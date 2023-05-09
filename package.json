@@ -15,8 +15,8 @@
     "typecheck": "tsc"
   },
   "dependencies": {
-    "@docusaurus/core": "0.0.0-5556",
-    "@docusaurus/preset-classic": "0.0.0-5556",
+    "@docusaurus/core": "0.0.0-5569",
+    "@docusaurus/preset-classic": "0.0.0-5569",
     "@mdx-js/react": "^2.1.5",
     "clsx": "^1.2.1",
     "enhancedocs-search": "^0.1.9",
@@ -25,7 +25,7 @@
     "react-dom": "^17.0.2"
   },
   "devDependencies": {
-    "@docusaurus/module-type-aliases": "0.0.0-5556",
+    "@docusaurus/module-type-aliases": "0.0.0-5569",
     "@tsconfig/docusaurus": "^1.0.5",
     "typescript": "^4.9.4"
   },
