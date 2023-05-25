@@ -22,4 +22,4 @@ We will talk about a few things here:
   - for creator
   - for personal use
 - clouds
-- prompts
+- prompt engineering
