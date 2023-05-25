@@ -100,7 +100,7 @@ const config = {
             title: "Docs",
             items: [
               {
-                label: "Docs",
+                label: "AI",
                 to: "/ai/intro",
               },
             ],

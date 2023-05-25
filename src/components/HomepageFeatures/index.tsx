@@ -2,6 +2,7 @@ import React from 'react';
 import clsx from 'clsx';
 import Heading from '@theme/Heading';
 import styles from './styles.module.css';
+import Translate, {translate} from '@docusaurus/Translate';
 
 type FeatureItem = {
   title: string;
@@ -15,7 +16,9 @@ const FeatureList: FeatureItem[] = [
     Svg: require('@site/static/img/undraw_docusaurus_mountain.svg').default,
     description: (
       <>
-        VR, AR and Decentralization is the passcode to Web3
+        <Translate id="homepage.web3">
+          VR, AR and Decentralization is the passcode to Web3
+        </Translate>
       </>
     ),
   },
@@ -24,7 +27,9 @@ const FeatureList: FeatureItem[] = [
     Svg: require('@site/static/img/undraw_docusaurus_tree.svg').default,
     description: (
       <>
-        Energe free is the key milestone of technology
+        <Translate id="homepage.energy">
+          Energe free is the key milestone of technology
+        </Translate>
       </>
     ),
   },
@@ -33,7 +38,9 @@ const FeatureList: FeatureItem[] = [
     Svg: require('@site/static/img/undraw_docusaurus_react.svg').default,
     description: (
       <>
-        Artificial Intelligence is the wind to blow you into immersive future
+        <Translate id="homepage.ai">
+          Artificial Intelligence is the wind to blow you into immersive future
+        </Translate>
       </>
     ),
   },
