@@ -1,0 +1,22 @@
+{
+  "title": {
+    "message": "Web9.AI",
+    "description": "The title in the navbar"
+  },
+  "logo.alt": {
+    "message": "Web9.AI Logo",
+    "description": "The alt text of navbar logo"
+  },
+  "item.label.AI": {
+    "message": "AI",
+    "description": "Navbar item with label AI"
+  },
+  "item.label.Blog": {
+    "message": "Blog",
+    "description": "Navbar item with label Blog"
+  },
+  "item.label.GitHub": {
+    "message": "GitHub",
+    "description": "Navbar item with label GitHub"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "version.label": {
+    "message": "Next",
+    "description": "The label for version current"
+  },
+  "sidebar.docsSidebar.category.cloud": {
+    "message": "cloud",
+    "description": "The label for category cloud in sidebar docsSidebar"
+  },
+  "sidebar.docsSidebar.category.paper": {
+    "message": "paper",
+    "description": "The label for category paper in sidebar docsSidebar"
+  }
+}

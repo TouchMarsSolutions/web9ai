@@ -7,7 +7,7 @@ const darkCodeTheme = require("prism-react-renderer/themes/dracula");
 /** @type {import('@docusaurus/types').Config} */
 const config = {
   title: "Web9.AI",
-  tagline: "square of web3 ^ AI",
+  tagline: "square of web3 to the power of AI",
   favicon: "img/favicon.ico",
 
   // Set the production url of your site here
@@ -20,6 +20,8 @@ const config = {
   // If you aren't using GitHub pages, you don't need these.
   organizationName: "TouchMarsSolutions", // Usually your GitHub org/user name.
   projectName: "web9ai", // Usually your repo name.
+  deploymentBranch: 'gh-pages',
+  trailingSlash: false,
 
   onBrokenLinks: "throw",
   onBrokenMarkdownLinks: "warn",
@@ -39,6 +41,8 @@ const config = {
       ({
         docs: {
           sidebarPath: require.resolve("./sidebars.js"),
+          routeBasePath: "/ai",
+          editLocalizedFiles: true,
           // Please change this to your repo.
           // Remove this to remove the "edit this page" links.
           editUrl:
@@ -74,10 +78,14 @@ const config = {
             type: "docSidebar",
             sidebarId: "docsSidebar",
             position: "left",
-            label: "Docs",
-          },
-          
+            label: "AI",
+          },          
           { to: "/blog", label: "Blog", position: "left" },
+
+          {
+            type: "localeDropdown",
+            position: "right",
+          },
           {
             href: "https://github.com/TouchMarsSolutions/web9ai",
             label: "GitHub",
@@ -93,7 +101,7 @@ const config = {
             items: [
               {
                 label: "Docs",
-                to: "/docs/intro",
+                to: "/ai/intro",
               },
             ],
           },

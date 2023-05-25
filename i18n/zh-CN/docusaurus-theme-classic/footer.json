@@ -1,0 +1,42 @@
+{
+  "link.title.Docs": {
+    "message": "Docs",
+    "description": "The title of the footer links column with title=Docs in the footer"
+  },
+  "link.title.Connect": {
+    "message": "Connect",
+    "description": "The title of the footer links column with title=Connect in the footer"
+  },
+  "link.title.More": {
+    "message": "More",
+    "description": "The title of the footer links column with title=More in the footer"
+  },
+  "link.item.label.Docs": {
+    "message": "Docs",
+    "description": "The label of footer link with label=Docs linking to /ai/intro"
+  },
+  "link.item.label.Instagram": {
+    "message": "Instagram",
+    "description": "The label of footer link with label=Instagram linking to https://www.instagram.com/web9ai/"
+  },
+  "link.item.label.Discord": {
+    "message": "Discord",
+    "description": "The label of footer link with label=Discord linking to https://discordapp.com/invite/web9ai/"
+  },
+  "link.item.label.Twitter": {
+    "message": "Twitter",
+    "description": "The label of footer link with label=Twitter linking to https://twitter.com/web9ai/"
+  },
+  "link.item.label.Blog": {
+    "message": "Blog",
+    "description": "The label of footer link with label=Blog linking to /blog"
+  },
+  "link.item.label.GitHub": {
+    "message": "GitHub",
+    "description": "The label of footer link with label=GitHub linking to https://github.com/TouchMarsSolutions/web9ai/"
+  },
+  "copyright": {
+    "message": "Copyright © 2023 Touch Mars Solutions Inc. Built with Docusaurus.",
+    "description": "The footer copyright"
+  }
+}
