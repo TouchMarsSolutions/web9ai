@@ -1,0 +1,98 @@
+---
+title: Replicate
+description: Most popular AI cloud service
+keywords: [cloud, replicate.com]
+slug: /replicate
+tags:
+    - cloud
+    - coding
+    - semi-techy
+---
+
+import InvestmentWarning from '@site/src/components/invest/InvestmentWarning.mdx';
+
+# Replicate
+
+::::warning Problem:
+1. You don't have good GPU to run your ML models
+2. You just want to deploy ML model into cloud with 1-line-command
+3. You want a cheaper bill than Colab Pro or AWS/GCP/Azure
+
+:::info Solution:
+[Replicate](https://replicate.com/) is a platform that can deploy your ML model into cloud with 1-click.
+:::
+::::
+
+### Introduction
+
+1. Run models in the cloud at scale
+- Replicate allows running ML models with minimal coding, without deep understanding of ML​.
+    ```bash
+    curl -s -X POST \
+        -d '{"version": "db21e45d3f7023abc2a46ee38a23973f6dce16bb082a930b0c49861f96d1e5bf", \
+            "input": { "prompt": "an astronaut riding on a horse" } }' \
+        -H "Authorization: Token $REPLICATE_API_TOKEN" \
+        -H 'Content-Type: application/json' \
+        https://api.replicate.com/v1/predictions
+    ```
+- It has [**thousands of ready-to-use models**](https://replicate.com/explore) shared by its community.
+2. Push: Package ML models easily
+- **Cog**, an open-source tool by Replicate, packages ML models into production-ready containers
+- only 4 steps to push your model into cloud
+    1. define the environment your model runs in with `cog.yaml`
+        ```yaml
+        build:
+            gpu: true
+            system_packages:
+                - "libgl1-mesa-glx"
+                - "libglib2.0-0"
+            python_version: "3.10"
+            python_packages:
+                - "torch==1.13.1"
+        predict: "predict.py:Predictor"
+        ```
+    2. define how predictions are run on your model with `predict.py`
+        ```python
+        from cog import BasePredictor, Input, Path
+        import torch
+
+        class Predictor(BasePredictor):
+            def setup(self):
+                """Load the model into memory to make running multiple predictions efficient"""
+                self.model = torch.load("./weights.pth")
+
+            # The arguments and types the model takes as input
+            def predict(self,
+                image: Path = Input(description="Grayscale input image")
+            ) -> Path:
+                """Run a single prediction on the model"""
+                processed_image = preprocess(image)
+                output = self.model(processed_image)
+                return postprocess(output)
+        ```
+    3. then you can run predictions on this model locally
+        ```bash
+        cog predict -i @input.jpg                
+        ```        
+    4. Finally, push your model to Replicate, and you can run it in the cloud with a few lines of code
+        ```bash
+        cog push
+        ```
+3. Scale: Deploy ML models at scale
+- scaling is 100% your choice
+  - Automatic scale
+  - Automatic API
+- **Pay by second** billing system
+
+
+## Investment Info {#investment-info}
+
+<InvestmentWarning />
+
+### 2023-May-27
+
+- crunchbase organization: [Replicate](https://www.crunchbase.com/organization/replicate)
+- Total Funding Amount: [USD$17.8M](https://www.crunchbase.com/search/funding_rounds/field/organizations/funding_total/replicate)
+- value estimated: Not Sure
+
+<InvestmentWarning />

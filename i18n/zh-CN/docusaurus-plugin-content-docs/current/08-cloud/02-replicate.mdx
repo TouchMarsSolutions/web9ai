@@ -1,0 +1,97 @@
+---
+title: Replicate
+description: 最流行的AI云
+keywords: [cloud, replicate.com]
+slug: /replicate
+tags:
+    - 云服务
+    - 码农专供
+    - 半技术
+---
+
+import InvestmentWarning from '@site/src/components/invest/InvestmentWarning.cn.mdx';
+
+# Replicate
+
+::::warning 解决什么问题?
+1. 你没有好的GPU来运行你的机器学习模型
+2. 你只想用一条命令将机器学习模型部署到云端
+3. 你希望比Colab Pro或AWS/GCP/Azure的费用更便宜
+
+:::info 此处方案
+[Replicate](https://replicate.com/) 是一个能够通过一键操作将你的机器学习模型部署到云端的平台
+:::
+::::
+
+### Introduction
+
+1. 在云端大规模运行模型
+- Replicate 可以在最小的代码编写下运行机器学习模型, 无需对机器学习有深入的理解
+    ```bash
+    curl -s -X POST \
+        -d '{"version": "db21e45d3f7023abc2a46ee38a23973f6dce16bb082a930b0c49861f96d1e5bf", \
+            "input": { "prompt": "an astronaut riding on a horse" } }' \
+        -H "Authorization: Token $REPLICATE_API_TOKEN" \
+        -H 'Content-Type: application/json' \
+        https://api.replicate.com/v1/predictions
+    ```
+- [**数千个ML模型**](https://replicate.com/explore)供君翻牌
+2. Push: 轻松打包
+- **Cog** 是 Replicate 的开源工具, 将机器学习模型打包成可直接投入生产环境的容器
+- 只需4步即可部署模型
+    1. 环境定义文件 `cog.yaml`
+        ```yaml
+        build:
+            gpu: true
+            system_packages:
+                - "libgl1-mesa-glx"
+                - "libglib2.0-0"
+            python_version: "3.10"
+            python_packages:
+                - "torch==1.13.1"
+        predict: "predict.py:Predictor"
+        ```
+    2. 定义如何对你的模型进行预测: `predict.py` 
+        ```python
+        from cog import BasePredictor, Input, Path
+        import torch
+
+        class Predictor(BasePredictor):
+            def setup(self):
+                """Load the model into memory to make running multiple predictions efficient"""
+                self.model = torch.load("./weights.pth")
+
+            # The arguments and types the model takes as input
+            def predict(self,
+                image: Path = Input(description="Grayscale input image")
+            ) -> Path:
+                """Run a single prediction on the model"""
+                processed_image = preprocess(image)
+                output = self.model(processed_image)
+                return postprocess(output)
+        ```
+    3. 本地运行
+        ```bash
+        cog predict -i @input.jpg                
+        ```        
+    4. 一行命令部署到云端
+        ```bash
+        cog push
+        ```
+3. 规模化：大规模部署机器学习模型
+- 你的规模你做主
+  - 自动扩展
+  - API控制扩展
+- **按秒计费**
+
+
+## 投资信息 {#investment-info}
+
+<InvestmentWarning />
+
+### 2023-May-26
+- crunchbase上的公司信息: [Replicate](https://www.crunchbase.com/organization/replicate)
+- 总融资: [USD$17.8M](https://www.crunchbase.com/search/funding_rounds/field/organizations/funding_total/replicate)
+- 估值: 暂不确定
+
+<InvestmentWarning />
