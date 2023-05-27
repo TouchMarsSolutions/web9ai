@@ -1,1 +1,0 @@
-"use strict";(self.webpackChunkweb_9_ai=self.webpackChunkweb_9_ai||[]).push([[4121],{8070:a=>{a.exports=JSON.parse('[{"label":"cloud","permalink":"/ai/tags/cloud","count":1},{"label":"SD","permalink":"/ai/tags/sd","count":1},{"label":"Stable Diffusion","permalink":"/ai/tags/stable-diffusion","count":1}]')}}]);
