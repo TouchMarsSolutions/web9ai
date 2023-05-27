@@ -296,5 +296,8 @@
   "homepage.start": {
     "message": "魔法启动",
     "description": "magic starts"
+  },
+  "AI Cloud providers": {
+    "message": "AI云服务提供商"
   }
 }
