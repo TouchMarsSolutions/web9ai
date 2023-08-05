@@ -5,12 +5,21 @@ tags:
 - guide
 ---
 
+import React from 'react';
+import { Vimeo } from 'mdx-embed';
+
 # General Guide of AI Use Cases
 
-## A few categories
+This guide is a general introduction about what AI models or products are mature to use in real world use cases, and what NOT.
+
+## A few categories to focus
+
+:::info
+Today's AI models are generally used in the following categories:
+:::
 
 1. Text 2 Text (`Txt2Txt`)
-   1. Summarization (`Summ`)
+   1. Summarization (`Sum`)
    2. Text Generation and Continuation
    3. Text Classification
 2. Text 2 Image (`Txt2Img`)
@@ -21,7 +30,11 @@ tags:
 5. Text 2 Video (`Txt2Video`)
 6. Text 2 Code
 
-## Keynotes Breakdown
+## Breakdown
+
+:::info
+Let's break down the above categories into more details:
+:::
 
 ### `Txt2Txt`
 
@@ -33,24 +46,55 @@ tags:
      1. email
      2. story
      3. manual report
-- the best products: 
-  1. [OpenAI ChatGPT](https://ai.com/)
-  2. [Google Bard](https://bard.google.com/)
+- the best products rawly based on their models: 
+  1. [OpenAI ChatGPT](https://chat.openai.com/) 
+    :::warning
+    ai.com is no longer redirected to this site but to Elon Musk new site -> x.ai
+    :::
+  2. [Google Bard](https://bard.google.com/) (sorry Canada not yet)
   3. [Claude](https://console.anthropic.com/)
-  4. [Poe](https://poe.com/)
-  5. [AiTok](https://chat.aitok.us/) Totally FREE
+  4. Open Source [Meta Llama 2](https://ai.meta.com/llama/)
+- portal websites to combined models:
+  1. [Poe](https://poe.com/)
+
+#### ChatGPT
+
+:::info
+ChatGPT is the best model for text generation.
+We emphasis it here because there are a bunch of hidden tricks to let you know
+:::
+
+1. It defaults to GPT-4 if you are a [plus member](https://openai.com/blog/chatgpt-plus) (USD$20/month)
+2. The `Code Interpreter` can help you read files, such as `json`, `Java`, `Perl`, csv (for Excel to open), PDF files, etc. Try to ask it for anythiing on top of your mind :smile:, e.g., 'what is the problem with my Perl code?'
+![ChatGPT Code Interpreter](/img/chatgpt-models.png)
+![ChatGPT upload files](/img/chatgpt-upload_file.png)
+1. It's a bunch of fun to play the plugins, for examples:
+![ChatGPT plugins](/img/chatgpt-plugins.png)
+- WebPilot
+- Zapier
+- Expedia, Kayak, 
+- AskYourPDF
+- Youtube Summary, VoxScript, Video Insights (or search with keyword Youtube)
+
+1. you can [install your own plugins](https://platform.openai.com/docs/plugins/introduction) as well.
 
 ### `Txt2Img`
 
 - Use text to generate images
 - the best products - only 2:
   - [MidJourney](https://www.midjourney.com/app/) - [paid plan](https://www.midjourney.com/account/)
-  - open sourced [Stable Diffusion](https://stablediffusionweb.com/)
+  - open source model [Stable Diffusion](https://stablediffusionweb.com/)
+    - prompt and `checkpoint` sites:
+      - [PromptHero](https://prompthero.com/)
+      - famous [CiviTai](https://civitai.com/)
+        ![civitai runmodel](/img/civitai-runmodel.png)
+        ![civitai runmodel selection](/img/civitai-runmodel-selection.png)
+      - more online playing websites will be discovered :heart:
     - a few playing projects or sites:
       - [SD WebUI](https://github.com/AUTOMATIC1111/stable-diffusion-webui) open sourced
-      - [Run Diffusion](https://app.rundiffusion.com?ref=web9ai15)
-      - [TUSI.art](https://tusi.art/)
-
+      - DIY and play your own hosting server: [Run Diffusion](https://app.rundiffusion.com?ref=web9ai15)
+- OpenAI and Bing([Download Microsoft Edge browser](https://www.microsoft.com/en-us/edge/download)) also provide [Dall-E 2](https://openai.com/dall-e-2) model :thumbsdown: but we are waiting for Dall-E 3
+  
 ### `Txt2Voice`
 
 - use text to generate voice
@@ -65,3 +109,16 @@ tags:
 - use one voice to generate another voice
 - popular open source projects:
   - [so-vits-svc](https://github.com/svc-develop-team/so-vits-svc)
+
+### `Txt2Video`
+
+- use text to generate video
+- Currently [Runway Gen2](https://research.runwayml.com/gen2) is providing the best services (not free)
+
+### `Digital Character`
+
+- this technology is not mature yet, but it's still fun to play some famous products:
+  1. [d-id](https://www.d-id.com/)
+  ![d-id](/img/d-id.png)
+  2. [HeyGen](https://app.heygen.com/guest/templates?cid=5e24983e)
+  ![heygen](/img/heygen.png)
