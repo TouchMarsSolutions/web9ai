@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkweb_9_ai=self.webpackChunkweb_9_ai||[]).push([[4335],{2514:e=>{e.exports=JSON.parse('{"label":"guide","permalink":"/zh-CN/ai/tags/guide","allTagsPath":"/zh-CN/ai/tags","count":1,"items":[{"id":"usecase/guide","title":"General Guide","description":"General Guide of AI Use Cases","permalink":"/zh-CN/ai/usecase/guide"}],"unlisted":false}')}}]);
