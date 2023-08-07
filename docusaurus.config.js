@@ -118,15 +118,15 @@ const config = {
             items: [
               {
                 label: "Instagram",
-                href: "https://www.instagram.com/web9ai/",
+                href: "https://www.instagram.com/web9dotai/",
               },
               {
                 label: "Discord",
-                href: "https://discordapp.com/invite/web9ai/",
+                href: "https://discordapp.com/invite/web9dotai/",
               },
               {
                 label: "Twitter",
-                href: "https://twitter.com/web9ai/",
+                href: "https://twitter.com/web9dotai/",
               },
             ],
           },
