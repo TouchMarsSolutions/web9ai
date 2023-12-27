@@ -4,7 +4,7 @@ description: the roadmap to Full Stack Developer Pro
 ---
 
 
-# RoadMap to Full Stack
+# RoadMap to Full Stack Pro
 
 :::tip
 - Ask ChatGPT [Full Stack Developer RoadMap](https://chat.openai.com/share/ccdcede5-dbcd-4393-930c-d75b76cec51a)
@@ -18,6 +18,12 @@ description: the roadmap to Full Stack Developer Pro
       1. [React](https://react.dev/)
       2. [Angular](https://angular.io/)
       3. [Vue](https://vuejs.org/)
+   4. other clients
+      1. chatbot
+         1. WeChat Official Account
+         2. Facebook Messenger
+         3. WhatsApp Bot
+      2. AR / VR / MR
 2. Backend
    1. NodeJS
    2. Python
