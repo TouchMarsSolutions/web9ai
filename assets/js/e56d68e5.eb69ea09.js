@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkweb_9_ai=self.webpackChunkweb_9_ai||[]).push([[7943],{32184:e=>{e.exports=JSON.parse('{"label":"ML cloud","permalink":"/ai/tags/ml-cloud","allTagsPath":"/ai/tags","count":1,"items":[{"id":"cloud/monster_api","title":"MonsterApi","description":"cheap API service for generative AI","permalink":"/ai/cloud/monster_api"}],"unlisted":false}')}}]);
