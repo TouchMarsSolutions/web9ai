@@ -9,12 +9,8 @@ tags:
 
 - 本文旨在言简意赅的给入门小白一个基本框架的概念, 
   - 介绍一些流行的开源项目或者产品. 
-  - 让大家知道, 什么技术是成熟的, 什么是容易被忽悠的.
+  - 让大家知道, 什么技术是 __成熟的__, 什么是容易被**忽悠**的.
 - 本文只谈技术分类, **商业版权**问题尚未解决, 请勿商用, 仅供学习参考
-- 高级篇以后再讲, 比如
-  - 程序代码生成
-  - 视频生成
-  - 不成熟的数字人
 
 ## 核心分类
 
@@ -34,10 +30,10 @@ tags:
 
 - 目前最流行的成熟的使用场景是**文生文**以及**文生图**, 但也要根据个人需求来选择
 
-### 文生文
-
-- 文生文 (`Txt2Txt`)
-  
+### 文生文(`Txt2Txt`)
+:::info
+用文字生成文字
+:::
 - 主要使用场景:
   1. 总结一段文字
   2. 生成内容或者续写, 比如
@@ -46,15 +42,15 @@ tags:
      3. 写报告
   3. 问答 - 知识库搜索总结, 知识库截止到2021年9月
 - 最好产品(模型)包括: 
-  1. [OpenAI ChatGPT](https://ai.com/)
-  2. [Google Bard](https://bard.google.com/)
+  1. [OpenAI ChatGPT](https://chat.openai.com/)
+  2. [Google Gemini Advance](https://gemini.google.com/app)
   3. [Claude](https://console.anthropic.com/)
 - 综合型网站:
   1. [Poe](https://poe.com/)
   2. [AiTok](https://chat.aitok.ai/register/648ea2a1ae498d6f4d28fa6e) 
-  :::warning
-  AiTok在大陆可用 且有付费版GPT4
-  :::
+      :::tip
+      AiTok在大陆可用 且有付费版GPT4
+      :::
 - 娱乐型流行网站
   1. [Character.ai](https://beta.character.ai/)
 
@@ -67,9 +63,12 @@ tags:
 - 好用的[prompt平台们](/ai/prompt-guides)
   - [Prompt Hero](https://prompthero.com/)
   - [PromptBase](https://promptbase.com/)
-- 最佳产品目前全世界只有2个, 都需要科学上网:
+- 最佳产品目前全世界只有3个, 都需要科学上网:
   - [MidJourney](https://www.midjourney.com/app/) 
     - [paid plan](https://www.midjourney.com/account/)
+  - [OpenAI DALL-E3](https://openai.com/dall-e-3)
+    - ChatGPT Plus 付费用户可随便用
+    - 随需付费可用[API接口](https://platform.openai.com/docs/guides/images/usage)
   - 开源的[Stable Diffusion](https://stablediffusionweb.com/)
     - 版本已到3 - [SD 3](https://stability.ai/stablediffusion3)
     - 知名模型平台 
@@ -91,7 +90,10 @@ tags:
 
 ### 文生音 (`Txt2Voice`)
 
-- 用文字生成声音
+:::info 
+用文字生成声音
+:::
+
 - 技术尚未绝对成熟, 声音还是有点机器人
 - 最流行的付费平台:
   - [11 Labs](https://elevenlabs.io/)
@@ -103,20 +105,39 @@ tags:
 
 ### 音色模仿
 
-- 换声, 比如: [AI孙燕姿之周杰伦发如雪](https://www.bilibili.com/video/BV1yv4y1H7wz/?share_source=copy_web&vd_source=dbdcc51f213af12e5e8d90f615e6a93c)
-- **版权问题**, 请自行解决
+:::info
+换声 如[AI孙燕姿之周杰伦发如雪](https://www.bilibili.com/video/BV1yv4y1H7wz/?share_source=copy_web&vd_source=dbdcc51f213af12e5e8d90f615e6a93c)
+:::
+
+:::warning
+会有 **版权问题** 请自行解决
+:::
+
 - 流行的开源技术:
   - [so-vits-svc](https://github.com/voicepaw/so-vits-svc-fork)
 - [B站手把手视频讲解](https://www.bilibili.com/video/BV1Cc411P7rs/?share_source=copy_web&vd_source=dbdcc51f213af12e5e8d90f615e6a93c):
-  
+
   <iframe src="//player.bilibili.com/player.html?aid=271160091&bvid=BV1Cc411P7rs&cid=1131288245&page=1" scrolling="no" border="0" frameborder="yes" framespacing="0" allowfullscreen="true"></iframe>
 
 ### 文生视频 (`Txt2Video`)
-
-- [Runway Gen-2](https://app.runwayml.com/ai-tools/gen-2) 
+:::info
+用文字生成视频
+:::
 - [Pika](https://pika.art/)
-- 开源的 `SVD` 即 [Stable Video Diffusion](https://stability.ai/stable-video)
+- [Runway Gen-2](https://app.runwayml.com/ai-tools/gen-2) 
+- _开源_ 的 `SVD` 即 [Stable Video Diffusion](https://stability.ai/stable-video)
 - 尚未上线的 [OpenAI Sora](https://openai.com/sora) - 2025再来看
+
+### 数字人
+:::warning
+截止至今到2024年2月底, 真正意义上的数字人技术尚不成熟, 请大家期待2025的到来
+:::
+- 目前为止 最好的半成品 [HeyGen](https://app.heygen.com/guest/templates?cid=5e24983e)
+- **口型对准**的开源项目
+  - 开源的 [Wav2Lip](https://github.com/Rudrabha/Wav2Lip)
+  - 开源的 [GeneFace++](https://genefaceplusplus.github.io/)
+- 非纯粹意义的数字人方案有一些 比如
+  - 真人实时换脸 (有一个真人表演者, 同时用 __换脸技术__ 把脸换掉)
 
 ### 云服务
 
@@ -126,16 +147,11 @@ tags:
 
 - [Run Diffusion](https://app.rundiffusion.com?ref=web9ai15) 半技术 需科学上网
 - [RudPod](https://runpod.io?ref=11a9xaes) - 需科学上网
+- [Replicate](https://replicate.com/) - 需科学上网 
+  :::tip
+  便宜且有海量实用模型
+  :::
 - [Lambda Labs](https://lambdalabs.com/service/gpu-cloud#pricing) - 需科学上网 
   :::tip
   Lambda Labs 有超便宜的 **A1001和 H100 (`$2.49起/hr`)**
   :::
-
-### 数字人
-
-- 目前为止 最好的半成品 [HeyGen](https://app.heygen.com/guest/templates?cid=5e24983e)
-- **口型对准**的开源项目
-  - 开源的 [Wav2Lip](https://github.com/Rudrabha/Wav2Lip)
-  - 开源的 [GeneFace++](https://genefaceplusplus.github.io/)
-- 截止至今到2024年2月底, 真正意义上的数字人技术尚不成熟, 请大家期待2025的到来
-- 非纯粹意义的数字人有一些, 比如真人同步 (有一个真人表演者, 同时用换脸技术把真人的脸换掉)
