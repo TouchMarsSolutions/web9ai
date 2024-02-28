@@ -1,1 +1,0 @@
-"use strict";(self.webpackChunkweb_9_ai=self.webpackChunkweb_9_ai||[]).push([[2097],{68382:e=>{e.exports=JSON.parse('{"title":"Model","slug":"/category/model","permalink":"/zh-CN/ai/category/model","navigation":{"previous":{"title":"python","permalink":"/zh-CN/ai/dev/python"},"next":{"title":"3D models","permalink":"/zh-CN/ai/model/01_3d"}}}')}}]);
