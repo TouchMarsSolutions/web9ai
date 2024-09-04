@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkweb_9_ai=self.webpackChunkweb_9_ai||[]).push([[3955],{57477:e=>{e.exports=JSON.parse('{"tag":{"label":"ML model","permalink":"/tags/ml-model","allTagsPath":"/tags","count":1,"items":[{"id":"ai/cloud/huggingface","title":"HuggingFace","description":"HuggingFace","permalink":"/ai/cloud/huggingface"}],"unlisted":false}}')}}]);

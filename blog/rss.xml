@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0">
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/">
     <channel>
         <title>Web9.AI Blog</title>
         <link>https://www.web9.ai/blog</link>
@@ -13,6 +13,9 @@
             <link>https://www.web9.ai/blog/welcome</link>
             <guid>https://www.web9.ai/blog/welcome</guid>
             <pubDate>Mon, 26 Aug 2024 00:00:00 GMT</pubDate>
+            <description><![CDATA[Hello World]]></description>
+            <content:encoded><![CDATA[<h2 class="anchor anchorWithStickyNavbar_LWe7" id="hello-world">Hello World<a href="https://www.web9.ai/blog/welcome#hello-world" class="hash-link" aria-label="Direct link to Hello World" title="Direct link to Hello World">​</a></h2>
+<p>Hello World</p>]]></content:encoded>
             <category>hello</category>
         </item>
     </channel>

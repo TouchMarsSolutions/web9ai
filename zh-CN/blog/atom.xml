@@ -12,6 +12,9 @@
         <id>https://www.web9.ai/zh-CN/blog/welcome</id>
         <link href="https://www.web9.ai/zh-CN/blog/welcome"/>
         <updated>2024-08-26T00:00:00.000Z</updated>
+        <summary type="html"><![CDATA[Hello World]]></summary>
+        <content type="html"><![CDATA[<h2 class="anchor anchorWithStickyNavbar_LWe7" id="hello-world">Hello World<a href="https://www.web9.ai/zh-CN/blog/welcome#hello-world" class="hash-link" aria-label="Hello World的直接链接" title="Hello World的直接链接">​</a></h2>
+<p>Hello World</p>]]></content>
         <category label="hello" term="hello"/>
     </entry>
 </feed>

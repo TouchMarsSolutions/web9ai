@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkweb_9_ai=self.webpackChunkweb_9_ai||[]).push([[7215],{6981:e=>{e.exports=JSON.parse('{"tag":{"label":"3d","permalink":"/tags/3-d","allTagsPath":"/tags","count":1,"items":[{"id":"ai/model/01_3d","title":"3D models","description":"popular 3D models","permalink":"/ai/model/01_3d"}],"unlisted":false}}')}}]);

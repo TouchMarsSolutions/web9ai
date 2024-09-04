@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkweb_9_ai=self.webpackChunkweb_9_ai||[]).push([[8371],{3181:a=>{a.exports=JSON.parse('{"tag":{"label":"framework","permalink":"/zh-CN/tags/framework","allTagsPath":"/zh-CN/tags","count":1,"items":[{"id":"ai/cloud/huggingface","title":"HuggingFace","description":"HuggingFace","permalink":"/zh-CN/ai/cloud/huggingface"}],"unlisted":false}}')}}]);
