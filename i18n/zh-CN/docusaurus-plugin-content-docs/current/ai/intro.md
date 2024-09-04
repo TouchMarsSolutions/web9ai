@@ -2,7 +2,7 @@
 sidebar_position: 1
 ---
 
-# AI {#ai}
+# 入门介绍 {#intro}
 
 :::info
 聊聊人工智能

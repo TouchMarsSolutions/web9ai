@@ -2,7 +2,7 @@
 sidebar_position: 1
 ---
 
-# AI {#ai}
+# Introduction {#intro}
 
 :::info
 Let's talk about AI - artificial intelligence.

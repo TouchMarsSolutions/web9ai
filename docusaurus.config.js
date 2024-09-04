@@ -44,7 +44,7 @@ const config = {
       ({
         docs: {
           sidebarPath: require.resolve("./sidebars.js"),
-          routeBasePath: "/ai",
+          routeBasePath: "/",
           editLocalizedFiles: true,          
           // Please change this to your repo.
           // Remove this to remove the "edit this page" links.
@@ -85,12 +85,24 @@ const config = {
           src: "img/logo.svg",
         },
         items: [
+          // {
+          //   type: 'docSidebar',
+          //   sidebarId: 'docsSidebar',
+          //   position: 'left',
+          //   label: 'AI'
+          // },
           {
-            type: "docSidebar",
-            sidebarId: "docsSidebar",
-            position: "left",
-            label: "AI",
-          },          
+            type: 'docSidebar',
+            sidebarId: 'aiSidebar',
+            position: 'left',
+            label: 'AI'
+          },
+          {
+            type: 'docSidebar',
+            sidebarId: 'devSidebar',
+            position: 'left',
+            label: 'Dev'
+          },
           { to: "/blog", label: "Blog", position: "left" },
 
           {
