@@ -1,1 +1,0 @@
-"use strict";(self.webpackChunkweb_9_ai=self.webpackChunkweb_9_ai||[]).push([[7414],{92863:e=>{e.exports=JSON.parse('{"title":"Use Case","slug":"/category/use-case","permalink":"/zh-CN/ai/category/use-case","navigation":{"previous":{"title":"AI","permalink":"/zh-CN/ai/intro"},"next":{"title":"\u5165\u95e8\u6307\u5357","permalink":"/zh-CN/ai/usecase/guide"}}}')}}]);

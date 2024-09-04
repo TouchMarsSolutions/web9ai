@@ -1,1 +1,0 @@
-"use strict";(self.webpackChunkweb_9_ai=self.webpackChunkweb_9_ai||[]).push([[6535],{95755:e=>{e.exports=JSON.parse('{"title":"Model","slug":"/category/model","permalink":"/ai/category/model","navigation":{"previous":{"title":"python","permalink":"/ai/dev/python"},"next":{"title":"LLM","permalink":"/ai/model/llm"}}}')}}]);
