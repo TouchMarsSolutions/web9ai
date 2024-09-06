@@ -22,3 +22,7 @@ yarn-error.log*
 # IDE
 .vscode
 .fleet
+
+# generated files
+*.class
+*.jar
