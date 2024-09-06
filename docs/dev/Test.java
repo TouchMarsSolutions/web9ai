@@ -7,5 +7,4 @@ public class Test {
         System.out.println("Hello, " + name + "! You are " + age + " years old and " + height + " cm tall. Are you a student? " + isStudent);
     }
 
-    
 }

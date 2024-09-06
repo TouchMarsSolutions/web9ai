@@ -22,7 +22,7 @@ import TabItem from '@theme/TabItem';
 > we will only learn 3 modules and each of them will apply to all the programming languages: variables, functions, and classes.
 
 
-## Let's Begin Our Coding Journey!
+## Purpose - Have Fun
 
 Now that we've outlined our learning path, it's time to dive into the fascinating world of programming languages. We'll explore variables, functions, and classes across Java, Kotlin, Python, TypeScript, and C#. 
 
@@ -30,7 +30,7 @@ Remember, the goal is **NOT to memorize every detail**, and **NOT to become an c
 
 Let's start with variables, the building blocks of any program!
 
-### Variables
+## Variables
 
 :::info
 - every language has variables, such as Math. All you need to understand in this module is only a few things:
@@ -40,7 +40,7 @@ Let's start with variables, the building blocks of any program!
 :::
 
 
-#### basic data types
+### basic data types
 
 Let's get a quick list of basic data types for each language:
 
@@ -50,7 +50,7 @@ Let's get a quick list of basic data types for each language:
     - Boolean
     - String
   
-    ```java
+    ```java live inline
     var age = 18;
     var height = 180.5;
     var name = "Jack";
@@ -58,8 +58,8 @@ Let's get a quick list of basic data types for each language:
     System.out.println("Hello, " + name + "! You are " + age + " years old and " + height + " cm tall. Are you a student? " + isStudent);
     ```
 
-    Result:
-    > Hello, Jack! You are 18 years old and 180.5 cm tall. Are you a student? true
+    Run it => Result:
+    ![Java Number Demo](java_000.png)
     
   </TabItem>
   <TabItem value="kotlin" label="Kotlin">
@@ -87,9 +87,11 @@ Let's get a quick list of basic data types for each language:
   </TabItem>
 </Tabs>
 
-Note: While Python and TypeScript have fewer "basic" types, they offer built-in complex types that are commonly used like basics in other languages.
+:::success
+That's all you need to know about variables, to be able to write software product. 🎉🚀💡🎊🥂
+:::
 
-### Functions
+## Functions
 
-### Classes
+## Classes
 
