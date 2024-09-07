@@ -677,7 +677,7 @@ However, you don't have to master `package` at this moement as your AI friend wi
 
 :::info homework
 Now it's time to see what the package looks like in Python, Java, Kotlin, TypeScript, and C#. Pls try to get help with your AI friend.
-Believe or not, this is super easy!
+Believe or not, this is super easy! And you will see it in the next lecture.
 :::
 
 ## ceremony
