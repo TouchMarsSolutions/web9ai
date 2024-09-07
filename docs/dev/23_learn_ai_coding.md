@@ -295,3 +295,106 @@ Now pls speak out loud: "I can define and use **function** in all the popular pr
 
 ## Class
 
+### what is class? {#what-is-class}
+
+A class is like a mold (or template). 🚗
+
+Imagine you're making toy cars:
+
+- Every toy car has wheels, a body, and a color, right? 🛞🏎️🎨
+- But you can't start from scratch each time you make a new car. You need a mold so that each car can be made easily.
+- This mold is what we call a class.
+
+In programming, a class is this mold:
+
+- It helps you define what features (attributes) an object (like a car) should have and what it can do (functions).
+- Then you can use this mold to make many "cars" (these cars are objects). Each car has the same basic design but can have different details, like different colors.
+
+Using this class (mold), you can conveniently reuse the design and save time. ⏱️
+
+For example, a "Car" class might include:
+- Attributes: color, model, speed
+- Functions: start, accelerate, brake
+
+This way, when you want to create new cars in your program, you can use this "Car" class template. It's a way to organize and reuse code, making it easier to create many similar things in your program. 🚙🚗🚕
+
+### Why do we need `class`? {#why-do-we-need-class}
+
+> well in one word, again, because human is lazy and you wanna be much lazier LOL 😂
+
+- `class` can help you organize your variables and functions in a structured way
+- `class` can help you reuse the code written by your own, and others
+- `class` can help you hide the details and only expose the necessary parts of the code
+- `class` can help you inherit the properties and methods from the parent class
+- `class` therefore can help you write less code technically 
+
+:::info car mold
+```md
+Let's build a Car Class in Java, which has:
+- speed
+- color
+- model
+and the car can do:
+- start
+- accelerate
+- brake
+```
+Again, paste the above prompt to your AI friend, and you will get a similar result like below:
+:::
+
+```java
+public class Car {
+    // Attributes of the Car
+    private int speed;
+    private String color;
+    private String model;
+
+    // Constructor to initialize the car's attributes
+    public Car(String model, String color) {
+        this.model = model;
+        this.color = color;
+        this.speed = 0; // Initial speed is 0 when the car is created
+    }
+
+    // Method to start the car
+    public void start() {
+        // set default speed to 50
+        speed
+        System.out.println("The car has started.");
+    }
+
+    // Method to accelerate the car
+    public void accelerate(int increment) {
+        if (increment > 0) {
+            speed += increment;
+            System.out.println("The car has accelerated. Current speed: " + speed + " km/h");
+        } else {
+            System.out.println("Invalid acceleration value.");
+        }
+    }
+
+    // Method to apply brake and reduce the speed
+    public void brake(int decrement) {
+        if (decrement > 0 && decrement <= speed) {
+            speed -= decrement;
+            System.out.println("The car has slowed down. Current speed: " + speed + " km/h");
+        } else if (decrement > speed) {
+            speed = 0;
+            System.out.println("The car has come to a complete stop.");
+        } else {
+            System.out.println("Invalid brake value.");
+        }
+    }
+
+    // Method to display the car's details
+    public void showDetails() {
+        System.out.println("Car Model: " + model);
+        System.out.println("Car Color: " + color);
+        System.out.println("Current Speed: " + speed + " km/h");
+    }
+}
+```
+
+:::info AI can explain the code
+I assume you can easily understand the idea of the code, however, if you have any question, pls just ask your AI friend, and it will explain it to you very well.
+:::
