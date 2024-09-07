@@ -142,5 +142,155 @@ Now pls speak out loud: "I can define **number** variables in all the popular pr
 
 ## Function
 
+### what is function? {#what-is-function}
+
+> function, a.k.a "method" or program,is like a formula: you give some inputs, and it will get you some outputs (actions counted as a type of output)
+
+### why do we need function? {#why-do-we-need-function}
+
+> because human is lazy LOL 😂, however, we are proud of it LOL 😆
+
+:::info question 2+2=?
+Let's prove that human is lazy but you are proud of it:
+- you've already know how to calculate 1+1, right? now let's calculate 2+2=?
+- then you will calculate 3+3=?
+- then 4+4=?
+- then 5+5=?
+- then 6+6=?
+- ...
+:::
+
+I believe this will be your code or similar idea:
+
+```python
+# python code
+
+# 1 + 1
+a = 1
+b = 1
+result = a + b
+print(f"{a} + {b} = {result}")
+
+# 2 + 2
+c = 2
+d = 2
+result2 = c + d
+print(f"{c} + {d} = {result2}")
+
+# 3 + 3
+e = 3
+f = 3
+result3 = e + f
+print(f"{e} + {f} = {result3}")
+
+# 4 + 4
+g = 4
+h = 4
+result4 = g + h
+print(f"{g} + {h} = {result4}")
+
+# 5 + 5
+i = 5
+j = 5
+result5 = i + j
+print(f"{i} + {j} = {result5}")
+
+# 6 + 6
+k = 6
+l = 6
+result6 = k + l
+print(f"{k} + {l} = {result6}")
+
+# count: around ~40 lines of code
+```
+
+Are you feeling tired? I believe you are!
+
+Wanna be a proudly lazy human developer? I bet you do!
+
+Let's see how AI can help us with this problem:
+![Sum Function Python](23_02_fun_sum_py.png)
+
+So the function in python is:
+
+```python
+def calculate_sum(a, b):
+    result = a + b
+    print(f"{a} + {b} = {result}")
+```
+
+- the name of function, `calculate_sum`, does NOT matter and you can name it whatever you want.
+- what if we rename it to simply the `sum`?
+  
+    ```python
+    def sum(a, b):
+        result = a + b
+        print(f"{a} + {b} = {result}")
+    ```
+
+Got it? I bet you do! And that's all as basics of function!
+
+Furthermore, let's play around a little bit more for the function(s):
+
+1. functions can call another function, well, just like your Math formula can call another Math formula, right? In this case, we let `sum` function return the sum result as number and update the `calculate_sum` function to call the `sum` function for the result then display it. 
+   1. first of first, remember functino can return some outputs right? so we update `sum` to return the sum up result.
+   2. secondly, we update `calculate_sum` to call `sum` function for the result then display it, where its output is actually an action, which is displaying the result.
+   3. Let's see how your best friend AI can do it:
+   ![Sum fun call fun py](23_02_fun_call_fun_py.png)
+2. Furthermore, let's play further with boolean and string:
+   1. let's check if a and b are equal within `calculate_sum`: display "a and b are (not) equal" by using new boolean variable. 
+   2. we'll define a variable of string type to store the displaying information of the piece `"{a} + {b} = {result}"` then display it.
+   3. Let's see how your best friend AI can do it:
+   ![Sum fun call fun with bool](23_02_fun_call_fun_bool_py.png)
+   ![Sum fun call fun with str](23_02_fun_call_fun_str_py.png)
+3. What if we wanna calculate all the way to `10+10=?`?
+    ```python
+    calculate_sum(1, 1)
+    calculate_sum(2, 2)
+    calculate_sum(3, 3)
+    calculate_sum(4, 4)
+    calculate_sum(5, 5)
+    calculate_sum(6, 6)
+    calculate_sum(7, 7)
+    calculate_sum(8, 8)
+    calculate_sum(9, 9)
+    calculate_sum(10, 10)
+    ```
+4. Wanna be lazier? Let's use "loop": 🚀
+   - ![Sum fun call fun with loop](23_02_fun_call_fun_loop10_py.png)
+   - Yes we are using a "for loop" to do it:
+        ```python
+        for i in range(1, 11):
+            calculate_sum(i, i)
+        ```
+   - there is another type of loop called "while loop" which is another way to do it:
+   ![sum fun call fun with while loop](23_02_fun_call_fun_while10_py.png)
+        ```python
+        i = 1
+        while i <= 10:
+            calculate_sum(i, i)
+            i += 1
+        ```
+    - okay! "loop" look simpler right? I bet you get its idea!
+      - `for` loop is used for a known number of times such as `10`, 
+      - while `while` loop is used for an unknown number of times but known condition such as `i <= 10`.
+      - you've already got the syntax of `for` loop and `while` loop in Python, and believe me, your AI friend can always help me write them whenever you mention "for/while loop" in the conversation 😎
+5. give it a try to other programming languages:
+    ![Sum fun call fun with loop in Java](23_02_fun_java.png)
+    ![Sum fun call fun with loop in Kotlin](23_02_fun_kt.png)
+    ![Sum fun call fun with loop in TypeScript](23_02_fun_ts.png)
+    ![Sum fun call fun with loop in C#](23_02_fun_cs.png)
+
+:::warning proud of yourself
+> "Proud of being a lazy human developer?"
+- Yes! I bet you are! And you should be!
+:::
+
+:::tip celebrate
+🎉 Congratulations! You've just learned how to define and use a **function** in all the major programming languages in 10 minute! 🎉🎉🎉
+
+Now pls speak out loud: "I can define and use **function** in all the popular programming languages now!" 🎉🕺💃🎉
+:::
+
 ## Class
 
