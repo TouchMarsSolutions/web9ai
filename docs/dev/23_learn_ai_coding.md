@@ -3,6 +3,9 @@ title: Learn Coding with AI-Copilot
 description: This article provides a comprehensive overview of five major programming languages - Java, Kotlin, Python, TypeScript, and C#. We'll explore three fundamental concepts across these languages - variables, functions, and classes. 
 ---
 
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
 # How-to become one Full Stack AI-Copilot Developer
 
 - what is **AI-Copilot**?
@@ -137,7 +140,7 @@ Now pls speak out loud: "I can define **number** variables in all the popular pr
 
 - Good question and good memory! You still remember them! However, also remember our goal is to get AI to code for us! Actually as long as you have the idea of the concepts about this piece of knowledge, you've got it! The rest of further details will be taken care of by your best friend AI!
 - Actually you will see them in the [next module - function](#functions)
-> ["NOT master all the knowledge"](#what-is-not)
+> _We would [NOT master all the knowledge](#what-is-not)_
 :::
 
 ## Function
@@ -328,7 +331,7 @@ This way, when you want to create new cars in your program, you can use this "Ca
 - `class` can help you inherit the properties and methods from the parent class
 - `class` therefore can help you write less code technically 
 
-:::info car mold
+:::tip car mold
 ```md
 Let's build a Car Class in Java, which has:
 - speed
@@ -342,80 +345,87 @@ and the car can do:
 Again, paste the above prompt to your AI friend, and you will get a similar result like below:
 :::
 
-```java
-public class Car {
-    // Attributes of the Car
-    private int speed;
-    private String color;
-    private String model;
+<details>
+    <summary>Click to see Java code</summary>
+    <Tabs>
+        <TabItem value="java" label="Java">
+        ```java
+        public class Car {
+            // Attributes of the Car
+            private int speed;
+            private String color;
+            private String model;
 
-    // Constructor to initialize the car's attributes
-    public Car(String model, String color) {
-        this.model = model;
-        this.color = color;
-        this.speed = 0; // Initial speed is 0 when the car is created
-    }
+            // Constructor to initialize the car's attributes
+            public Car(String model, String color) {
+                this.model = model;
+                this.color = color;
+                this.speed = 0; // Initial speed is 0 when the car is created
+            }
 
-    // Method to start the car
-    public void start() {
-        // set default speed to 50
-        speed
-        System.out.println("The car has started.");
-    }
+            // Method to start the car
+            public void start() {
+                // set default speed to 50
+                speed
+                System.out.println("The car has started.");
+            }
 
-    // Method to accelerate the car
-    public void accelerate(int increment) {
-        if (increment > 0) {
-            speed += increment;
-            System.out.println("The car has accelerated. Current speed: " + speed + " km/h");
-        } else {
-            System.out.println("Invalid acceleration value.");
+            // Method to accelerate the car
+            public void accelerate(int increment) {
+                if (increment > 0) {
+                    speed += increment;
+                    System.out.println("The car has accelerated. Current speed: " + speed + " km/h");
+                } else {
+                    System.out.println("Invalid acceleration value.");
+                }
+            }
+
+            // Method to apply brake and reduce the speed
+            public void brake(int decrement) {
+                if (decrement > 0 && decrement <= speed) {
+                    speed -= decrement;
+                    System.out.println("The car has slowed down. Current speed: " + speed + " km/h");
+                } else if (decrement > speed) {
+                    speed = 0;
+                    System.out.println("The car has come to a complete stop.");
+                } else {
+                    System.out.println("Invalid brake value.");
+                }
+            }
+
+            // Method to display the car's details
+            public void showDetails() {
+                System.out.println("Car Model: " + model);
+                System.out.println("Car Color: " + color);
+                System.out.println("Current Speed: " + speed + " km/h");
+            }
+
+            // usage of the Car Class: Main method to demonstrate how-to use Car class
+            public static void main(String[] args) {
+                // Create a new car object
+                Car myCar = new Car("Tesla Model 3", "Red");
+                // Start the car
+                myCar.start();
+                // Display car details
+                myCar.showDetails();
+                // Accelerate the car
+                myCar.accelerate(30);
+                // Show current details
+                myCar.showDetails();
+                // slow down the car
+                myCar.brake(10);
+                // Further accelerate
+                myCar.accelerate(50);
+                // Brake the car to a stop
+                myCar.brake(80);
+                // Show final details
+                myCar.showDetails();
+            }
         }
-    }
-
-    // Method to apply brake and reduce the speed
-    public void brake(int decrement) {
-        if (decrement > 0 && decrement <= speed) {
-            speed -= decrement;
-            System.out.println("The car has slowed down. Current speed: " + speed + " km/h");
-        } else if (decrement > speed) {
-            speed = 0;
-            System.out.println("The car has come to a complete stop.");
-        } else {
-            System.out.println("Invalid brake value.");
-        }
-    }
-
-    // Method to display the car's details
-    public void showDetails() {
-        System.out.println("Car Model: " + model);
-        System.out.println("Car Color: " + color);
-        System.out.println("Current Speed: " + speed + " km/h");
-    }
-
-    // usage of the Car Class: Main method to demonstrate how-to use Car class
-    public static void main(String[] args) {
-        // Create a new car object
-        Car myCar = new Car("Tesla Model 3", "Red");
-        // Start the car
-        myCar.start();
-        // Display car details
-        myCar.showDetails();
-        // Accelerate the car
-        myCar.accelerate(30);
-        // Show current details
-        myCar.showDetails();
-        // slow down the car
-        myCar.brake(10);
-        // Further accelerate
-        myCar.accelerate(50);
-        // Brake the car to a stop
-        myCar.brake(80);
-        // Show final details
-        myCar.showDetails();
-    }
-}
-```
+        ```
+        </TabItem>
+    </Tabs>
+</details>
 
 :::warning AI can explain the code
 I assume you can easily understand the idea of the code, however, if you have any question, pls just ask your AI friend, and it will explain it to you very well.
@@ -424,7 +434,231 @@ I assume you can easily understand the idea of the code, however, if you have an
 :::info homework
 Now it's time to see what the Car Class code looks like in Python, Kotlin, TypeScript, and C#. Pls try to get help with your AI friend.
 Believe or not, this is super easy!
+
+you can continue the conversation with your AI friend:
+```md
+good job! pls rewrite the above Java code to a few languages but without any comment :
+1. python
+2. kotlin
+3. typescript
+4. c#
+```
 :::
+
+<details>
+    <summary>After you get your result, feel free to check here for curiosity only</summary>
+    <Tabs>
+        <TabItem value="python" label="Python">
+        ```python
+        class Car:
+            def __init__(self, model, color):
+                self.speed = 0
+                self.color = color
+                self.model = model
+
+            def start(self):
+                print("The car has started.")
+
+            def accelerate(self, increment):
+                if increment > 0:
+                    self.speed += increment
+                    print(f"The car has accelerated. Current speed: {self.speed} km/h")
+                else:
+                    print("Invalid acceleration value.")
+
+            def brake(self, decrement):
+                if decrement > 0 and decrement <= self.speed:
+                    self.speed -= decrement
+                    print(f"The car has slowed down. Current speed: {self.speed} km/h")
+                elif decrement > self.speed:
+                    self.speed = 0
+                    print("The car has come to a complete stop.")
+                else:
+                    print("Invalid brake value.")
+
+            def show_details(self):
+                print(f"Car Model: {self.model}")
+                print(f"Car Color: {self.color}")
+                print(f"Current Speed: {self.speed} km/h")
+
+
+        my_car = Car("Tesla Model 3", "Red")
+        my_car.start()
+        my_car.show_details()
+        my_car.accelerate(30)
+        my_car.brake(10)
+        my_car.accelerate(50)
+        my_car.brake(80)
+        my_car.show_details()
+        ```
+</TabItem>
+<TabItem value="kotlin" label="Kotlin">
+        ```kotlin
+        class Car(val model: String, val color: String) {
+            var speed = 0
+
+            fun start() {
+                println("The car has started.")
+            }
+
+            fun accelerate(increment: Int) {
+                if (increment > 0) {
+                    speed += increment
+                    println("The car has accelerated. Current speed: $speed km/h")
+                } else {
+                    println("Invalid acceleration value.")
+                }
+            }
+
+            fun brake(decrement: Int) {
+                if (decrement > 0 && decrement <= speed) {
+                    speed -= decrement
+                    println("The car has slowed down. Current speed: $speed km/h")
+                } else if (decrement > speed) {
+                    speed = 0
+                    println("The car has come to a complete stop.")
+                } else {
+                    println("Invalid brake value.")
+                }
+            }
+
+            fun showDetails() {
+                println("Car Model: $model")
+                println("Car Color: $color")
+                println("Current Speed: $speed km/h")
+            }
+        }
+
+        fun main() {
+            val myCar = Car("Tesla Model 3", "Red")
+            myCar.start()
+            myCar.showDetails()
+            myCar.accelerate(30)
+            myCar.brake(10)
+            myCar.accelerate(50)
+            myCar.brake(80)
+            myCar.showDetails()
+        }
+        ```
+</TabItem>
+<TabItem value="typescript" label="TypeScript">
+        ```typescript
+        class Car {
+            private speed: number;
+            private color: string;
+            private model: string;
+
+            constructor(model: string, color: string) {
+                this.speed = 0;
+                this.color = color;
+                this.model = model;
+            }
+
+            start(): void {
+                console.log("The car has started.");
+            }
+
+            accelerate(increment: number): void {
+                if (increment > 0) {
+                    this.speed += increment;
+                    console.log(`The car has accelerated. Current speed: ${this.speed} km/h`);
+                } else {
+                    console.log("Invalid acceleration value.");
+                }
+            }
+
+            brake(decrement: number): void {
+                if (decrement > 0 && decrement <= this.speed) {
+                    this.speed -= decrement;
+                    console.log(`The car has slowed down. Current speed: ${this.speed} km/h`);
+                } else if (decrement > this.speed) {
+                    this.speed = 0;
+                    console.log("The car has come to a complete stop.");
+                } else {
+                    console.log("Invalid brake value.");
+                }
+            }
+
+            showDetails(): void {
+                console.log(`Car Model: ${this.model}`);
+                console.log(`Car Color: ${this.color}`);
+                console.log(`Current Speed: ${this.speed} km/h`);
+            }
+        }
+
+        const myCar = new Car("Tesla Model 3", "Red");
+        myCar.start();
+        myCar.showDetails();
+        myCar.accelerate(30);
+        myCar.brake(10);
+        myCar.accelerate(50);
+        myCar.brake(80);
+        myCar.showDetails();
+        ```
+</TabItem>
+<TabItem value="c#" label="C#">
+        ```csharp
+        using System;
+
+        class Car {
+            private int speed;
+            private string color;
+            private string model;
+
+            public Car(string model, string color) {
+                this.speed = 0;
+                this.color = color;
+                this.model = model;
+            }
+
+            public void Start() {
+                Console.WriteLine("The car has started.");
+            }
+
+            public void Accelerate(int increment) {
+                if (increment > 0) {
+                    speed += increment;
+                    Console.WriteLine($"The car has accelerated. Current speed: {speed} km/h");
+                } else {
+                    Console.WriteLine("Invalid acceleration value.");
+                }
+            }
+
+            public void Brake(int decrement) {
+                if (decrement > 0 && decrement <= speed) {
+                    speed -= decrement;
+                    Console.WriteLine($"The car has slowed down. Current speed: {speed} km/h");
+                } else if (decrement > speed) {
+                    speed = 0;
+                    Console.WriteLine("The car has come to a complete stop.");
+                } else {
+                    Console.WriteLine("Invalid brake value.");
+                }
+            }
+
+            public void ShowDetails() {
+                Console.WriteLine($"Car Model: {model}");
+                Console.WriteLine($"Car Color: {color}");
+                Console.WriteLine($"Current Speed: {speed} km/h");
+            }
+        }
+
+        class Program {
+            static void Main() {
+                Car myCar = new Car("Tesla Model 3", "Red");
+                myCar.Start();
+                myCar.ShowDetails();
+                myCar.Accelerate(30);
+                myCar.Brake(10);
+                myCar.Accelerate(50);
+                myCar.Brake(80);
+                myCar.ShowDetails();
+            }
+        }
+        ```
+</TabItem>
+</Tabs>
+</details>
 
 :::tip celebrate
 🎉 Congratulations! You've just learned how to define and use a **class** in all the major programming languages in 10 minute! 🎉🎉🎉
@@ -432,13 +666,24 @@ Believe or not, this is super easy!
 Now pls speak out loud: "I can define and use **class** in all the popular programming languages now!" 🎉🕺💃🎉
 :::
 
-## package
+## bonus - package
 
 :::tip what is package?
-Just like class which is a good organizer of attributes and methods/functions, package is a good organizer of classes.
+Just like class which is a good organizer of attributes and methods/functions, package simply is a good organizer of classes.
+
+However, you don't have to master `package` at this moement as your AI friend will ultimately show you its usage one day
+- remember our course principle: _we would [NOT remember coding techniques](#what-is-not)_
 :::
 
 :::info homework
 Now it's time to see what the package looks like in Python, Java, Kotlin, TypeScript, and C#. Pls try to get help with your AI friend.
 Believe or not, this is super easy!
+:::
+
+## ceremony
+
+:::tip convocation
+🎉 Congratulations! You've just learned **Coding with AI-Copilot** in all the major programming languages in 1 hour! 🎉🎉🎉
+
+Now pls speak out loud: "I can do coding in all the popular programming languages now!" 🎉🕺💃🎉
 :::
