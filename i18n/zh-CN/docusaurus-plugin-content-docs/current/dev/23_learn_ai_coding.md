@@ -6,10 +6,10 @@ description: 本文提供了5种主流编程语言 - Java、Kotlin、Python、Ty
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-# 如何成为一名AI全栈开发者
+# 带着AI一起编程
 
 - 什么是 **AI编程**？
-    - 简单来说，就是"_你最好的朋友 - AI，将帮助你编程。_"
+    - 简单来说，就是"_你最好的朋友AI 将辅佐你 跟你一起编程_"
 
 - 今天我们将学习什么（`<60分钟`）？
     - 5大主流编程语言 结构性概念
