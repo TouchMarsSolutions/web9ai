@@ -258,6 +258,7 @@ Furthermore, let's play around a little bit more for the function(s):
     calculate_sum(8, 8)
     calculate_sum(9, 9)
     calculate_sum(10, 10)
+    # count: total 6+10=16 lines of code
     ```
 4. Wanna be lazier? Let's use "loop": 🚀
    - ![Sum fun call fun with loop](23_02_fun_call_fun_loop10_py.png)

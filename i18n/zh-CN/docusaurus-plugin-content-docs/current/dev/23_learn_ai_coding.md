@@ -243,6 +243,7 @@ def calculate_sum(a, b):
     calculate_sum(8, 8)
     calculate_sum(9, 9)
     calculate_sum(10, 10)
+    # 统计一下: 从上到下一共6+10=16行代码
     ```
 4. 想再懒一点？可以的! 这次我们使用"**循环**语句"：🚀
    - ![Sum函数调用函数与循环](23_02_fun_call_fun_loop10_py.png)
