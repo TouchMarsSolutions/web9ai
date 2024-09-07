@@ -258,13 +258,14 @@ Furthermore, let's play around a little bit more for the function(s):
     ```
 4. Wanna be lazier? Let's use "loop": 🚀
    - ![Sum fun call fun with loop](23_02_fun_call_fun_loop10_py.png)
-   - Yes we are using a "for loop" to do it:
+   - Yes you are using a "for loop" to do it:
         ```python
         for i in range(1, 11):
             calculate_sum(i, i)
         ```
    - there is another type of loop called "while loop" which is another way to do it:
    ![sum fun call fun with while loop](23_02_fun_call_fun_while10_py.png)
+     - yes that's the while loop:
         ```python
         i = 1
         while i <= 10:
