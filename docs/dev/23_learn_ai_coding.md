@@ -136,11 +136,11 @@ Now pls speak out loud: "I can define **number** variables in all the popular pr
 > "now I've learnt the number, what about the string, boolean, and collection?"
 
 - Good question and good memory! You still remember them! However, also remember our goal is to get AI to code for us! Actually as long as you have the idea of the concepts about this piece of knowledge, you've got it! The rest of further details will be taken care of by your best friend AI!
-- Actually you will see them in the [next section](#functions)
+- Actually you will see them in the [next module - function](#functions)
 > ["NOT master all the knowledge"](#what-is-not)
 :::
 
-## Functions
+## Function
 
-## Classes
+## Class
 
