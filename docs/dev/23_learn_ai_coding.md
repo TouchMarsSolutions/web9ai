@@ -392,9 +392,53 @@ public class Car {
         System.out.println("Car Color: " + color);
         System.out.println("Current Speed: " + speed + " km/h");
     }
+
+    // usage of the Car Class: Main method to demonstrate how-to use Car class
+    public static void main(String[] args) {
+        // Create a new car object
+        Car myCar = new Car("Tesla Model 3", "Red");
+        // Start the car
+        myCar.start();
+        // Display car details
+        myCar.showDetails();
+        // Accelerate the car
+        myCar.accelerate(30);
+        // Show current details
+        myCar.showDetails();
+        // slow down the car
+        myCar.brake(10);
+        // Further accelerate
+        myCar.accelerate(50);
+        // Brake the car to a stop
+        myCar.brake(80);
+        // Show final details
+        myCar.showDetails();
+    }
 }
 ```
 
-:::info AI can explain the code
+:::warning AI can explain the code
 I assume you can easily understand the idea of the code, however, if you have any question, pls just ask your AI friend, and it will explain it to you very well.
+:::
+
+:::info homework
+Now it's time to see what the Car Class code looks like in Python, Kotlin, TypeScript, and C#. Pls try to get help with your AI friend.
+Believe or not, this is super easy!
+:::
+
+:::tip celebrate
+🎉 Congratulations! You've just learned how to define and use a **class** in all the major programming languages in 10 minute! 🎉🎉🎉
+
+Now pls speak out loud: "I can define and use **class** in all the popular programming languages now!" 🎉🕺💃🎉
+:::
+
+## package
+
+:::tip what is package?
+Just like class which is a good organizer of attributes and methods/functions, package is a good organizer of classes.
+:::
+
+:::info homework
+Now it's time to see what the package looks like in Python, Java, Kotlin, TypeScript, and C#. Pls try to get help with your AI friend.
+Believe or not, this is super easy!
 :::
