@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkweb_9_ai=self.webpackChunkweb_9_ai||[]).push([[1075],{71704:(e,t,i)=>{i.r(t),i.d(t,{AlignedText:()=>a,default:()=>l});i(96540);var n=i(74848);function a(e){let{children:t,align:i="right"}=e;return(0,n.jsx)("div",{className:`text--${i}`,children:t})}const l=a}}]);
