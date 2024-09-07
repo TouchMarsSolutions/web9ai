@@ -6,6 +6,16 @@ description: 本文提供了5种主流编程语言 - Java、Kotlin、Python、Ty
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
+import Image from '@theme/IdealImage';
+import varInPy from './23_01_var_py.png';
+import varInJava from './23_01_var_java.png';
+import varInKt from './23_01_var_kt.png';
+import varInTs from './23_01_var_ts.png';
+import varInCs from './23_01_var_cs.png';
+import varInSwift from './23_01_var_swift.png';
+
+import { AlignedText } from '@site/src/pages/AlignedText';
+
 # 带着AI一起编程
 
 - 什么是 **AI编程**？
@@ -60,12 +70,12 @@ import TabItem from '@theme/TabItem';
 - 数字
 - 文字 -> 我们称之为"`String`"
 - True / False -> 我们称之为"`Boolean`"
-- 集合 -> 我们称之为"`Collection`"
+- 集合 -> 我们称之为"`Collection`" (此处只需要知道有这么个名字即可 不必深究)
   - 列表 / `List` 或者 数组 / `Array`
   - 字典 / `Dictionary` / `Map`
 
 > "如果我连这些**数据类型**都记不住怎么办？"
-- 没问题！只需问ChatGPT或你最喜欢的AI，"_所有流行编程语言中的基本数据类型是什么？_"
+- 没问题！只需问ChatGPT或KimiChat或者豆包等 你最喜欢的AI，"_所有流行编程语言中的基本数据类型是什么？_"
 - 作业：试一试吧!
 
 ### 定义和使用变量
@@ -97,20 +107,30 @@ import TabItem from '@theme/TabItem';
 
 现在让我们看看结果：
 
-![Python变量演示](23_01_var_py.png)
+<Image img={varInPy} />
 
 就是这样！你懂了吗？🎉不要忘记**庆祝**哦！我们也会在最后一个模块的结尾帮你庆祝，非常重要! 😄
 
 现在让我们尝试另几种语言，Java、Kotlin、TypeScript和C#
 
-![Java变量演示](23_01_var_java.png)
+<Image img={varInJava} /> 
 
-![Kotlin变量演示](23_01_var_kt_ts.png)
+<Image img={varInKt} />
 
-![C#变量演示](23_01_var_cs.png)
+<Image img={varInTs} />
+
+<AlignedText align="right">
+
+> 很好 再试试用C#写
+
+</AlignedText>
+
+<Image img={varInCs} />
+
+<Image img={varInSwift} />
 
 :::info
-不用担心如何运行这些代码，我们会在下一门课程中学习。但偷偷告诉你一个秘密，其实非常容易！
+不用担心如何运行这些代码，因为你会在以后的实战训练营中学习。但偷偷告诉你一个秘密，其实非常容易！
 :::
 
 所以你懂了吗？我猜你肯定看懂了！现在让我们庆祝吧！🎉
@@ -311,7 +331,7 @@ def calculate_sum(a, b):
 > 嗯，再说一次，因为"人性皆懒"，我们尊重人性, 所以其实, 你还想变得更懒一点 哈哈哈 真实真的 😂
 
 - `类` 可以帮助你以结构化的方式组织你的变量和函数
-- `类` 可以帮助你重复使用你自己编写的代码，以及他人的代码
+- `类` 可以帮助你重复���用你自己编写的代码，以及他人的代码
 - `类` 可以帮助你隐藏细节，只暴露代码的必要部分
 - `类` 因此可以帮助你少写很多的代码
 
