@@ -308,12 +308,14 @@ def calculate_sum(a, b):
       - 而`while`循环用于未知次数但**已知条件**的情况，如`i <= 10`。
       - 你已经在Python中学会了`for`循环和`while`循环的玩法啦! 相信我，你的AI兄弟肯定可以随时帮你写出它们，只要你提到"**for/while loop/循环**"即可 😎
 5. 我们的课程是要贯通5大主流高级语言, 现在咱们一起尝试下其他编程语言：
-    <Image img={funCallFunJava} />
-    <Image img={funCallFunKt} />
-    <Image img={funCallFunTs} />
-    <Image img={funCallFunCs} />
-    <Image img={funCallFunSwift} />
-
+    <details>
+        <summary>点击查看Java、Kotlin、TypeScript、C#和Swift代码</summary>
+        <Image img={funCallFunJava} />
+        <Image img={funCallFunKt} />
+        <Image img={funCallFunTs} />
+        <Image img={funCallFunCs} />
+        <Image img={funCallFunSwift} />
+    </details>
 :::warning 为自己的懒人性而自豪
 > "有没有感觉到, 为自己是懒惰的人类开发者而自豪吗?"
 - 这个可以有哦!
