@@ -689,6 +689,62 @@ def calculate_sum(a, b):
         }
         ```
 </TabItem>
+<TabItem value="swift" label="Swift">
+    ```swift
+        class Car {
+            var speed: Int
+            var color: String
+            var model: String
+
+            init(model: String, color: String) {
+                self.speed = 0
+                self.model = model
+                self.color = color
+            }
+
+            func start() {
+                self.speed = 50
+                print("汽车已启动。")
+            }
+
+            func accelerate(increment: Int) {
+                if increment > 0 {
+                    self.speed += increment
+                    print("汽车已加速。当前速度：\(self.speed) km/h")
+                } else {
+                    print("无效的加速值。")
+                }
+            }
+
+            func brake(decrement: Int) {
+                if decrement > 0 && decrement <= self.speed {
+                    self.speed -= decrement
+                    print("汽车已减速。当前速度：\(self.speed) km/h")
+                } else if decrement > self.speed {
+                    self.speed = 0
+                    print("汽车已完全停止。")
+                } else {
+                    print("无效的刹车值。")
+                }
+            }
+
+            func showDetails() {
+                print("汽车型号：\(self.model)")
+                print("汽车颜色：\(self.color)")
+                print("当前速度：\(self.speed) km/h")
+            }
+        }
+
+        let myCar = Car(model: "特斯拉Model 3", color: "红色")
+        myCar.start()
+        myCar.showDetails()
+        myCar.accelerate(increment: 30)
+        myCar.brake(decrement: 10)
+        myCar.accelerate(increment: 50)
+        myCar.brake(decrement: 80)
+        myCar.showDetails()
+    ```
+</TabItem>
 </Tabs>
 </details>
 
