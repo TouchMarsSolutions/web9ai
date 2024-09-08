@@ -5,6 +5,7 @@ description: This article provides a comprehensive overview of five major progra
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
+import AlignedText from '@site/src/pages/AlignedText';
 
 # How-to become one Full Stack AI-Copilot Developer
 
@@ -354,6 +355,25 @@ and the car can do:
 Again, paste the above prompt to your AI friend, and you will get a similar result like below:
 :::
 
+```mermaid
+---
+title: Car Class
+---
+classDiagram
+    class Car {
+        -int speed
+        -String color
+        -String model
+
+        +Car(String model, String color)
+        +void start()
+        +void accelerate(int increment)
+        +void brake(int decrement)
+        +void showDetails()
+    }
+    note for Car "speed is initialized to 0\nin the constructor"
+```
+
 <details>
     <summary>Click to see Java code</summary>
     <Tabs>
@@ -435,6 +455,10 @@ Again, paste the above prompt to your AI friend, and you will get a similar resu
         </TabItem>
     </Tabs>
 </details>
+
+:::tip Constructor
+- Constructor is used to initialize the object's attributes
+:::
 
 :::warning AI can explain the code
 I assume you can easily understand the idea of the code, however, if you have any question, pls just ask your AI friend, and it will explain it to you very well.

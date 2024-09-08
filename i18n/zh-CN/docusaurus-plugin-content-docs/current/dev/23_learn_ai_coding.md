@@ -382,6 +382,25 @@ def calculate_sum(a, b):
 再次将上述提示词(**prompt**) 粘贴给你的AI兄弟 => 得到差不多这样的结果：
 :::
 
+```mermaid
+---
+title: Car Class
+---
+classDiagram
+    class Car {
+        -int speed
+        -String color
+        -String model
+
+        +Car(String model, String color)
+        +void start()
+        +void accelerate(int increment)
+        +void brake(int decrement)
+        +void showDetails()
+    }
+    note for Car "speed is initialized to 0\nin the constructor"
+```
+
 <details>
     <summary>点击查看Java代码</summary>
     <Tabs>
@@ -464,8 +483,12 @@ def calculate_sum(a, b):
     </Tabs>
 </details>
 
+:::tip Constructor 构造函数
+- 构造函数是用来初始化对象的属性
+:::
+
 :::warning AI能解释代码
-估计你应该可以轻松理解这段代码的思路，但如果有任何困惑，请随时问你的AI兄弟，它对于这点小事还是能应付的。
+- 估计你应该可以轻松理解这段代码的思路，但如果有任何困惑，请随时问你的AI兄弟，它对于这点小事还是能应付的。
 :::
 
 :::info 作业
