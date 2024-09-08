@@ -22,6 +22,14 @@ import TabItem from '@theme/TabItem';
 
 > we will only learn 3 modules within one hour,and each of them will apply to all the programming languages: variables, functions, and classes.
 
+```mermaid
+mindmap
+  root((AI coding))
+    variable
+    function
+    class
+```
+
 ## Purpose - Have Fun
 
 Now that we've outlined our learning path, it's time to dive into the fascinating world of programming languages. We'll explore variables, functions, and classes across Java, Kotlin, Python, TypeScript, and C#. 

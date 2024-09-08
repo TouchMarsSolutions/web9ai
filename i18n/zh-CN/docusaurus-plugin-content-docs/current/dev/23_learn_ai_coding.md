@@ -49,6 +49,14 @@ import funCallFunSwift from './23_02_fun_swift.png'
 
 > 我们将在一个小时内学习3个模块，每个模块都适用于所有编程语言：变量、函数和类。
 
+```mermaid
+mindmap
+  root((AI coding))
+    变量 variable
+    函数 function
+    类 class
+```
+
 ## 目的 - Have Fun
 
 我们将探索Java、Kotlin、Python、TypeScript和C#中的变量、函数和类。
