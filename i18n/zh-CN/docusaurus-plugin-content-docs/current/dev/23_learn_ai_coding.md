@@ -6,6 +6,8 @@ description: 本文提供了5种主流编程语言 - Java、Kotlin、Python、Ty
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
+import { AlignedText } from '@site/src/pages/AlignedText';
+
 import Image from '@theme/IdealImage';
 import varInPy from './23_01_var_py.png';
 import varInJava from './23_01_var_java.png';
@@ -13,8 +15,18 @@ import varInKt from './23_01_var_kt.png';
 import varInTs from './23_01_var_ts.png';
 import varInCs from './23_01_var_cs.png';
 import varInSwift from './23_01_var_swift.png';
+import funSumPy from './23_02_fun_sum_py.png'
+import funSumPurePy from './23_02_fun_sum_pure_py.png'
+import funCallFunPy from './23_02_fun_call_fun_py.png'
+import funCallFunBoolStrPy from './23_02_fun_call_fun_bool_str_py.png'
+import funCallFunLoop10Py from './23_02_fun_call_fun_loop10_py.png'
+import funCallFunWhile10Py from './23_02_fun_call_fun_while10_py.png'
+import funCallFunJava from './23_02_fun_java.png'
+import funCallFunKt from './23_02_fun_kt.png'
+import funCallFunTs from './23_02_fun_ts.png'
+import funCallFunCs from './23_02_fun_cs.png'
+import funCallFunSwift from './23_02_fun_swift.png'
 
-import { AlignedText } from '@site/src/pages/AlignedText';
 
 # 带着AI一起编程
 
@@ -98,6 +110,8 @@ import { AlignedText } from '@site/src/pages/AlignedText';
 :::
 
 首先让我们看这个问题 - 它是个什么样的问题呢? 这是给了两个数字而求一个结果，所以是`3个数字`对吧？那么有请我们的好朋友AI, 来回答这个问题：
+
+> 这次我们使用字节的[豆包](https://www.doubao.com/chat/)来尝尝鲜:
 
 ```md
 # 学习编程语言
@@ -213,45 +227,53 @@ print(f"{k} + {l} = {result6}")
 # 统计一下：从上到下一共大约~40行代码
 ```
 
-累不累? 我猜你肯定累!
+累不累? 我猜你肯定累! 如果还不累的话, 想一想从1到100走一遍, 肿么办?
 
 想成为一个"我懒我自豪"的人类程序员吗？我打赌你想！
 
 好的, 我们来看看AI如何帮助我们解决这个问题：
-![Sum函数Python](23_02_fun_sum_py.png)
+
+> 这次我们使用另一个AI工具来尝尝鲜 - [KimiChat](https://kimi.moonshot.cn/):
+
+<Image img={funSumPy} />
 
 所以用Python写的函数就是：
 
 ```python
 def calculate_sum(a, b):
-    result = a + b
-    print(f"{a} + {b} = {result}")
+    sum_result = a + b
+    print(f"{a}+{b}={sum_result}")
 ```
 
-- 函数的名称`calculate_sum`并不重要，你可以随意命名, 比如, 咱们给它重命名为`sum`？
+> python里以`#`开头的都是给观众看的注释 不是程序的正文 你可以理解为电影的旁白 
+
+- 函数的名称`calculate_sum`并不重要，你可以随意起名, 比如, 咱们创作一个新的函数(function)叫做sum 只计算并返回求和的结果 不打印"a+b=?"？
+  - 还记得函数可以输出一些数据, 对吧？所以我们的`sum`就是仅仅返回加和的结果
   
+  <Image img={funSumPurePy} />
+
+  - 所以 `sum` 函数就是这样的：
+    
+
     ```python
     def sum(a, b):
-        result = a + b
-        print(f"{a} + {b} = {result}")
+        return a + b
     ```
 
 懂了吗？我猜你懂了！这就是一个基础的函数！
 
 函数是最重要的概念, 好, 现在让我们深入玩一下：
 
-1. 函数可以调用另一个函数，就像你的数学公式可以调用一个数学公式一样，对吧？在这种情况下，我们让`sum`函数返回加和的结果(数字)，同时更新`calculate_sum`函数来调用`sum`函数获取结果并显示它。 
-   1. 还记得函数可以输出一些数据, 对吧？所以我们更新`sum`以返回加和的结果。
-   2. 其次，我们更新`calculate_sum`以调用`sum`函数获取结果并显示它，所以这个"输出/output"实际上是一个动作，也就是显示结果在电脑屏幕上。
-   3. 咱们看看你的AI兄弟怎么做到的：
+1. 函数可以调用另一个函数，就像你的数学公式可以调用一个数学公式一样，对吧？
+   1. 首先, 我们更新`calculate_sum`以调用`sum`函数获取结果并显示它，所以这个"输出(output)"实际上是一个动作，也就是显示结果在电脑屏幕上。
+   2. 咱们看看你的AI兄弟怎么做到的：
    ![Sum函数调用函数py](23_02_fun_call_fun_py.png)
 2. 此外，让我们再玩一会儿`Boolean`和字符串`String`：
    1. 让我们在`calculate_sum`中检查`a`和`b`是否相等：通过使用新的`Boolean`变量显示"a和b是（不是）相等"。 
    2. 再定义一个`String`字符串类型的变量来存储这一部分信息, 即`"{a} + {b} = {result}"`，然后显示它。
    3. 咱们再看看你的好朋友AI 如何做到这一点：
-   ![Sum函数调用函数与布尔值](23_02_fun_call_fun_bool_py.png)
-   ![Sum函数调用函数与字符串](23_02_fun_call_fun_str_py.png)
-3. 所以 如果我们想计算从`1+1=?`一直到`10+10=?`怎么办？
+   <Image img={funCallFunBoolStrPy} />
+3. 所以 如果我们想计算从`1+1=?`一直到`10+10=?`怎么办？我猜 聪明如你 是这么想的:
     ```python
     calculate_sum(1, 1)
     calculate_sum(2, 2)
@@ -265,7 +287,7 @@ def calculate_sum(a, b):
     calculate_sum(10, 10)
     # 统计一下: 从上到下一共6+10=16行代码
     ```
-4. 想再懒一点？可以的! 这次我们使用"**循环**语句"：🚀
+4. 没毛病! 只是 还想再懒一点不？可以的! 这次我们使用"**循环**语句"：🚀
    - ![Sum函数调用函数与循环](23_02_fun_call_fun_loop10_py.png)
    - 对的 这就是"**for循环**"：
         ```python
@@ -286,10 +308,11 @@ def calculate_sum(a, b):
       - 而`while`循环用于未知次数但**已知条件**的情况，如`i <= 10`。
       - 你已经在Python中学会了`for`循环和`while`循环的玩法啦! 相信我，你的AI兄弟肯定可以随时帮你写出它们，只要你提到"**for/while loop/循环**"即可 😎
 5. 我们的课程是要贯通5大主流高级语言, 现在咱们一起尝试下其他编程语言：
-    ![Sum函数调用函数与循环Java](23_02_fun_java.png)
-    ![Sum函数调用函数与循环Kotlin](23_02_fun_kt.png)
-    ![Sum函数调用函数与循环TypeScript](23_02_fun_ts.png)
-    ![Sum函数调用函数与循环C#](23_02_fun_cs.png)
+    <Image img={funCallFunJava} />
+    <Image img={funCallFunKt} />
+    <Image img={funCallFunTs} />
+    <Image img={funCallFunCs} />
+    <Image img={funCallFunSwift} />
 
 :::warning 为自己的懒人性而自豪
 > "有没有感觉到, 为自己是懒惰的人类开发者而自豪吗?"
