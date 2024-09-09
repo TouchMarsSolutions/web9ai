@@ -1,8 +1,10 @@
 ---
+title: Introduction to AI
+description: An introduction to the artificial intelligence department of the website
 sidebar_position: 1
 ---
 
-# Introduction {#intro}
+# Introduction to AI {#intro}
 
 :::info
 Let's talk about AI - artificial intelligence.
@@ -21,5 +23,5 @@ We will talk about a few things here:
   - for social media
   - for creator
   - for personal use
-- clouds
+- clouds to save $$$
 - prompt engineering
