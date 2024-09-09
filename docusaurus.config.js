@@ -70,17 +70,16 @@ const config = {
         theme: {
           customCss: require.resolve("./src/css/custom.css"),
         },
-      }),
-    ],
-    [
-      '@docusaurus/preset-classic',
-      {
         gtag: {
-          trackingID: 'GTM-K6K8XCMX',
+          trackingID: 'G-81T35Y584D',
           anonymizeIP: true,
         },
-      },
+        googleTagManager: {
+          containerId: 'GTM-K6K8XCMX',
+        },
+      }),      
     ],
+    
   ],
 
   markdown: {
