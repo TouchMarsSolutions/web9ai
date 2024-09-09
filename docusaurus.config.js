@@ -72,6 +72,15 @@ const config = {
         },
       }),
     ],
+    [
+      '@docusaurus/preset-classic',
+      {
+        gtag: {
+          trackingID: 'GTM-K6K8XCMX',
+          anonymizeIP: true,
+        },
+      },
+    ],
   ],
 
   markdown: {
