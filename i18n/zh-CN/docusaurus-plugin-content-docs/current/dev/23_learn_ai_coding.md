@@ -9,23 +9,23 @@ import TabItem from '@theme/TabItem';
 import { AlignedText } from '@site/src/pages/AlignedText';
 
 import Image from '@theme/IdealImage';
-import varInPy from './23_01_var_py.png';
-import varInJava from './23_01_var_java.png';
-import varInKt from './23_01_var_kt.png';
-import varInTs from './23_01_var_ts.png';
-import varInCs from './23_01_var_cs.png';
-import varInSwift from './23_01_var_swift.png';
-import funSumPy from './23_02_fun_sum_py.png'
-import funSumPurePy from './23_02_fun_sum_pure_py.png'
-import funCallFunPy from './23_02_fun_call_fun_py.png'
-import funCallFunBoolStrPy from './23_02_fun_call_fun_bool_str_py.png'
-import funCallFunLoop10Py from './23_02_fun_call_fun_loop10_py.png'
-import funCallFunWhile10Py from './23_02_fun_call_fun_while10_py.png'
-import funCallFunJava from './23_02_fun_java.png'
-import funCallFunKt from './23_02_fun_kt.png'
-import funCallFunTs from './23_02_fun_ts.png'
-import funCallFunCs from './23_02_fun_cs.png'
-import funCallFunSwift from './23_02_fun_swift.png'
+import varInPy from '/img/dev/23/cn/23_01_var_py.png';
+import varInJava from '/img/dev/23/cn/23_01_var_java.png';
+import varInKt from '/img/dev/23/cn/23_01_var_kt.png';
+import varInTs from '/img/dev/23/cn/23_01_var_ts.png';
+import varInCs from '/img/dev/23/cn/23_01_var_cs.png';
+import varInSwift from '/img/dev/23/cn/23_01_var_swift.png';
+import funSumPy from '/img/dev/23/cn/23_02_fun_sum_py.png'
+import funSumPurePy from '/img/dev/23/cn/23_02_fun_sum_pure_py.png'
+import funCallFunPy from '/img/dev/23/cn/23_02_fun_call_fun_py.png'
+import funCallFunBoolStrPy from '/img/dev/23/cn/23_02_fun_call_fun_bool_str_py.png'
+import funCallFunLoop10Py from '/img/dev/23/cn/23_02_fun_call_fun_loop10_py.png'
+import funCallFunWhile10Py from '/img/dev/23/cn/23_02_fun_call_fun_while10_py.png'
+import funCallFunJava from '/img/dev/23/cn/23_02_fun_java.png'
+import funCallFunKt from '/img/dev/23/cn/23_02_fun_kt.png'
+import funCallFunTs from '/img/dev/23/cn/23_02_fun_ts.png'
+import funCallFunCs from '/img/dev/23/cn/23_02_fun_cs.png'
+import funCallFunSwift from '/img/dev/23/cn/23_02_fun_swift.png'
 
 
 # 带着AI一起编程
@@ -275,7 +275,7 @@ def calculate_sum(a, b):
 1. 函数可以调用另一个函数，就像你的数学公式可以调用一个数学公式一样，对吧？
    1. 首先, 我们更新`calculate_sum`以调用`sum`函数获取结果并显示它，所以这个"输出(output)"实际上是一个动作，也就是显示结果在电脑屏幕上。
    2. 咱们看看你的AI兄弟怎么做到的：
-   ![Sum函数调用函数py](23_02_fun_call_fun_py.png)
+   <Image img={funCallFunPy} />
 2. 此外，让我们再玩一会儿`Boolean`和字符串`String`：
    1. 让我们在`calculate_sum`中检查`a`和`b`是否相等：通过使用新的`Boolean`变量显示"a和b是（不是）相等"。 
    2. 再定义一个`String`字符串类型的变量来存储这一部分信息, 即`"{a} + {b} = {result}"`，然后显示它。
@@ -296,14 +296,14 @@ def calculate_sum(a, b):
     # 统计一下: 从上到下一共6+10=16行代码
     ```
 4. 没毛病! 只是 还想再懒一点不？可以的! 这次我们使用"**循环**语句"：🚀
-   - ![Sum函数调用函数与循环](23_02_fun_call_fun_loop10_py.png)
+   - <Image img={funCallFunLoop10Py} />
    - 对的 这就是"**for循环**"：
         ```python
         for i in range(1, 11):
             calculate_sum(i, i)
         ```
    - 好事成双, 还有一种循环类型叫做 "**while循环**"：
-   ![sum函数调用函数与while循环](23_02_fun_call_fun_while10_py.png)
+     <Image img={funCallFunWhile10Py} />
      - 所以 这段就是while循环：
         ```python
         i = 1

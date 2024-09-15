@@ -7,6 +7,24 @@ import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 import AlignedText from '@site/src/pages/AlignedText';
 
+import Image from '@theme/IdealImage';
+import varInPy from '/img/dev/23/en/23_01_var_py.png';
+import varInJava from '/img/dev/23/en/23_01_var_java.png';
+import varInKtTs from '/img/dev/23/en/23_01_var_kt_ts.png';
+import varInCs from '/img/dev/23/en/23_01_var_cs.png';
+import funSumPy from '/img/dev/23/en/23_02_fun_sum_py.png'
+import funCallFunPy from '/img/dev/23/en/23_02_fun_call_fun_py.png'
+import funCallFunBoolPy from '/img/dev/23/en/23_02_fun_call_fun_bool_py.png'
+import funCallFunStrPy from '/img/dev/23/en/23_02_fun_call_fun_str_py.png'
+import funCallFunLoop10Py from '/img/dev/23/en/23_02_fun_call_fun_loop10_py.png'
+import funCallFunWhile10Py from '/img/dev/23/en/23_02_fun_call_fun_while10_py.png'
+import funCallFunJava from '/img/dev/23/en/23_02_fun_java.png'
+import funCallFunKt from '/img/dev/23/en/23_02_fun_kt.png'
+import funCallFunTs from '/img/dev/23/en/23_02_fun_ts.png'
+import funCallFunCs from '/img/dev/23/en/23_02_fun_cs.png'
+import funCallFunOther from '/img/dev/23/en/23_02_fun_other.png'
+
+
 # How-to become one Full Stack AI-Copilot Developer
 
 - what is **AI-Copilot**?
@@ -119,17 +137,17 @@ First let's look at this question - it's adding up 2 numbers and getting one res
 
 Now let's see the result:
 
-![Python Var Demo](23_01_var_py.png)
+<Image img={varInPy} />
 
 That's it! You got it? 🎉 Don't forget to **celebrate**! We'll help you celebrate in the end of this section when you learn all the programming languages 😄
 
 Now let's try another language, Java, Kotlin, TypeScript, and C#
 
-![Java Var Demo](23_01_var_java.png)
+<Image img={varInJava} />
 
-![Kotlin Var Demo](23_01_var_kt_ts.png)
+<Image img={varInKtTs} />
 
-![C# Var Demo](23_01_var_cs.png)
+<Image img={varInCs} />
 
 :::info
 Don't worry about how to run the code, we'll learn it in next course later. But tell you the secret that it is very easy!
@@ -221,7 +239,7 @@ Are you feeling tired? I believe you are!
 Wanna be a proudly lazy human developer? I bet you do!
 
 Let's see how AI can help us with this problem:
-![Sum Function Python](23_02_fun_sum_py.png)
+<Image img={funSumPy} />
 
 So the function in python is:
 
@@ -248,13 +266,13 @@ Furthermore, let's play around a little bit more for the function(s):
    1. first of first, remember functino can return some outputs right? so we update `sum` to return the sum up result.
    2. secondly, we update `calculate_sum` to call `sum` function for the result then display it, where its output is actually an action, which is displaying the result.
    3. Let's see how your best friend AI can do it:
-   ![Sum fun call fun py](23_02_fun_call_fun_py.png)
+    <Image img={funCallFunPy} />
 2. Furthermore, let's play further with boolean and string:
    1. let's check if a and b are equal within `calculate_sum`: display "a and b are (not) equal" by using new boolean variable. 
    2. we'll define a variable of string type to store the displaying information of the piece `"{a} + {b} = {result}"` then display it.
    3. Let's see how your best friend AI can do it:
-   ![Sum fun call fun with bool](23_02_fun_call_fun_bool_py.png)
-   ![Sum fun call fun with str](23_02_fun_call_fun_str_py.png)
+    <Image img={funCallFunBoolPy} />
+    <Image img={funCallFunStrPy} />
 3. What if we wanna calculate all the way to `10+10=?`?
     ```python
     calculate_sum(1, 1)
@@ -270,14 +288,14 @@ Furthermore, let's play around a little bit more for the function(s):
     # count: total 6+10=16 lines of code
     ```
 4. Wanna be lazier? Let's use "loop": 🚀
-   - ![Sum fun call fun with loop](23_02_fun_call_fun_loop10_py.png)
+   - <Image img={funCallFunLoop10Py} />
    - Yes you are using a "for loop" to do it:
         ```python
         for i in range(1, 11):
             calculate_sum(i, i)
         ```
    - there is another type of loop called "while loop" which is another way to do it:
-   ![sum fun call fun with while loop](23_02_fun_call_fun_while10_py.png)
+    <Image img={funCallFunWhile10Py} />
      - yes that's the while loop:
         ```python
         i = 1
@@ -290,10 +308,11 @@ Furthermore, let's play around a little bit more for the function(s):
       - while `while` loop is used for an unknown number of times but known condition such as `i <= 10`.
       - you've already got the syntax of `for` loop and `while` loop in Python, and believe me, your AI friend can always help me write them whenever you mention "for/while loop" in the conversation 😎
 5. give it a try to other programming languages:
-    ![Sum fun call fun with loop in Java](23_02_fun_java.png)
-    ![Sum fun call fun with loop in Kotlin](23_02_fun_kt.png)
-    ![Sum fun call fun with loop in TypeScript](23_02_fun_ts.png)
-    ![Sum fun call fun with loop in C#](23_02_fun_cs.png)
+    <Image img={funCallFunJava} />
+    <Image img={funCallFunKt} />
+    <Image img={funCallFunTs} />
+    <Image img={funCallFunCs} />
+    
 
 :::warning proud of yourself
 > "Proud of being a lazy human developer?"
