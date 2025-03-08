@@ -817,8 +817,8 @@
 
   </g>
   <!-- 底部装饰 -->
-  <text x="450" y="1000" font-family="Palatino, serif" font-size="18" text-anchor="middle" fill="#c9a95c">跨越科技裂谷 | 成为穿越周期的投资达人</text>
-  <text x="450" y="1030" font-family="Palatino, serif" font-size="16" text-anchor="middle" fill="#a08e50">2025.03.14 不见不散</text>
+  <text x="450" y="1000" font-family="Palatino, serif" font-size="18" text-anchor="middle" fill="#c9a95c">跨越裂谷 | 穿越周期 | 暖悦寒冬</text>
+  <text x="450" y="1030" font-family="Palatino, serif" font-size="16" text-anchor="middle" fill="#a08e50">2025.03.14 | 不见不散</text>
   
   <!-- 底部装饰线 -->
   <line x1="250" y1="1050" x2="550" y2="1050" stroke="#c9a95c" stroke-width="1"/>
