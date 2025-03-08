@@ -21,7 +21,7 @@
   <path d="M400,70 C500,50 600,70 700,90 L700,50 L100,50 L100,90 C200,70 300,50 400,70Z" fill="#c9a95c" opacity="0.3"/>
   
   <!-- 标题 -->
-  <text x="400" y="120" font-family="Palatino, serif" font-size="48" text-anchor="middle" fill="#e0d3a9" font-weight="bold">AI学习之旅</text>
+  <text x="400" y="120" font-family="Palatino, serif" font-size="48" text-anchor="middle" fill="#e0d3a9" font-weight="bold">AI微课 · 晚宴</text>
   <text x="400" y="170" font-family="Palatino, serif" font-size="24" text-anchor="middle" fill="#c9a95c">MENU</text>
   
   <!-- 装饰线 -->
