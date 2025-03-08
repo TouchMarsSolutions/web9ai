@@ -28,3 +28,7 @@ yarn-error.log*
 *.class
 *.jar
 *.bak
+
+# lock files
+yarn.lock
+package-lock.json
