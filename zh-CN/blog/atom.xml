@@ -2,7 +2,7 @@
 <feed xmlns="http://www.w3.org/2005/Atom">
     <id>https://www.web9.ai/zh-CN/blog</id>
     <title>Web9.AI Blog</title>
-    <updated>2025-03-08T02:10:30.000Z</updated>
+    <updated>2025-03-08T02:12:48.000Z</updated>
     <generator>https://github.com/jpmonette/feed</generator>
     <link rel="alternate" href="https://www.web9.ai/zh-CN/blog"/>
     <subtitle>Web9.AI Blog</subtitle>
@@ -11,14 +11,13 @@
         <title type="html"><![CDATA[AI学习之旅 | 一场AI工具与技能的晚宴]]></title>
         <id>https://www.web9.ai/zh-CN/blog/ai-tiny-course</id>
         <link href="https://www.web9.ai/zh-CN/blog/ai-tiny-course"/>
-        <updated>2025-03-08T02:10:30.000Z</updated>
-        <summary type="html"><![CDATA[跨越科技裂谷 | 成为穿越周期的投资达人]]></summary>
-        <content type="html"><![CDATA[<p><em>跨越科技裂谷 | 成为穿越周期的投资达人</em></p>
+        <updated>2025-03-08T02:12:48.000Z</updated>
+        <summary type="html"><![CDATA[跨越科技裂谷 | 成为穿越周期的AI达人]]></summary>
+        <content type="html"><![CDATA[<p><em>跨越科技裂谷 | 成为穿越周期的AI达人</em></p>
 <p>这次小课程将带你领略AI工具的魅力，从入门到进阶，像参观一顿精致晚餐般从容随意</p>
 <p><img decoding="async" loading="lazy" alt="AI学习之旅课程海报" src="https://www.web9.ai/zh-CN/assets/images/20250314_poster6-080d4bfd8e8d06f4b9c40aa9a0960d61.svg" width="800" height="1100" class="img_ev3q"></p>
-<p><strong>时间</strong>：2025.03.14 19:00-21:30<br>
-<strong>地点</strong>：线上直播
-<strong>预约方式</strong>：扫描海报二维码</p>
+<p><strong>时间</strong>：2025.03.14 19:00-21:00<br>
+<strong>地点</strong>：线上直播</p>
 <p><em>不见不散！</em></p>]]></content>
         <category label="AI" term="AI"/>
         <category label="course" term="course"/>
