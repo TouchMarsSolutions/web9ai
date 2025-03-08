@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1100">
   <!-- Background Image -->
   <!-- Define a pattern for the background -->
-  <image href="./dinner_background_6.png" width="800" height="1100" preserveAspectRatio="xMidYMid slice" opacity="0.5"/>
+  <image href="dinner_background_6.png" width="800" height="1100" preserveAspectRatio="xMidYMid slice" opacity="0.5"/>
 
   <!-- Dark overlay to enhance readability -->
   <rect width="800" height="1100" fill="#1a1a1a" opacity="0.7"/>
