@@ -44,6 +44,7 @@ const config = {
       min: 640,
       steps: 20,
       detail: 0.4,
+      disableInDev: false,
     }],
   ],
 
