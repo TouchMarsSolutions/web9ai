@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkweb_9_ai=self.webpackChunkweb_9_ai||[]).push([[7472],{55513:e=>{e.exports=JSON.parse('{"title":"Recent posts","items":[{"title":"AI\u5b66\u4e60\u4e4b\u65c5 | \u4e00\u573aAI\u5de5\u5177\u4e0e\u6280\u80fd\u7684\u665a\u5bb4","permalink":"/zh-CN/blog/ai-tiny-course","unlisted":false,"date":"2025-03-12T02:40:49.000Z"}]}')}}]);
