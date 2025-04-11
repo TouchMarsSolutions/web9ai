@@ -62,6 +62,8 @@ const config = {
           editUrl: "https://github.com/TouchMarsSolutions/web9ai/tree/main/",
         },
         blog: {
+          blogSidebarTitle: 'All posts',
+          blogSidebarCount: 'ALL',
           showReadingTime: true,
           readingTime: ({content, frontMatter, defaultReadingTime}) => defaultReadingTime({content, options: {wordsPerMinute: 250}}),
           // Please change this to your repo.
@@ -146,22 +148,22 @@ const config = {
                 label: "AI",
                 to: "/ai/intro",
               },
+              {
+                label: "DEV",
+                to: "/dev/overview",
+              },
             ],
           },
           {
             title: "Connect",
             items: [
               {
-                label: "Instagram",
-                href: "https://www.instagram.com/web9dotai/",
-              },
+                label: "Website",
+                href: "https://www.web9.ai/",
+              },              
               {
-                label: "Discord",
-                href: "https://discordapp.com/invite/web9dotai/",
-              },
-              {
-                label: "Twitter",
-                href: "https://twitter.com/web9dotai/",
+                label: "LinkedIn",
+                href: "https://www.linkedin.com/in/johnincanada/",
               },
             ],
           },
