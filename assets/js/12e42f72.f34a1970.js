@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkweb_9_ai=self.webpackChunkweb_9_ai||[]).push([[6946],{94819:a=>{a.exports=JSON.parse('{"tag":{"label":"AI","permalink":"/tags/ai","allTagsPath":"/tags","count":1,"items":[{"id":"ai/usecase/tools","title":"Adhoc AI Tools","description":"\u9ad8\u7ea7\u667a\u80fd","permalink":"/ai/usecase/ai-tools-adhoc"}],"unlisted":false}}')}}]);
