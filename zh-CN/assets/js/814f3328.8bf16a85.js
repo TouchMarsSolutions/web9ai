@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkweb_9_ai=self.webpackChunkweb_9_ai||[]).push([[7472],{55513:e=>{e.exports=JSON.parse('{"title":"Recent posts","items":[{"title":"\u6700\u5e38\u7528AI\u5de5\u5177\u4e32\u70e7","permalink":"/zh-CN/blog/ai-tools-adhoc","unlisted":false,"date":"2025-04-12T02:52:47.000Z"}]}')}}]);
