@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkweb_9_ai=self.webpackChunkweb_9_ai||[]).push([[3847],{2640:s=>{s.exports=JSON.parse('{"tag":{"label":"workshop","permalink":"/tags/workshop","allTagsPath":"/tags","count":1,"items":[{"id":"ai/usecase/ai_hot_tools","title":"Adhoc AI Tools","description":"\u9ad8\u7ea7\u667a\u80fd","permalink":"/ai/usecase/ai-tools-adhoc"}],"unlisted":false}}')}}]);
