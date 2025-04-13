@@ -39,12 +39,12 @@ const ControlPanel: React.FC<ControlPanelProps> = (props) => {
       button.title = title;
       
       Object.assign(button.style, {
-        border: 'none',
+        border: '1px solid rgba(0, 0, 0, 0.2)',
         background: 'transparent',
         cursor: 'pointer',
-        fontSize: '18px',
-        width: '36px',
-        height: '36px',
+        fontSize: '24px',
+        width: '72px',
+        height: '72px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
