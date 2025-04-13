@@ -56,7 +56,8 @@ const config = {
         docs: {
           sidebarPath: require.resolve("./sidebars.js"),
           routeBasePath: "/",
-          editLocalizedFiles: true,          
+          editLocalizedFiles: true,  
+          sidebarCollapsed: true,        
           // Please change this to your repo.
           // Remove this to remove the "edit this page" links.
           editUrl: "https://github.com/TouchMarsSolutions/web9ai/tree/main/",
@@ -96,6 +97,7 @@ const config = {
       docs: {
         sidebar: {
           hideable: true,
+          autoCollapseCategories: true,
         },
       },
       // Replace with your project's social card
