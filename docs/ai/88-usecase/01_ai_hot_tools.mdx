@@ -204,7 +204,7 @@ Suno为龙头首选 上手练习 跟ChatGPT写出歌词变成**歌曲** 人人�
 ### 宝宝天天见
 
 :::info
-强烈建议小白先安装豆包电脑版 天天使用 一骑绝尘 躺平巴适
+若你对其他应用毫无兴趣 那就只用豆包吧
 :::
 
 | 豆包 | 
@@ -260,9 +260,9 @@ flowchart TB
         subgraph RAG["知识库Agent"]
             subgraph RAGTools["知识库工具"]
                 direction LR
-                IMA@{ img: '/img/rag/ima.png', label: "IMA知识库<br/>ima.qq.com", pos: "t", w: 100, h: 100}
-                Get@{ img: '/img/rag/get.png', label: "Get笔记<br/>biji.com", pos: "t", w: 100, h: 100}
-                Notion@{ img: '/img/rag/notion.svg', label: "Notion AI<br/>notion.so/product/ai", pos: "t", w: 100, h: 100}
+                IMA@{ img: '/img/rag/ima.png', label: "IMA知识库<br/>ima.qq.com", pos: "t", w: 80, h: 80}
+                Get@{ img: '/img/rag/get.png', label: "Get笔记<br/>biji.com", pos: "t", w: 80, h: 80}
+                Notion@{ img: '/img/rag/notion.svg', label: "Notion AI<br/>notion.so/product/ai", pos: "t", w: 80, h: 80}
             end
         end
     end
@@ -283,7 +283,7 @@ flowchart TB
                 Hailuo@{img: '/img/txt2img/hailuo.png', label: "海螺AI<br/>hailuoai.video", pos: "t", w: 160, h: 160}
                 Kling@{img: '/img/txt2img/kling.svg', label: "可灵<br/>klingai.com", pos: "t", w: 160, h: 160}
                 Jimeng@{img: '/img/txt2img/jimeng.png', label: "即梦<br/>jimeng.jianying.com", pos: "t", w: 160, h: 160}
-                PixVerse["PixVerse<br/>pixverse.ai"]            
+                PixVerse@{img: '/img/txt2img/pixverse.svg', label: "PixVerse<br/>pixverse.ai", pos: "t", w: 160, h: 160}
             end
             
             subgraph DesignTools["设计Pro"]
@@ -311,7 +311,7 @@ flowchart TB
         end
     end
 
-    subgraph Models["基础模型<br/>Models"]
+    subgraph Models["基础模型"]
         direction TB
         subgraph LLM["LLM之5虎上将<br/>Top 5 LLMs"]
             subgraph LLMTools["主流大模型"]
