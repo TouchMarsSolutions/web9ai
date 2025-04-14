@@ -2,7 +2,7 @@
 <feed xmlns="http://www.w3.org/2005/Atom">
     <id>https://www.web9.ai/blog</id>
     <title>Web9.AI Blog</title>
-    <updated>2025-04-14T04:36:36.000Z</updated>
+    <updated>2025-04-14T04:43:49.000Z</updated>
     <generator>https://github.com/jpmonette/feed</generator>
     <link rel="alternate" href="https://www.web9.ai/blog"/>
     <subtitle>Web9.AI Blog</subtitle>
@@ -11,7 +11,7 @@
         <title type="html"><![CDATA[最常用AI工具串烧]]></title>
         <id>https://www.web9.ai/blog/ai-tools-adhoc</id>
         <link href="https://www.web9.ai/blog/ai-tools-adhoc"/>
-        <updated>2025-04-14T04:36:36.000Z</updated>
+        <updated>2025-04-14T04:43:49.000Z</updated>
         <summary type="html"><![CDATA[Pls visit Adhoc AI Tools for more details.]]></summary>
         <content type="html"><![CDATA[<h3 class="anchor anchorWithStickyNavbar_LWe7" id="pls-visit-adhoc-ai-tools-for-more-details">Pls visit <a href="https://www.web9.ai/ai/usecase/ai-tools-adhoc">Adhoc AI Tools</a> for more details.<a href="https://www.web9.ai/blog/ai-tools-adhoc#pls-visit-adhoc-ai-tools-for-more-details" class="hash-link" aria-label="Direct link to pls-visit-adhoc-ai-tools-for-more-details" title="Direct link to pls-visit-adhoc-ai-tools-for-more-details">​</a></h3>]]></content>
         <category label="AI" term="AI"/>
