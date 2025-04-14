@@ -102,7 +102,7 @@ quadrantChart
 mindmap
   root(("`**AI工具串烧**`"))
     ("`**智能体雏形**<br/>AI Agents`")
-      ("`**Workflow Agents**<br/>流程规划`")        
+      ("`**Workflow Agents**<br/>流程规划`")     
         Coze["`**Coze**<br/>coze.com`"]         
         ["`**Zapier**<br/>zapier.com`"]
       ("`**套壳组装机**<br/>Thin Wrappers`")
@@ -231,6 +231,126 @@ Replicate Explore要持续探索 从小白到高手 一个都不落
 
 ------
 
+## AI工具流程图
+
+```mermaid
+flowchart TB
+    Agents --> Foundation
+    Foundation --> Models
+    
+    subgraph Agents["智能体雏形<br/>AI Agents"]
+        direction TB
+        subgraph Workflow["流程Agents"]
+            subgraph WorkflowTools["流程规划工具"]
+                direction LR
+                Coze@{ img: '/img/coze/coze_store.png', label: "Coze<br/>coze.com", pos: "t", w: 260, h: 160}
+                Zapier@{ img: '/img/zapier/zapier_apps.png', label: "Zapier<br/>zapier.com", pos: "t", w: 260, h: 160}
+            end
+        end
+        subgraph Wrapper["套壳组装机"]
+            subgraph WrapperTools["组装工具"]
+                Manus@{ img: '/img/agent/manus.png', label: "Manus<br/>manus.im", pos: "t", w: 160, h: 160}
+            end
+        end
+        subgraph Avatar["播报数字人Agent"]
+            subgraph AvatarTools["数字人工具"]
+                HeyGen@{ img: '/img/heygen/heygen_home.png', label: "HeyGen<br/>app.heygen.com", pos: "t", w: 160, h: 160}
+            end
+        end
+        subgraph RAG["知识库Agent"]
+            subgraph RAGTools["知识库工具"]
+                direction LR
+                IMA@{ img: '/img/rag/ima.png', label: "IMA知识库<br/>ima.qq.com", pos: "t", w: 100, h: 100}
+                Get@{ img: '/img/rag/get.png', label: "Get笔记<br/>biji.com", pos: "t", w: 100, h: 100}
+                Notion@{ img: '/img/rag/notion.svg', label: "Notion AI<br/>notion.so/product/ai", pos: "t", w: 100, h: 100}
+            end
+        end
+    end
+
+    subgraph Foundation["模型的直接应用层"]
+        direction TB
+        subgraph Drawing["神笔马良"]
+            direction TB
+            subgraph Photo
+                direction LR
+                MidJourney@{ img: '/img/txt2img/midjourney.svg', label: "MidJourney<br/>midjourney.com", pos: "t", w: 160, h: 160}
+                LibLib@{ img: '/img/txt2img/liblib.svg', label: "LibLibAI<br/>liblib.art", pos: "t", w: 160, h: 160}
+                Recraft@{ img: '/img/txt2img/recraft2.svg', label: "Recraft<br/>recraft.ai", pos: "t", w: 160, h: 160}
+            end
+            subgraph Video
+                direction LR
+                Capcut@{img: '/img/video/capcut.svg', label: "剪映CapCut<br/>capcut.com", pos: "t", w: 160, h: 160}
+                Hailuo@{img: '/img/txt2img/hailuo.png', label: "海螺AI<br/>hailuoai.video", pos: "t", w: 160, h: 160}
+                Kling@{img: '/img/txt2img/kling.svg', label: "可灵<br/>klingai.com", pos: "t", w: 160, h: 160}
+                Jimeng@{img: '/img/txt2img/jimeng.png', label: "即梦<br/>jimeng.jianying.com", pos: "t", w: 160, h: 160}
+                PixVerse["PixVerse<br/>pixverse.ai"]            
+            end
+            
+            subgraph DesignTools["设计Pro"]
+                direction LR
+                Canva@{ img: '/img/design/canva.svg', label: "Canva<br/>canva.com", pos: "t", w: 160, h: 160}
+                Chuangkit@{ img: '/img/design/chuangkit_logo.svg', label: "创客帖<br/>chuangkit.com", pos: "t", w: 160, h: 160}
+                Napkin@{ img: '/img/design/napkin.svg', label: "Napkin<br/>napkin.ai", pos: "t", w: 160, h: 160}
+            end
+        end
+        
+        subgraph Voice["声控必备"]
+            direction LR
+            subgraph VoiceGeneration["声音生成"]
+                ElevenLabs@{ img: '/img/txt2audio/11labs.svg', label: "11Labs<br/>elevenlabs.io", pos: "t", w: 160, h: 160}
+                NotebookLM@{ img: '/img/txt2audio/notebooklm.svg', label: "NotebookLM<br/>notebooklm.google.com", pos: "t", w: 160, h: 160}
+            end
+
+            subgraph MusicTools["音乐工具"]
+                direction LR
+                Suno@{ img: '/img/music/suno.svg', label: "Suno<br/>suno.ai", pos: "t", w: 160, h: 160}
+                Udio@{ img: '/img/music/udio.svg', label: "Udio<br/>udio.com", pos: "t", w: 160, h: 160}
+                Mureka@{ img: '/img/music/mureka_ss.png', label: "Mureka<br/>mureka.ai", pos: "t", w: 160, h: 160}
+                Haimian@{ img: '/img/music/haimian.svg', label: "海绵音乐<br/>haimian.com", pos: "t", w: 160, h: 160}
+            end        
+        end
+    end
+
+    subgraph Models["基础模型<br/>Models"]
+        direction TB
+        subgraph LLM["LLM之5虎上将<br/>Top 5 LLMs"]
+            subgraph LLMTools["主流大模型"]
+                direction TB
+                ChatGPT["ChatGPT"]
+                DeepSeek["DeepSeek"]
+                Gemini["Gemini"]
+                Grok3["Grok3"]
+                Claude["Claude"]
+            end
+        end
+        subgraph OpenSource["开源模型的游乐场"]
+            subgraph OpenSourceTools["开源平台"]
+                direction TB
+                Replicate@{ img: '/img/cloud/replicate.svg', label: "Replicate<br/>replicate.com", pos: "t", w: 160, h: 160}
+                Huggingface@{ img: '/img/cloud/huggingface.svg', label: "Huggingface<br/>huggingface.co", pos: "t", w: 160, h: 160}
+            end
+        end
+    end
+        
+    %% Connect main categories to their tools
+    Wrapper --> WrapperTools
+    Avatar --> AvatarTools
+    RAG --> RAGTools
+    
+    LLM --> LLMTools
+    OpenSource --> OpenSourceTools
+        
+    %% Styling
+    classDef rootNode fill:#f9f,stroke:#333,stroke-width:2px
+    classDef categoryNode fill:#bbf,stroke:#333,stroke-width:1px
+    classDef toolNode fill:#ddf,stroke:#333,stroke-width:1px
+    
+    class Root rootNode
+    class Agents,Models,Drawing,Voice,Art categoryNode
+    class Workflow,Wrapper,Avatar,RAG,LLM,OpenSource,Music,Daily categoryNode
+    class Coze,Zapier,Manus,HeyGen,IMA,Get,Notion,ChatGPT,DeepSeek,Gemini,Grok3,Claude,Replicate,Huggingface,MidJourney,LibLib,Hailuo,Kling,Jimeng,PixVerse,Recraft,ElevenLabs,NotebookLM,Canva,Chuangkit,Napkin,Suno,Udio,Mureka,Haimian,Doubao,Capcut toolNode
+```
+
 ## 善用工具
 
 :::tip _工欲善其事必先利其器, 那么..._
@@ -250,4 +370,3 @@ Replicate Explore要持续探索 从小白到高手 一个都不落
 :::danger 希望大家 善用工具 驾驭科技 跨越裂谷 成为先驱 而非先烈 
 >  _"若非生活所迫, 谁愿满身才华?"_ `<=>` _"Stay hungry, stay foolish."_ 
 :::
-
