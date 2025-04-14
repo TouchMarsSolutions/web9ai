@@ -260,9 +260,9 @@ flowchart TB
         subgraph RAG["知识库Agent"]
             subgraph RAGTools["知识库工具"]
                 direction LR
-                IMA@{ img: '/img/rag/ima.png', label: "IMA知识库<br/>ima.qq.com", pos: "t", w: 80, h: 80}
-                Get@{ img: '/img/rag/get.png', label: "Get笔记<br/>biji.com", pos: "t", w: 80, h: 80}
-                Notion@{ img: '/img/rag/notion.svg', label: "Notion AI<br/>notion.so/product/ai", pos: "t", w: 80, h: 80}
+                IMA@{ img: '/img/rag/ima.png', label: "IMA知识库<br/>ima.qq.com", pos: "t", w: 80, h: 80, constraint: on }
+                Get@{ img: '/img/rag/get.png', label: "Get笔记<br/>biji.com", pos: "t", w: 80, h: 60}
+                Notion@{ img: '/img/rag/notion.svg', label: "Notion AI<br/>notion.so/product/ai", pos: "t", w: 80, h: 80, constraint: on }
             end
         end
     end
@@ -273,40 +273,40 @@ flowchart TB
             direction TB
             subgraph Photo
                 direction LR
-                MidJourney@{ img: '/img/txt2img/midjourney.svg', label: "MidJourney<br/>midjourney.com", pos: "t", w: 160, h: 160}
-                LibLib@{ img: '/img/txt2img/liblib.svg', label: "LibLibAI<br/>liblib.art", pos: "t", w: 160, h: 160}
-                Recraft@{ img: '/img/txt2img/recraft2.svg', label: "Recraft<br/>recraft.ai", pos: "t", w: 160, h: 160}
+                MidJourney@{ img: '/img/txt2img/midjourney.svg', label: "MidJourney<br/>midjourney.com", pos: "t", w: 160, h: 160, constraint: on }
+                LibLib@{ img: '/img/txt2img/liblib.svg', label: "LibLibAI<br/>liblib.art", pos: "t", w: 100, h: 100, constraint: off }
+                Recraft@{ img: '/img/txt2img/recraft2.svg', label: "Recraft<br/>recraft.ai", pos: "t", w: 160, h: 160, constraint: on }
             end
             subgraph Video
                 direction LR
-                Capcut@{img: '/img/video/capcut.svg', label: "剪映CapCut<br/>capcut.com", pos: "t", w: 160, h: 160}
-                Hailuo@{img: '/img/txt2img/hailuo.png', label: "海螺AI<br/>hailuoai.video", pos: "t", w: 160, h: 160}
-                Kling@{img: '/img/txt2img/kling.svg', label: "可灵<br/>klingai.com", pos: "t", w: 160, h: 160}
-                Jimeng@{img: '/img/txt2img/jimeng.png', label: "即梦<br/>jimeng.jianying.com", pos: "t", w: 160, h: 160}
-                PixVerse@{img: '/img/txt2img/pixverse.svg', label: "PixVerse<br/>pixverse.ai", pos: "t", w: 160, h: 160}
+                Capcut@{img: '/img/video/capcut.svg', label: "剪映CapCut<br/>capcut.com", pos: "t", w: 160, h: 160, constraint: on }
+                Hailuo@{img: '/img/txt2img/hailuo.png', label: "海螺AI<br/>hailuoai.video", pos: "t", w: 160, h: 100, constraint: off }
+                Kling@{img: '/img/txt2img/kling.svg', label: "可灵<br/>klingai.com", pos: "t", w: 100, h: 100, constraint: on }
+                Jimeng@{img: '/img/txt2img/jimeng.png', label: "即梦<br/>jimeng.jianying.com", pos: "t", w: 160, h: 100, constraint: off }
+                PixVerse@{img: '/img/txt2img/pixverse.svg', label: "PixVerse<br/>pixverse.ai", pos: "t", w: 160, h: 100, constraint: off }
             end
             
             subgraph DesignTools["设计Pro"]
                 direction LR
-                Canva@{ img: '/img/design/canva.svg', label: "Canva<br/>canva.com", pos: "t", w: 160, h: 160}
-                Chuangkit@{ img: '/img/design/chuangkit_logo.svg', label: "创客帖<br/>chuangkit.com", pos: "t", w: 160, h: 160}
-                Napkin@{ img: '/img/design/napkin.svg', label: "Napkin<br/>napkin.ai", pos: "t", w: 160, h: 160}
+                Canva@{ img: '/img/design/canva.svg', label: "Canva<br/>canva.com", pos: "t", w: 160, h: 160, constraint: off }
+                Chuangkit@{ img: '/img/design/chuangkit_logo.svg', label: "创客帖<br/>chuangkit.com", pos: "t", w: 160, h: 120, constraint: off }
+                Napkin@{ img: '/img/design/napkin.svg', label: "Napkin<br/>napkin.ai", pos: "t", w: 160, h: 100, constraint: off }
             end
         end
         
         subgraph Voice["声控必备"]
             direction LR
             subgraph VoiceGeneration["声音生成"]
-                ElevenLabs@{ img: '/img/txt2audio/11labs.svg', label: "11Labs<br/>elevenlabs.io", pos: "t", w: 160, h: 160}
-                NotebookLM@{ img: '/img/txt2audio/notebooklm.svg', label: "NotebookLM<br/>notebooklm.google.com", pos: "t", w: 160, h: 160}
+                ElevenLabs@{ img: '/img/txt2audio/11labs.svg', label: "11Labs<br/>elevenlabs.io", pos: "t", w: 160, h: 100, constraint: off }
+                NotebookLM@{ img: '/img/txt2audio/notebooklm.svg', label: "NotebookLM<br/>notebooklm.google.com", pos: "t", w: 160, h: 100, constraint: off }
             end
 
             subgraph MusicTools["音乐工具"]
                 direction LR
-                Suno@{ img: '/img/music/suno.svg', label: "Suno<br/>suno.ai", pos: "t", w: 160, h: 160}
-                Udio@{ img: '/img/music/udio.svg', label: "Udio<br/>udio.com", pos: "t", w: 160, h: 160}
-                Mureka@{ img: '/img/music/mureka_ss.png', label: "Mureka<br/>mureka.ai", pos: "t", w: 160, h: 160}
-                Haimian@{ img: '/img/music/haimian.svg', label: "海绵音乐<br/>haimian.com", pos: "t", w: 160, h: 160}
+                Suno@{ img: '/img/music/suno.svg', label: "Suno suno.ai", pos: "t", w: 160, h: 160, constraint: on }
+                Udio@{ img: '/img/music/udio.svg', label: "Udio udio.com", pos: "t", w: 160, h: 160, constraint: on }
+                Mureka@{ img: '/img/music/mureka_ss.png', label: "Mureka mureka.ai", pos: "t", w: 160, h: 120, constraint: off }
+                Haimian@{ img: '/img/music/haimian.svg', label: "海绵音乐 haimian.com", pos: "t", w: 160, h: 160, constraint: on }
             end        
         end
     end
