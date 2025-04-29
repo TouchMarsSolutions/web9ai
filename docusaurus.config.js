@@ -45,7 +45,7 @@ const config = {
       steps: 20,
       detail: 0.4,
       disableInDev: false,
-    }],
+    }],    
   ],
 
   presets: [
