@@ -7,7 +7,9 @@ hide_table_of_contents: false
 
 import Image from '@theme/IdealImage';
 import CozeStore from '/img/coze/coze_store.png';
+import CozeSpace from '/img/coze/coze_space.png';
 import Zapier from '/img/zapier/zapier_apps.png';
+import Make from '/img/make/make_store.png';
 import HeyGen from '/img/heygen/heygen_home.png';
 import NotionSvg from '/img/rag/notion.svg';
 import GetPng from '/img/rag/get.png';
@@ -40,6 +42,11 @@ import DoubaoPng from '/img/agent/doubao.png';
 import TOCInline from '@theme/TOCInline';
 import ControlPanel from '@site/src/components/util/ControlPanel';
 
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+import FullscreenWrapper from '@site/src/components/util/FullscreenWrapper';
+import InvestmentWarning from '@site/src/components/invest/InvestmentWarning.cn.mdx';
+
 <!-- <ControlPanel /> -->
 
 <!-- <Image img={JohnJpg} /> -->
@@ -50,46 +57,59 @@ import ControlPanel from '@site/src/components/util/ControlPanel';
 
 <!-- truncate -->
 
+<InvestmentWarning />
+
 ## 高级智能
 
 :::info
 传说中的智能体 AI Agent = AI代理
 :::
 
-```mermaid
-quadrantChart
-    title AI Agent
-    quadrant-1 "知识库Agent"
-    quadrant-2 "流程管理员Agent"
-    quadrant-3 "组装大师Agent"
-    quadrant-4 "数字人Agent"
-```
+<details>
+  <summary>Category of AI Agent 智能代理的分类</summary>
 
-### 知识库
+```mermaid
+mindmap
+  root((AI Agent))
+    知识库Agent
+    流程管理员Agent
+    组装大师Agent
+    数字人Agent
+```
+</details>
+
+### 知识库 (RAG) {#knowledge-base}
 
 | **IMA知识库** (微信亲生)                                               | Get笔记 (得到亲生)                                                                  | Notion AI                                                                  |
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
 | 微信亲生的知识库, <br/>可添加聊天文件, 公众号文章                      | 语音输入 自动总结                                                        | Notion配套 笔记之王                                                        |
 | [<Image img={ImaPng} width={100} height={100} />](https://ima.qq.com/) | [<Image img={GetPng} width={100} height={100} />](https://www.biji.com/) | [<NotionSvg width={100} height={100} />](https://www.notion.so/product/ai) |
 
-### 流程管理
+### 流程管理 {#workflow-agent-mgmt}
 
-| [Coze](https://www.coze.com/)                      | [**Zapier**](https://zapier.com/)             |
-| -------------------------------------------------- | --------------------------------------------- |
-| [<Image img={CozeStore} />](https://www.coze.com/) | [<Image img={Zapier} />](https://zapier.com/) |
+| [Coze](https://www.coze.com/)                      | [**Zapier**](https://zapier.com/)             | [**Make**](https://www.make.com/) |
+| -------------------------------------------------- | --------------------------------------------- | --------------------------------- |
+| [<Image img={CozeStore} />](https://www.coze.com/) | [<Image img={Zapier} />](https://zapier.com/) | [<Image img={Make} />](https://www.make.com/) |
 
 ### 套壳组装机 
 
-<details open>
+<details>
   <summary>Manus</summary>
   <div>
     [<Image img={Manus} />](https://manus.im/)
   </div>
 </details>
 
+<details>
+  <summary>Coze Space</summary>
+  <div>
+    [<Image img={CozeSpace} />](https://space.coze.cn/)
+  </div>
+</details>
+
 ### 播报数字人
 
-<details open>
+<details>
   <summary>HeyGen</summary>
   <div>
     [<Image img={HeyGen} />](https://app.heygen.com/guest/templates?cid=5e24983e)
@@ -98,11 +118,96 @@ quadrantChart
 
 ## 基础模型
 
+<FullscreenWrapper>
+  <Tabs
+    defaultValue="llm"
+    values={[
+      {label: 'LLM', value: 'llm'},
+      {label: '幻相', value: 'hallucination'},
+      {label: '自动化', value: 'rpa'},
+      {label: 'LLM使用L心法', value: 'use-llm'},
+    ]}>
+    <TabItem value="llm">
+      ```mermaid
+      graph TD
+        root["AI Models"] --> LLM["LLM (Text) 字"]
+        root --> IMG["Image Generation 图像"]
+        root --> AUD["Voice and Music 音频"]
+        root --> VID["Video Generation 视频"]
+
+        %% LLM derivatives
+        LLM --> CODE["Code 编程代码"]
+        LLM --> STORY["Story & Article <br/>小说/文案/故事"]
+        LLM --> REASON["Prompt 提示词"]
+
+        %% Style nodes
+        classDef root fill:#ff9900,stroke:#fff,stroke-width:2px,color:#fff
+        classDef primary fill:#00b4d8,stroke:#fff,stroke-width:2px,color:#fff
+        classDef secondary fill:#0077b6,stroke:#fff,stroke-width:2px,color:#fff
+        classDef desc fill:none,stroke:none
+
+        class root root
+        class LLM,IMG,AUD,VID primary
+        class CODE,STORY,REASON secondary
+        class CODE_DESC,STORY_DESC,REASON_DESC desc
+      ```
+    </TabItem>
+    <TabItem value="hallucination">
+    
+:::tip 心法 💫
+<div style={{
+  background: 'linear-gradient(135deg, #9400D3, #4B0082)',
+  padding: '20px',
+  borderRadius: '10px',
+  color: '#E6E6FA',
+  textAlign: 'center',
+  fontSize: '1.2em',
+  fontWeight: 'bold',
+  margin: '20px 0',
+  boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
+}}>
+
+🌟 凡所有相，皆是虚妄。 🌌
+
+✨ 若见诸相非相，则见如来。 🙏
+
+🌙 一切有为法，如梦幻泡影， 💫
+
+🌊 如露亦如电，应作如是观。 ⚡
+
+</div>
+:::
+     
+    </TabItem>
+    <TabItem value="rpa">
+:::danger
+* 自动化 (RPA) vs AI
+* AI vs ML
+* AI vs Machine Intelligence
+:::
+    </TabItem>
+    <TabItem value="use-llm">
+:::info
+哲学3问:
+* 我/你 是谁
+* 从哪来
+* 到哪去
+:::
+    </TabItem>
+  </Tabs>
+</FullscreenWrapper>
+
 ### LLM之5虎上将
 
 | ChatGPT                              | DeepSeek                        | Gemini            | Grok3                                              | **Claude**                              |
 | ------------------------------------ | ------------------------------- | ----------------- | -------------------------------------------------- | --------------------------------------- |
 | "咋让ChatGPT每天8点给我发送BTC新闻?" | 精通中文 <br/>"施主, 算一卦么?" | 谷歌亲生 生态集成 | 连通X 搜索狂野 <br/>"调研NVDA的业务和预测下周走势" | 精于术数 编程之王 <br/>驾驭浏览器自动化 |
+
+#### 开源模型 {#opensource-llm}
+* DeepSeek
+* 阿里的千问
+* ~~腾讯的混元~~
+* Meta的LLAMA 3 
 
 ### 神笔马良甄选
 
@@ -125,7 +230,7 @@ Canva 从业余到专业 从海报到海选 你都用的上
 | **Canva**                                                       | 创客帖                                                                  | Napkin                                                           |
 | --------------------------------------------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | [<CanvaSvg width={100} height={100} />](https://www.canva.com/) | [<ChuangkitSvg width={100} height={100} />](https://www.chuangkit.com/) | [<NapkinSvg width={100} height={100} />](https://www.napkin.ai/) |
-| Pro设计之王                                                     | 模版精选                                                                | 极简                                                             |
+| Pro设计之王                                                     | 自媒体模版精选                                                                | 极简                                                             |
 
 ### 声控必备
 
@@ -142,7 +247,8 @@ Canva 从业余到专业 从海报到海选 你都用的上
 
 | **Suno**                                                 | Udio                                                          | Mureka                                                                   | 海绵音乐                                                            |
 | -------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------- |
-| [<SunoSvg width={100} height={100} />](https://suno.ai/) | [<UdioSvg width={100} height={100} />](https://www.udio.com/) | [<Image img={MurekaPng} width={100} height={100} />](https://mureka.ai/) | [<HaimianSvg width={150} height={100} />](https://www.haimian.com/) |
+| [<SunoSvg width={100} height={100} />](https://suno.com/invite/@jhcao) | [<UdioSvg width={100} height={100} />](https://www.udio.com/) | [<Image img={MurekaPng} width={100} height={100} />](https://mureka.ai/) | [<HaimianSvg width={150} height={100} />](https://www.haimian.com/) |
+
 
 :::info Suno
 Suno为龙头首选 上手练习 跟ChatGPT写出歌词变成**歌曲** 人人皆可作音乐
@@ -352,6 +458,9 @@ flowchart TB
     class Workflow,Wrapper,Avatar,RAG,LLM,OpenSource,Music,Daily categoryNode
     class Coze,Zapier,Manus,HeyGen,IMA,Get,Notion,ChatGPT,DeepSeek,Gemini,Grok3,Claude,Replicate,Huggingface,MidJourney,LibLib,Hailuo,Kling,Jimeng,PixVerse,Recraft,ElevenLabs,NotebookLM,Canva,Chuangkit,Napkin,Suno,Udio,Mureka,Haimian,Doubao,Capcut toolNode
 ```
+
+
+<InvestmentWarning />
 
 ## 心法 {#methodology}
 

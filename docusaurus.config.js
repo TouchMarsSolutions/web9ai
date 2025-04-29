@@ -46,6 +46,14 @@ const config = {
       detail: 0.4,
       disableInDev: false,
     }],
+    [
+      '@docusaurus/plugin-svgr',
+      {
+        svgrConfig: {
+          /* SVGR config */
+        },
+      },
+    ],
   ],
 
   presets: [
