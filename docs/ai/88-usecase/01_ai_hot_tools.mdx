@@ -122,11 +122,19 @@ mindmap
   <Tabs
     defaultValue="llm"
     values={[
-      {label: 'LLM', value: 'llm'},
+      {label: '概念强化', value: 'rpa'},
       {label: '幻相', value: 'hallucination'},
-      {label: '自动化', value: 'rpa'},
+      {label: '大模型', value: 'llm'},
       {label: 'LLM使用L心法', value: 'use-llm'},
     ]}>
+    <TabItem value="rpa">
+:::danger
+* `GenAI` = Generative AI 生成式AI
+* 自动化 (RPA) vs AI
+* AI vs ML
+* AI vs Machine Intelligence
+:::
+    </TabItem>
     <TabItem value="llm">
       ```mermaid
       graph TD
@@ -178,13 +186,6 @@ mindmap
 </div>
 :::
      
-    </TabItem>
-    <TabItem value="rpa">
-:::danger
-* 自动化 (RPA) vs AI
-* AI vs ML
-* AI vs Machine Intelligence
-:::
     </TabItem>
     <TabItem value="use-llm">
 :::info
@@ -340,7 +341,8 @@ mindmap
 ```
 
 ### AI常用工具串串烧 {#flowchart}
-
+<details>
+  <summary>AI常用工具串串烧</summary>
 ```mermaid
 flowchart TB
     Agents --> Foundation
@@ -421,14 +423,21 @@ flowchart TB
 
     subgraph Models["基础模型"]
         direction TB
-        subgraph LLM["LLM之5虎上将<br/>Top 5 LLMs"]
-            subgraph LLMTools["主流大模型"]
+        subgraph LLM["多模态"]
+            subgraph LLMTools["主流LLM"]
                 direction TB
                 ChatGPT["ChatGPT"]
-                DeepSeek["DeepSeek"]
+                DeepSeek_LLM["DeepSeek"]
                 Gemini["Gemini"]
                 Grok3["Grok3"]
                 Claude["Claude"]
+            end            
+            subgraph MediaTools["声色模型"]
+                direction TB
+                VoiceModel["声音"]
+                MusicModel["音乐"]
+                ImageModel["画画"]
+                VideoModel["视频"]
             end
         end
         subgraph OpenSource["开源模型的游乐场"]
@@ -456,9 +465,10 @@ flowchart TB
     class Root rootNode
     class Agents,Models,Drawing,Voice,Art categoryNode
     class Workflow,Wrapper,Avatar,RAG,LLM,OpenSource,Music,Daily categoryNode
-    class Coze,Zapier,Manus,HeyGen,IMA,Get,Notion,ChatGPT,DeepSeek,Gemini,Grok3,Claude,Replicate,Huggingface,MidJourney,LibLib,Hailuo,Kling,Jimeng,PixVerse,Recraft,ElevenLabs,NotebookLM,Canva,Chuangkit,Napkin,Suno,Udio,Mureka,Haimian,Doubao,Capcut toolNode
+    class Coze,Zapier,Manus,HeyGen,IMA,Get,Notion,ChatGPT,DeepSeek_LLM,Gemini,Grok3,Claude,Replicate,Huggingface,MidJourney,LibLib,Hailuo,Kling,Jimeng,PixVerse,Recraft,ElevenLabs,NotebookLM,Canva,Chuangkit,Napkin,Suno,Udio,Mureka,Haimian,Doubao,Capcut toolNode
 ```
 
+</details>
 
 <InvestmentWarning />
 

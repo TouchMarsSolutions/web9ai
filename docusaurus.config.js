@@ -45,15 +45,7 @@ const config = {
       steps: 20,
       detail: 0.4,
       disableInDev: false,
-    }],
-    [
-      '@docusaurus/plugin-svgr',
-      {
-        svgrConfig: {
-          /* SVGR config */
-        },
-      },
-    ],
+    }],    
   ],
 
   presets: [
