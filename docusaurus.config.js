@@ -191,6 +191,12 @@ const config = {
         additionalLanguages: ['bash', 'diff', 'json', 'java', 'kotlin', 'python', 'typescript', 'csharp'],
       },
     }),
+  scripts: [
+    {
+      src: 'https://embed.voomly.com/embed/embed-build.js',
+      async: true,
+    },
+  ],
 };
 
 module.exports = config;
