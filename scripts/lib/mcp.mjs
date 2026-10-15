@@ -16,6 +16,7 @@ export function parseRpcBody(raw) {
 /** Unwrap a tools/call answer: JSON-parse its text content when possible; throw on errors. */
 export function unwrapToolResult(name, res) {
 	if (res.error) throw new Error(`${name}: ${res.error.message ?? JSON.stringify(res.error)}`);
+	if (!res.result) throw new Error(`${name}: not a JSON-RPC result: ${JSON.stringify(res).slice(0, 200)}`);
 	const text = (res.result?.content ?? [])
 		.filter((c) => c.type === "text")
 		.map((c) => c.text)
@@ -45,7 +46,9 @@ export async function rpc(method, params = {}, { url = process.env.EMDASH_URL ??
 		},
 		body: JSON.stringify({ jsonrpc: "2.0", id: nextId++, method, params }),
 	});
-	return parseRpcBody(await res.text());
+	const body = await res.text();
+	if (!res.ok) throw new Error(`MCP HTTP ${res.status}: ${body.slice(0, 200)}`);
+	return parseRpcBody(body);
 }
 
 export async function callTool(name, args = {}, opts) {

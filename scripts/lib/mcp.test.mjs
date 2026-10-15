@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { checkMarkers } from "./markers.mjs";
-import { parseRpcBody, unwrapToolResult } from "./mcp.mjs";
+import { parseRpcBody, rpc, unwrapToolResult } from "./mcp.mjs";
 
 describe("parseRpcBody", () => {
 	it("parses plain JSON", () => {
@@ -24,6 +24,19 @@ describe("unwrapToolResult", () => {
 	it("throws on tool errors and JSON-RPC errors", () => {
 		expect(() => unwrapToolResult("t", { result: { isError: true, content: [{ type: "text", text: "nope" }] } })).toThrow("t: nope");
 		expect(() => unwrapToolResult("t", { error: { code: -32602, message: "bad args" } })).toThrow("t: bad args");
+	});
+	it("throws when the body is not a JSON-RPC result", () => {
+		expect(() => unwrapToolResult("t", { message: "Unauthorized" })).toThrow(/^t: .*not a JSON-RPC result/);
+	});
+});
+
+describe("rpc", () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+	it("throws with the HTTP status on a non-OK response", async () => {
+		vi.stubGlobal("fetch", async () => new Response('{"error":"nope"}', { status: 401 }));
+		await expect(rpc("tools/list", {}, { token: "x" })).rejects.toThrow("MCP HTTP 401");
 	});
 });
 
