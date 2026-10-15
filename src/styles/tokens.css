@@ -20,20 +20,6 @@
 	:root {
 		color-scheme: light dark;
 
-		/* Colors */
-		--color-bg: light-dark(#ffffff, #0d0d0d);
-		--color-bg-subtle: light-dark(#fafafa, #141414);
-		--color-text: light-dark(#1a1a1a, #ededed);
-		--color-text-secondary: light-dark(#525252, #a0a0a0);
-		--color-muted: light-dark(#8b8b8b, #6b6b6b);
-		--color-border: light-dark(#e5e5e5, #2a2a2a);
-		--color-border-subtle: light-dark(#f0f0f0, #1f1f1f);
-		--color-surface: light-dark(#f7f7f7, #181818);
-		--color-brand: light-dark(#0066cc, #4d9fff);
-		--color-brand-hover: light-dark(#0052a3, #6eb0ff);
-		--color-on-brand: white;
-		--color-brand-ring: color-mix(in srgb, var(--color-brand) 25%, transparent);
-
 		/* EmDash search theming */
 		--emdash-search-bg: var(--color-bg);
 		--emdash-search-text: var(--color-text);

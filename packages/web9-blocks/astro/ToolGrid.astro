@@ -1,7 +1,6 @@
 ---
 import { sanitizeHref } from "emdash";
 import { renderInlineMarkdown } from "../lib/markdown.mjs";
-import "./blocks.css";
 
 interface Tool {
 	name?: string;
@@ -18,22 +17,25 @@ const tools = Array.isArray(node?.tools) ? node.tools : [];
 const size = node?.logo_size || 72;
 ---
 
-{node?.title && <h4 class="w9-tools__title">{node.title}</h4>}
-<div class="w9-tools">
+{node?.title && <h4 class="mt-4 mb-2">{node.title}</h4>}
+<div class="not-prose my-4 mb-6 grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3" data-w9-tools>
 	{
 		tools.map((tool) => (
 			<a
-				class:list={["w9-tool", { "w9-tool--featured": tool.featured }]}
+				class:list={[
+					"flex flex-col items-center gap-1.5 rounded-xl border px-2.5 py-3.5 text-center text-inherit no-underline hover:border-brand",
+					tool.featured ? "border-brand ring-1 ring-brand ring-inset" : "border-border",
+				]}
 				href={tool.url ? sanitizeHref(tool.url) : undefined}
 				target="_blank"
 				rel="noopener noreferrer"
 			>
 				{tool.logo && (
-					<img src={sanitizeHref(tool.logo)} alt={tool.name ?? ""} width={size} height={size} loading="lazy" />
+					<img class="max-w-full object-contain" src={sanitizeHref(tool.logo)} alt={tool.name ?? ""} width={size} height={size} loading="lazy" />
 				)}
 				<strong>{tool.name}</strong>
 				{tool.tagline && (
-					<span class="w9-tool__tagline" set:html={renderInlineMarkdown(tool.tagline.replace(/\n/g, "<br>"))} />
+					<span class="text-[0.85em] opacity-80" set:html={renderInlineMarkdown(tool.tagline.replace(/\n/g, "<br>"))} />
 				)}
 			</a>
 		))

@@ -1,6 +1,5 @@
 ---
 import { renderMarkdown } from "../lib/markdown.mjs";
-import "./blocks.css";
 
 interface Tab {
 	label?: string;
@@ -15,14 +14,21 @@ const active = Math.min(Math.max((node?.default_tab ?? 1) - 1, 0), Math.max(tabs
 const uid = `w9t-${node?._key ?? "x"}`;
 ---
 
-<div class="w9-tabs" data-w9-tabs>
-	{node?.fullscreen && <button class="w9-tabs__fs" type="button" data-fs aria-label="Toggle fullscreen">⛶</button>}
-	<div class="w9-tabs__list" role="tablist">
+<div class="relative my-6 rounded-lg border border-border px-4 pb-4 [&:fullscreen]:overflow-auto [&:fullscreen]:bg-bg [&:fullscreen]:p-8" data-w9-tabs>
+	{
+		node?.fullscreen && (
+			<button class="absolute top-1.5 right-2 cursor-pointer text-lg opacity-70 hover:opacity-100" type="button" data-fs aria-label="Toggle fullscreen">
+				⛶
+			</button>
+		)
+	}
+	<div class="-mx-4 mb-4 flex flex-wrap gap-1 border-b border-border px-3" role="tablist">
 		{
 			tabs.map((tab, i) => (
 				<button
 					type="button"
 					role="tab"
+					class="cursor-pointer border-b-2 border-transparent px-3 py-2.5 opacity-70 aria-selected:border-brand aria-selected:font-semibold aria-selected:opacity-100"
 					id={`${uid}-tab-${i}`}
 					aria-controls={`${uid}-panel-${i}`}
 					aria-selected={i === active ? "true" : "false"}

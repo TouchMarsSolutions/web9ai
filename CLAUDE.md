@@ -26,3 +26,5 @@ Read `AGENTS.md` for EmDash conventions; agent skills are in `.agents/skills/`.
 - Doc bodies are a `portableText` field plus inline custom blocks; never a `blocks` field (not searchable).
 - Adding a block type = definition in `packages/web9-blocks/index.mjs` + renderer in `astro/` + deploy before content uses it.
 - Markdown-valued block fields are rendered by `packages/web9-blocks/lib/markdown.mjs` and sanitized there.
+- Styling is Tailwind 4 (`src/styles/global.css`, spec §11). Colors are the template tokens (`bg-surface`, `text-muted`, `border-border`, `text-brand`); never use the `dark:` variant, `light-dark()` already follows the theme toggle.
+- Content HTML never carries classes. Markdown output is styled only by `prose` on the container and by the whitelisted-class selectors in `packages/web9-blocks/astro/blocks.css` (utilities layer). Never widen the sanitizer's class/style whitelist; any block prop that reaches a `class` attribute must be whitelisted (see `safeTone`).

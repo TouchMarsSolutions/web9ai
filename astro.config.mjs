@@ -3,6 +3,7 @@ import react from "@astrojs/react";
 import { d1, r2 } from "@emdash-cms/cloudflare";
 import { defineConfig, fontProviders } from "astro/config";
 import emdash from "emdash/astro";
+import tailwindcss from "@tailwindcss/vite";
 import { web9Blocks } from "@web9/blocks";
 
 export default defineConfig({
@@ -45,5 +46,6 @@ export default defineConfig({
 			fallbacks: ["monospace"],
 		},
 	],
+	vite: { plugins: [tailwindcss()] },
 	devToolbar: { enabled: false },
 });

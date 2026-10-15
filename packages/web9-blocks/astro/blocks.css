@@ -1,38 +1,29 @@
-/* Shared styles for Web9 blocks. Global because Markdown bodies are injected with set:html. */
-.callout {
-	--tone: #4b8bf5;
-	margin: 1.25rem 0;
-	padding: 0.75rem 1rem;
-	border-left: 4px solid var(--tone);
-	border-radius: 6px;
-	background: color-mix(in srgb, var(--tone) 10%, transparent);
+/*
+ * Styles for HTML produced by renderMarkdown(). Sanitized content cannot carry utility classes
+ * (the sanitizer strips them on purpose, spec §10/§11), so whitelisted classes are styled here.
+ * Imported by src/styles/global.css; never import this file from a component (@apply needs the
+ * Tailwind entry).
+ *
+ * Utilities layer, not components: @tailwindcss/typography puts .prose in the utilities layer and
+ * layer order beats specificity, so components-layer rules would lose to prose margins.
+ */
+@layer utilities {
+	.callout {
+		--tone: #4b8bf5;
+		@apply my-5 rounded-md border-l-4 px-4 py-3;
+		border-left-color: var(--tone);
+		background: color-mix(in srgb, var(--tone) 10%, transparent);
+	}
+	.callout--note { --tone: #8a8f98; }
+	.callout--tip { --tone: #2e9e5b; }
+	.callout--info { --tone: #4b8bf5; }
+	.callout--warning,
+	.callout--caution { --tone: #d9a400; }
+	.callout--danger { --tone: #d6443a; }
+	.callout > :first-child,
+	.callout > div > :first-child { @apply mt-0; }
+	.callout > :last-child,
+	.callout > div > :last-child { @apply mb-0; }
+	.callout .callout__title { @apply mt-0 mb-1.5 font-bold; }
+	pre.mermaid { @apply bg-transparent text-center; }
 }
-.callout--note { --tone: #8a8f98; }
-.callout--tip { --tone: #2e9e5b; }
-.callout--info { --tone: #4b8bf5; }
-.callout--warning, .callout--caution { --tone: #d9a400; }
-.callout--danger { --tone: #d6443a; }
-.callout > :first-child, .callout > div > :first-child { margin-top: 0; }
-.callout > :last-child, .callout > div > :last-child { margin-bottom: 0; }
-.callout__title { font-weight: 700; margin: 0 0 0.35rem; }
-
-.w9-tabs { position: relative; margin: 1.5rem 0; border: 1px solid color-mix(in srgb, currentColor 15%, transparent); border-radius: 8px; padding: 0 1rem 1rem; }
-.w9-tabs:fullscreen { overflow: auto; padding: 2rem; background: var(--color-bg, Canvas); }
-.w9-tabs__list { display: flex; flex-wrap: wrap; gap: 0.25rem; border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent); margin: 0 -1rem 1rem; padding: 0 0.75rem; }
-.w9-tabs__list [role="tab"] { appearance: none; background: none; border: 0; border-bottom: 2px solid transparent; padding: 0.6rem 0.75rem; font: inherit; color: inherit; opacity: 0.7; cursor: pointer; }
-.w9-tabs__list [role="tab"][aria-selected="true"] { opacity: 1; border-bottom-color: var(--color-accent, #4b8bf5); font-weight: 600; }
-.w9-tabs__fs { position: absolute; top: 0.35rem; right: 0.5rem; background: none; border: 0; font-size: 1.1rem; cursor: pointer; color: inherit; opacity: 0.7; }
-
-.w9-details { margin: 1rem 0; border: 1px solid color-mix(in srgb, currentColor 15%, transparent); border-radius: 8px; padding: 0.5rem 1rem; }
-.w9-details > summary { cursor: pointer; font-weight: 600; }
-.w9-details[open] > summary { margin-bottom: 0.75rem; }
-
-.w9-tools__title { margin: 1rem 0 0.5rem; }
-.w9-tools { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.75rem; margin: 1rem 0 1.5rem; }
-.w9-tool { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; padding: 0.85rem 0.6rem; border: 1px solid color-mix(in srgb, currentColor 15%, transparent); border-radius: 10px; text-align: center; text-decoration: none; color: inherit; }
-.w9-tool:hover { border-color: var(--color-accent, #4b8bf5); }
-.w9-tool--featured { border-color: var(--color-accent, #4b8bf5); box-shadow: 0 0 0 1px var(--color-accent, #4b8bf5) inset; }
-.w9-tool img { object-fit: contain; max-width: 100%; }
-.w9-tool__tagline { font-size: 0.85em; opacity: 0.8; }
-
-pre.mermaid { background: none; text-align: center; }

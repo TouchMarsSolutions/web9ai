@@ -7,7 +7,8 @@
   "exports": {
     ".": "./index.mjs",
     "./astro": "./astro/index.mjs",
-    "./markdown": "./lib/markdown.mjs"
+    "./markdown": "./lib/markdown.mjs",
+    "./styles.css": "./astro/blocks.css"
   },
   "peerDependencies": {
     "astro": "*",
