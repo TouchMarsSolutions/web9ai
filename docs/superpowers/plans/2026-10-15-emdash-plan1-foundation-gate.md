@@ -1887,3 +1887,14 @@ Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
    - 合并到 `main`，生产分支改成 `main`，绑定 `www.web9.ai`；
    - 确认预览环境是否和生产共用 binding。
 7. **AI 账号**：owner 在后台邀请一个 Editor 账号，用 passkey 注册，再创建 PAT（spec §8）。
+
+### 计划 1 遗留，计划 2 必须处理
+
+- **安全关口（建 AI Editor 账号之前）**：web9 自己的 `htmlBlock` renderer（去掉 class/id，`isolated` 交给 core）；构建后扫描 `dist/client/_astro/*.css` 的 denylist（`.fixed{`、`.inset-`、`.z-[0-9]`、`-screen{`、`-dvh{`）；收紧 `SAFE_VALUE`（函数名 allowlist，拒绝 `//`，覆盖 `image-set()`、超大 `box-shadow`/负 `margin`）。
+- **明暗切换**：生产构建把 `light-dark()` 降级，手动切换失效。两种修法：调高 `build.cssTarget`/lightningcss targets（Chrome 123、Safari 17.5、Firefox 120，放弃旧浏览器，由 owner 决定），或改成 `:root.light`/`.dark` 显式 token。验收：构建产物里 `--lightningcss-light` 为 0。
+- **部署绑定**：D1 `database_id`、R2、adapter 注入的 KV `SESSION` 和 `IMAGES`；构建产物的 worker 体积对照免费额度；用 workerd 跑一次构建产物。
+- **已有库加字段的顺序**：如果生产库不是用 seed 从空库建的，先 `schema_create_field search_text`，再上线带 hook 的插件（hook 的 `errorPolicy` 是 abort）。
+- **迁移 runner**：`_key` 改成确定性（slug + 位置的 hash），否则每次重跑都产生新 revision；`section`/`category`/`sort_order` 从 `legacy/docs/{ai,dev}/NN-dir/NN_file` 路径推导（只有 2/28 个文件有 `sidebar_position`）；`23_learn_ai_coding.mdx` 里 `<details>` 套 `<Tabs>` 的转换；golden test 不再读 `legacy/`（cutover 删掉它之前换成 fixture）。
+- **搜索**：`htmlBlock` 的文字 core 和 hook 都不索引；`posts` 里的 `:::` callout 文字不进搜索（决定给 `posts` 加 `search_text` 还是接受）；core `snippet()` 固定取第 2 列，块里命中时摘要显示标题。
+- **样式小问题**：`prose` 给行内 `code` 加反引号；docs 侧栏分组标签 `text-muted` 对比度不够 AA；ToolGrid 的 `object-contain` 被 preflight 的 `height:auto` 抵消；callout/tabs 里的站内链接也被强制 `target="_blank"`。
+- **依赖清理**：`astro` 版本下限提到 `^7.4.0`（adapter 的 peer）；删掉没用到的 `@cloudflare/workers-types`。
