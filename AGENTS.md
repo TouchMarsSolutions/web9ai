@@ -27,6 +27,7 @@ Agent skills are in `.agents/skills/`. Load them when working on specific tasks:
 - **building-emdash-site** -- Querying content, rendering Portable Text, schema design, seed files, site features (menus, widgets, search, SEO, comments, bylines). Start here.
 - **creating-plugins** -- Building EmDash plugins with hooks, storage, admin UI, API routes, and Portable Text block types.
 - **emdash-cli** -- CLI commands for content management, seeding, type generation, and visual editing flow.
+- **web9-blocks** -- Writing or editing site content over MCP (Markdown body + Web9 custom blocks, tables). Read it first for any content write.
 
 ## Documentation
 
@@ -105,4 +106,3 @@ CSS variables worth knowing (see `tokens.css` for the full list):
 - Don't use stock blog copy ("Welcome to my blog", "Stay tuned for more"). Write a real tagline that says what this blog is about.
 - Don't seed the home page with three identical placeholder posts. If you only have one real post, show one real post.
 - Comments are enabled on posts and rendered on the post detail page. Configure moderation before publishing the site, or remove `commentsEnabled` and the comments UI together.
-- Writing or editing site content over MCP: read `.agents/skills/web9-blocks/SKILL.md` first.
