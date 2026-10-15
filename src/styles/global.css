@@ -1,12 +1,11 @@
 /* Tailwind entry, imported first by src/layouts/Base.astro (spec §11). */
-@import "tailwindcss";
+@import "tailwindcss" source(none);
 @import "@web9/blocks/styles.css";
 @plugin "@tailwindcss/typography";
 
-/* legacy/ (Docusaurus sources) and docs/ (specs, plans) are prose, not markup: don't mine them for classes. */
-@source not "../../legacy";
-@source not "../../docs";
-@source "../../packages/web9-blocks";
+/* Scan only the code that renders pages. Tests, docs, scripts, seed and content must never feed utilities into the bundle (spec §10). */
+@source "../../src";
+@source "../../packages/web9-blocks/astro";
 
 /*
  * Template color tokens, names unchanged, exposed as utilities (bg-surface, text-muted, border-border...).
@@ -27,9 +26,6 @@
 	--color-on-brand: white;
 	--color-brand-ring: color-mix(in srgb, var(--color-brand) 25%, transparent);
 }
-
-/* (If the build cannot resolve "@web9/blocks/styles.css", use @import "../../packages/web9-blocks/astro/blocks.css"
-   instead and drop the "./styles.css" export added in Step 4.) */
 
 /* prose colors follow the same tokens, so prose-invert is never needed. */
 @layer utilities {
