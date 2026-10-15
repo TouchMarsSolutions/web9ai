@@ -1,6 +1,6 @@
-// Flatten text inside non-core Portable Text blocks so full-text search can see it (spec §4).
-// Core "block" nodes are skipped: EmDash indexes them already.
-const SKIP_KEYS = new Set(["_type", "_key", "_version", "url", "logo", "tone", "lang", "marks", "markDefs"]);
+// Flatten text inside this plugin's own Portable Text block types so full-text search can see it (spec §4).
+// Core nodes (block, table, code, image, ...) are left to core search, which already indexes them.
+const SKIP_KEYS = new Set(["_type", "_key", "_version", "url", "logo", "tone", "lang", "marks", "markDefs", "code"]);
 
 function collect(value, out) {
 	if (typeof value === "string") {
@@ -12,11 +12,14 @@ function collect(value, out) {
 	}
 }
 
-/** @param {unknown} body Portable Text array, or a Markdown string (MCP accepts both) */
-export function extractBlockText(body) {
+/**
+ * @param {unknown} body Portable Text array, or a Markdown string (MCP accepts both)
+ * @param {Set<string>} [types] block `_type`s to walk; nodes of any other type are skipped
+ */
+export function extractBlockText(body, types) {
 	if (typeof body === "string") return body;
-	if (!Array.isArray(body)) return "";
+	if (!Array.isArray(body) || !types?.size) return "";
 	const out = [];
-	for (const node of body) if (node && node._type !== "block") collect(node, out);
+	for (const node of body) if (node && types.has(node._type)) collect(node, out);
 	return out.join("\n");
 }

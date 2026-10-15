@@ -101,6 +101,9 @@ export const BLOCKS = [
 	},
 ];
 
+/** `_type`s of this plugin's blocks; only their text is mirrored into docs.search_text. */
+const BLOCK_TYPES = new Set(BLOCKS.map((b) => b.type));
+
 export function web9Blocks() {
 	return {
 		id: ID,
@@ -120,10 +123,11 @@ export function createPlugin() {
 		capabilities: ["content:write"],
 		hooks: {
 			// Spec §4: core search does not index custom-block text; mirror it into docs.search_text.
+			// Only this plugin's block types are walked; core nodes are left to core search.
 			"content:beforeSave": async ({ content, collection }) => {
 				// Updates pass only the changed fields; when body didn't change, keep search_text as is.
 				if (collection !== "docs" || content.body === undefined) return content;
-				return { ...content, search_text: extractBlockText(content.body) };
+				return { ...content, search_text: extractBlockText(content.body, BLOCK_TYPES) };
 			},
 		},
 		admin: { portableTextBlocks: BLOCKS },
