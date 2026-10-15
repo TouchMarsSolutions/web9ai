@@ -45,6 +45,8 @@ Always include a unique `_key` in every ec:block JSON, unique within the doc: ke
 
 Full Markdown (GFM, `:::tip Title … :::` admonitions, ```` ```mermaid ```` fences) works only in callout `body`, details `body` and tab `body`. Callout `title`, details `summary` and tool `tagline` are inline Markdown only (bold, links, code); tool_grid `title`, tab `label` and tool `name` are plain text. Raw HTML is sanitized: inline `style` keeps only cosmetic properties (no `position`, no `url()`), and `class`/`id` are removed. Do not try to style content with classes.
 
+Never use `htmlBlock` (`{"_type":"htmlBlock",…}`): raw HTML there keeps `class`/`id` and bypasses the Web9 sanitizer. Use the blocks listed below.
+
 | Block | JSON |
 |---|---|
 | callout | `{"_type":"callout","_key":"…","tone":"tip","title":"…","body":"md"}`; `tone` is one of: note, tip, info, warning, danger, caution (unknown falls back to info) |

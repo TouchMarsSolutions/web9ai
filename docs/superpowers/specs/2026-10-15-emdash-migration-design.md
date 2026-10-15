@@ -34,7 +34,7 @@
 
 | Collection | 用途 | 字段 | 状态 |
 |---|---|---|---|
-| `docs` | AI / Dev 知识库 | `title`(string, searchable) · `description`(text) · `section`(select ai\|dev, 不可翻译) · `category`(string) · `sort_order`(integer, indexed, 不可翻译) · `body`(portableText, searchable)；supports drafts/revisions/preview/search/seo | **已定**，在 `seed/seed.json` 里定义（通过 MCP 建的 collection 没有全文搜索索引表） |
+| `docs` | AI / Dev 知识库 | `title`(string, searchable) · `description`(text) · `section`(select ai\|dev, 不可翻译) · `category`(string) · `sort_order`(integer, indexed, 不可翻译) · `body`(portableText, searchable) · `search_text`(text, searchable；由 `web9-blocks` 的 `content:beforeSave` hook 自动生成，不要手写)；supports drafts/revisions/preview/search/seo | **已定**，在 `seed/seed.json` 里定义（通过 MCP 建的 collection 没有全文搜索索引表） |
 | `posts` | Blog | 模板自带；Docusaurus tags 映射到 `tag` taxonomy | **已定** |
 | `pages` | 首页及落地页 | 加一个 `layout` 字段（`blocks` 类型），块类型包括 `hero`、`feature_grid`，以后可以继续加 | **已定**（owner 选择首页可在后台编辑） |
 
@@ -48,7 +48,7 @@
 |---|---|---|
 | 布局层 | 侧边栏、TOC、语言切换、全屏 | 在 `src/` 里写普通 Astro 组件 |
 | 内联块（`@web9/blocks`） | 已实现：`callout`、`tabs`、`details`、`mermaid`、`tool_grid`、`investment_warning` | 在 `index.mjs` 加定义，在 `astro/` 加渲染组件，在 skill 里补 cookbook 条目，然后部署，**之后**内容才能使用 |
-| core 自带 | `image`、`code`、`table`、`embed`（YouTube/Vimeo）、`htmlBlock`、`break`、`gallery`、`columns`、`button` | 直接使用，不重复实现 |
+| core 自带 | `image`、`code`、`table`、`embed`（YouTube/Vimeo）、`htmlBlock`、`break`、`gallery`、`columns`、`button` | 直接使用，不重复实现。**例外：`htmlBlock` 不要用**：core 的 sanitizer 保留 `class`/`id`/`data-*`，不是 class-safe（见 §10） |
 | 页面块（`pages.layout`） | `hero`、`feature_grid` | 通过 MCP 的 `schema_create_block_type` 定义块类型，在 `src/components/blocks/` 写渲染组件 |
 
 - 一句话：**用组件写内容**在后台或 MCP 里完成；**新增一种组件**需要改代码并部署。
@@ -63,8 +63,8 @@
   - 实测：正文段落 1 条、`table` 单元格 1 条；`callout` 正文、`tabs` 正文、`tool_grid` 工具名称各 0 条。
   - 原因：core 的 FTS 触发器用 `json_tree` 只提取 portableText 字段里 key 为 `text`、`alt`、`caption`、`code` 的字符串（读 `emdash` 的 `fts-manager` 源码确认）。
   - 按这条规则**推断**（未实测）：`callout` 的 `title`、`tabs` 的 `label`、`tool_grid` 的 `title` 和 `tagline`、`details` 的 `summary` 和 `body` 同样不会被索引；`mermaid` 的 `code` 会被 core 索引。
-  - 做法：在 `docs` 上加一个隐藏的 `search_text`（text, searchable）字段，由 `web9-blocks` 插件的 `content:beforeSave` hook 把块里的文字摊平写进去。
-  - **已实现并验证（计划 1 Task 9）**：`search_text` hook 已实现；重新保存并发布探针 doc 后，`callout` 正文、`tabs` 正文、`tool_grid` 工具名称、`table` 单元格四个探针词各搜到 1 条。字段定义没有 hidden 选项，所以在 label 里注明是自动生成。已有内容需要重新保存一次才会生成 `search_text`（计划 2 的迁移会自然覆盖）。
+  - 做法：在 `docs` 上加一个 `search_text`（text, searchable）字段，由 `web9-blocks` 插件的 `content:beforeSave` hook 把**本插件自己的块类型**里的文字摊平写进去（core 的块不处理，留给 core 的索引）。
+  - **已实现并验证（计划 1 Task 9）**：`search_text` hook 已实现；重新保存并发布探针 doc 后，`callout` 正文、`tabs` 正文、`tool_grid` 工具名称、`table` 单元格四个探针词各搜到 1 条；其中 `table` 单元格那条来自 core 自己的索引，不是 hook 写的。字段定义没有 hidden 选项，所以在 label 里注明是自动生成。已有内容需要重新保存一次才会生成 `search_text`（计划 2 的迁移会自然覆盖）。
 - **建议**：在布局里加上 core 自带的 `WebMcpSearch`，让访客浏览器里的 AI agent 可以通过 WebMCP 搜索本站。
 
 ## 5. i18n
@@ -104,8 +104,8 @@
 
   简化方案：用管理员自己的 PAT，只勾选同样的 scopes。权限上等价，因为 scope 本身就会挡住 schema 和 settings 类工具；缺点是修订记录里分不清是人改的还是 AI 改的。
 - AI 写内容的方式，写进 `web9-blocks` skill：
-  - 普通正文用 Markdown（EmDash 会自动转换；不支持表格）；
-  - 表格、复杂结构用 Portable Text JSON；
+  - 普通正文用 Markdown（EmDash 会自动转换；Markdown 的表格语法不会转换）；
+  - 表格和其他复杂结构也用单独一行 `ec:block` 写 JSON 块：`table` 已实测可以（见下方 Task 10），不需要把整个 body 改成 Portable Text JSON；
   - 在 Markdown 里插入自定义块，用单独一行 `<!--ec:block {json} -->`，已从源码确认解析器支持；
   - skill 里列出每种块的 JSON 示例；
   - **发布**：MCP 的 `content_create` 默认创建草稿（已实测）。要直接上线，传 `status: "published"`，或者之后再调用 `content_publish`。
@@ -126,7 +126,7 @@
   5. 在 Worker 上绑定 `www.web9.ai` custom domain（DNS 已经在 Cloudflare），apex 重定向到 www；
   6. GitHub Pages 保留作为回退：`gh-pages` 分支还在，可以随时把 DNS 切回去。确认稳定后再关闭。
 - **待验证（切换后）**：Workers 的预览版本是否和生产共用 D1/R2 binding。如果共用，就加一个 staging environment，使用独立的 D1 和 R2，再开启分支预览。
-- **待验证**：D1 和 R2 是由 wrangler 在部署时自动创建，还是需要先手动创建。
+- **待验证**：D1 和 R2 是由 wrangler 在部署时自动创建，还是需要先手动创建。另外，adapter 还会注入 KV `SESSION` binding 和 `IMAGES` binding（`wrangler.jsonc` 里没有），`d1_databases` 里也还没有 `database_id`：首次部署前都要配置好或做出决定。
 - 备份：首次部署前备份 `EMDASH_ENCRYPTION_KEY`；定时导出 D1，再定期通过 MCP `site_export` 做整站导出。
 - 缓存：v1 不配置。`Astro.cache` 的 warning 是预期内的。上线后先测性能，再按 EmDash 文档加 object cache。
 - 模板的 cron trigger（`* * * * *`，用于定时发布）每天约 1440 次调用，在免费额度之内。
@@ -139,7 +139,7 @@
 | Markdown 字段不是所见即所得 | 后台编辑体验一般 | 已接受；AI 和开发者是主要作者 |
 | EmDash 1.x 刚发布（1.1.0 在 10-01） | API 变动较快 | 锁定 minor 版本，升级前读 changelog |
 | 预览环境和生产共用数据库 | 分支代码可能改到生产数据 | §9 staging environment |
-| AI 直接发布的 Markdown / HTML | XSS、CSS 注入（全屏遮罩钓鱼、`url()` 追踪） | `sanitize-html` 白名单（已实现并测试）：<br>• 去掉事件属性和 `javascript:` 链接<br>• class 只允许白名单里的几个。用了 Tailwind 之后，这条白名单**不能放宽**：`<div class="fixed inset-0 z-50">` 只靠 class 就能做出全屏遮罩<br>• inline style 只允许排版类属性，不允许定位，也不允许 `url()`、`expression()` 和 CSS 转义<br>`htmlBlock` 使用 core 的 `sanitizeContent` |
+| AI 直接发布的 Markdown / HTML | XSS、CSS 注入（全屏遮罩钓鱼、`url()` 追踪） | `sanitize-html` 白名单（已实现并测试）：<br>• 去掉事件属性和 `javascript:` 链接<br>• class 只允许白名单里的几个。用了 Tailwind 之后，这条白名单**不能放宽**：`<div class="fixed inset-0 z-50">` 只靠 class 就能做出全屏遮罩<br>• inline style 只允许排版类属性，不允许定位，也不允许 `url()`、`expression()` 和 CSS 转义<br>• **`htmlBlock` 不在这条白名单里，不是 class-safe**：core 的 sanitizer 保留 `class`/`id`/`data-*`，`ec:block` 解析器接受任意 `_type`，所以任何能写内容的人都能发布带 class 的 `htmlBlock`<br>• 目前的不变式：CSS bundle 里没有内容能用的遮罩类 utility。靠 Tailwind 只扫描 `src/` 和 `packages/web9-blocks/astro`（`global.css` 里用 `source(none)`）来保证<br>• 长期的控制是计划 2 的关口，必须在创建 AI Editor 账号之前落地：web9 自己的 `htmlBlock` renderer 覆盖（去掉 class/id），加构建期的 CSS denylist |
 | 用请求的 Host 头拼绝对 URL（模板代码） | RSS / OG 链接被投毒 | `astro.config` 固定 `site: "https://www.web9.ai"`；`rss.xml.ts`、`posts/[slug]`、`pages/[slug]` 改为用 `site`（已修） |
 
 ## 11. 样式（2026-10-15 新增：owner 要求用 Tailwind）
@@ -147,11 +147,12 @@
 - **已定**：Tailwind CSS 4.3.3，通过 `@tailwindcss/vite` 接入；Markdown 和 Portable Text 正文用 `@tailwindcss/typography` 0.5.20 的 `prose`。入口文件是 `src/styles/global.css`，由 `Base.astro` 第一个 import。
 - **颜色沿用模板的 token**（`--color-bg`、`--color-text`、`--color-surface`、`--color-border`、`--color-brand` 等），名字不变，挪进 `@theme static`，生成 `bg-surface`、`text-muted`、`border-border` 这类 utility：
   - token 用的是 `light-dark()`，模板自带的明暗切换（cookie 控制 `color-scheme`）可以直接生效；
+  - 注意：生产构建（Lightning CSS minify）会把 `light-dark()` 降级成 `prefers-color-scheme` 变量（`--lightningcss-light/-dark`），所以构建产物里模板的手动切换**不会**让 token 颜色翻转，dev 里正常；修法是计划 2 的事项（见计划 1 的「计划 2 路线图」）；
   - **不用 `dark:` variant**，因为它只认系统偏好，和模板的手动切换会不一致；
   - 用 `static` 是因为模板里不经过 Tailwind 的 CSS 也在读这些变量。Tailwind 默认只输出用到的变量，不加 `static` 它们会消失。
   - `prose` 的配色同样通过 `--tw-prose-*` 变量指向这些 token，因此也不需要 `prose-invert`。
 - **内容 HTML 不带 utility class**（安全规则，见 §10）。`renderMarkdown()` 输出的 HTML 只能靠两种方式加样式：外层容器上的 `prose`，以及 `packages/web9-blocks/astro/blocks.css` 里针对 `.callout`、`pre.mermaid` 这类白名单 class 写的选择器。块组件自己的 markup（Tabs、ToolGrid 等）是代码，可以直接写 utility。
 - `blocks.css` 里的规则放在 **`@layer utilities`**，不放 `components`。已实测：`@tailwindcss/typography` 把 `.prose` 放在 utilities layer，而 layer 的优先级高于选择器权重，放在 components layer 的规则会被 `prose` 的段落边距覆盖。
 - `blocks.css` 里用了 `@apply`，所以必须由 `global.css` 用 `@import "@web9/blocks/styles.css"` 引入，块组件里不再各自 import CSS。
-- 扫描范围：`@source not` 排除 `legacy/` 和 `docs/`，否则 Docusaurus 源文件和 spec 里的单词会生成多余的 utility（已实测，排除后不再生成）。
+- 扫描范围：`@import "tailwindcss" source(none)`，再用 `@source` 只扫 `src/` 和 `packages/web9-blocks/astro`。测试文件、`docs/`、`legacy/`、`scripts/`、`seed/`、`public/` 和内容都不扫：否则它们里面的单词（包括 sanitizer 测试里的 `fixed inset-0 z-50 bg-black`）会生成真实的 utility（已实测，见 §10）。
 - 分期：计划 1 只把 docs 页面和 web9 块改成 Tailwind；`Base.astro`、blog 列表、文章页这些模板页面在计划 2 里整体重写。在此期间，Tailwind 的 preflight 可能让模板页面出现细微的样式变化，这在预期之内。
