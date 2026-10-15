@@ -20,7 +20,7 @@ export const BLOCKS = [
 				type: "select",
 				action_id: "tone",
 				label: "Tone",
-				options: ["note", "tip", "info", "warning", "danger"].map((v) => ({ value: v, label: v })),
+				options: ["note", "tip", "info", "warning", "danger", "caution"].map((v) => ({ value: v, label: v })),
 				initial_value: "info",
 			},
 			text("title", "Title"),
