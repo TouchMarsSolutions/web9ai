@@ -122,11 +122,20 @@ mindmap
   <Tabs
     defaultValue="llm"
     values={[
+      {label: '为啥学AI', value: 'why'},
       {label: '概念强化', value: 'rpa'},
-      {label: '幻相', value: 'hallucination'},
       {label: '大模型', value: 'llm'},
-      {label: 'LLM使用L心法', value: 'use-llm'},
+      {label: 'LLM使用心法', value: 'use-llm'},
+      {label: '幻相', value: 'hallucination'},    
+      {label: '神通', value: 'gift'},
     ]}>
+    <TabItem value="why">
+:::info 为啥学AI
+* 天时
+* 地利
+* 人和
+:::
+    </TabItem>
     <TabItem value="rpa">
 :::danger
 * `GenAI` = Generative AI 生成式AI
@@ -186,13 +195,17 @@ mindmap
 </div>
 :::
      
-    </TabItem>
+    </TabItem>    
     <TabItem value="use-llm">
 :::info
 哲学3问:
 * 我/你 是谁
 * 从哪来
 * 到哪去
+:::
+    </TabItem>
+    <TabItem value="gift">
+:::tip 天赋神通
 :::
     </TabItem>
   </Tabs>
