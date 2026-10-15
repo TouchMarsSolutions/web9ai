@@ -9,13 +9,14 @@ Read `AGENTS.md` for EmDash conventions; agent skills are in `.agents/skills/`.
 - Headless dev login + PAT: `curl -X POST 'http://localhost:4321/_emdash/api/setup/dev-bypass?token=1'`
 - Build: `npm run build`
 - Type check: `npm run typecheck`
+- Tests: `npm test` (vitest; `*.test.mjs` under scripts/, packages/, seed/)
 - Regenerate content types: `npx emdash types`
 
 ## Layout
 
 - `src/` — Astro routes, layouts, `DocsPage.astro`
 - `packages/web9-blocks/` — custom Portable Text blocks (editor definitions in `index.mjs`, renderers in `astro/`)
-- `scripts/convert-mdx.mjs` — Docusaurus MDX -> EmDash `docs` payload converter
+- `scripts/lib/mdx-to-pt.mjs` — Docusaurus MDX -> EmDash `docs` payload (`convertMdx`); `scripts/convert-mdx.mjs` is its CLI
 - `legacy/` — the old Docusaurus site; input for the migration only, removed after cutover
 - `public/img/` — static images, same `/img/...` URLs as the old site
 

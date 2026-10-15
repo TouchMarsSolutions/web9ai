@@ -41,3 +41,6 @@ data.db-*
 .env
 .env.*
 !.env.example
+
+# Local scratch (dev token, payloads)
+.local/
