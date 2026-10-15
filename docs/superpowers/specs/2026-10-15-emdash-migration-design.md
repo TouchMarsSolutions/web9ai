@@ -59,11 +59,10 @@
 
 ## 4. 搜索
 
-- **已验证（计划 1 Task 8）**：自定义块里的文字不进全文搜索索引，需要做 Task 9。实测方法：在 workerd dev 里建探针 doc `search-probe`，每个位置放一个独一无二的词，再对 `docs` 逐个搜索。
-  - 命中：正文段落 1 条；core `table` 的单元格 1 条。
-  - 未命中（0 条）：`callout` 正文、`tabs` 的 tab 正文、`tool_grid` 的工具名称。
-  - 原因：core 的 FTS 触发器只提取 portableText JSON 里 key 为 `text`、`alt`、`caption`、`code` 的字符串（读 `emdash` 的 `fts-manager` 源码确认）。自定义块的字段叫 `title`、`body`、`label`、`name`、`tagline`、`summary`，都不在其中。
-  - Task 9 要覆盖的块：`callout`（`title`、`body`）、`tabs`（`tabs[].label`、`tabs[].body`）、`tool_grid`（`title`、`tools[].name`、`tools[].tagline`）。`details`（`summary`、`body`）按同一规则推断也不会被索引，探针里没有单独实测。`mermaid` 的字段叫 `code`，按规则会被 core 索引，也没有实测。
+- **已验证（计划 1 Task 8）**：正文和 core `table` 单元格里的文字能搜到；`callout` 正文、`tabs` 的 tab 正文、`tool_grid` 的工具名称里的文字搜不到（workerd dev 实测）。所以需要做 Task 9。实测方法：建探针 doc `search-probe`，每个位置放一个独一无二的词，再对 `docs` 逐个搜索。
+  - 实测：正文段落 1 条、`table` 单元格 1 条；`callout` 正文、`tabs` 正文、`tool_grid` 工具名称各 0 条。
+  - 原因：core 的 FTS 触发器用 `json_tree` 只提取 portableText 字段里 key 为 `text`、`alt`、`caption`、`code` 的字符串（读 `emdash` 的 `fts-manager` 源码确认）。
+  - 按这条规则**推断**（未实测）：`callout` 的 `title`、`tabs` 的 `label`、`tool_grid` 的 `title` 和 `tagline`、`details` 的 `summary` 和 `body` 同样不会被索引；`mermaid` 的 `code` 会被 core 索引。
   - 做法：在 `docs` 上加一个隐藏的 `search_text`（text, searchable）字段，由 `web9-blocks` 插件的 `content:beforeSave` hook 把块里的文字摊平写进去。
 - **建议**：在布局里加上 core 自带的 `WebMcpSearch`，让访客浏览器里的 AI agent 可以通过 WebMCP 搜索本站。
 
