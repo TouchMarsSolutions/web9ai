@@ -1,0 +1,41 @@
+---
+import { sanitizeHref } from "emdash";
+import { renderInlineMarkdown } from "../lib/markdown.mjs";
+import "./blocks.css";
+
+interface Tool {
+	name?: string;
+	tagline?: string;
+	logo?: string;
+	url?: string;
+	featured?: boolean;
+}
+interface Props {
+	node: { _type: "tool_grid"; _key: string; title?: string; tools?: Tool[]; logo_size?: number };
+}
+const { node } = Astro.props;
+const tools = Array.isArray(node?.tools) ? node.tools : [];
+const size = node?.logo_size || 72;
+---
+
+{node?.title && <h4 class="w9-tools__title">{node.title}</h4>}
+<div class="w9-tools">
+	{
+		tools.map((tool) => (
+			<a
+				class:list={["w9-tool", { "w9-tool--featured": tool.featured }]}
+				href={tool.url ? sanitizeHref(tool.url) : undefined}
+				target="_blank"
+				rel="noopener noreferrer"
+			>
+				{tool.logo && (
+					<img src={sanitizeHref(tool.logo)} alt={tool.name ?? ""} width={size} height={size} loading="lazy" />
+				)}
+				<strong>{tool.name}</strong>
+				{tool.tagline && (
+					<span class="w9-tool__tagline" set:html={renderInlineMarkdown(tool.tagline.replace(/\n/g, "<br>"))} />
+				)}
+			</a>
+		))
+	}
+</div>

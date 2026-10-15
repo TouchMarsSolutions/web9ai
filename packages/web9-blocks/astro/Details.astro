@@ -1,0 +1,24 @@
+---
+import { renderInlineMarkdown, renderMarkdown } from "../lib/markdown.mjs";
+import "./blocks.css";
+
+interface Props {
+	node: { _type: "details"; _key: string; summary?: string; body?: string };
+}
+const { node } = Astro.props;
+---
+
+<details class="w9-details" data-w9-details>
+	<summary set:html={renderInlineMarkdown(node?.summary ?? "Details")} />
+	<div set:html={renderMarkdown(node?.body)} />
+</details>
+
+<script>
+	import "./mermaid-client.mjs";
+
+	for (const el of document.querySelectorAll<HTMLDetailsElement>("[data-w9-details]")) {
+		el.addEventListener("toggle", () => {
+			if (el.open) (window as any).w9RenderMermaid?.(el);
+		});
+	}
+</script>

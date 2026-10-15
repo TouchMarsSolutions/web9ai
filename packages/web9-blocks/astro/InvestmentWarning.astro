@@ -1,0 +1,14 @@
+---
+import "./blocks.css";
+
+interface Props {
+	node: { _type: "investment_warning"; _key: string; lang?: "zh" | "en" };
+}
+const { node } = Astro.props;
+const TEXT = {
+	zh: "请注意，本站一切内容并不构成投资指导或建议。所展示的资料仅用于信息传递，不应被理解为，也不应依赖于作为投资或财务决策的推荐。读者需对自己做出的任何投资决策承担全部责任，建议在需要的情况下寻求独立的财务或投资建议。",
+	en: "Please be duly advised that the content herein does not constitute investment guidance or advice. The material presented is purely for informational purposes and should not be construed as, nor relied upon as a recommendation for investment or financial decision-making. The reader bears sole responsibility for any investment decisions made, and it is recommended that they seek independent financial advice as required.",
+};
+---
+
+<aside class="callout callout--warning"><p>{TEXT[node?.lang ?? "zh"] ?? TEXT.zh}</p></aside>

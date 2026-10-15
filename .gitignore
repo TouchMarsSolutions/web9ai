@@ -31,3 +31,13 @@ yarn-error.log*
 
 # lock files
 yarn.lock
+# Astro / EmDash
+/dist
+.astro
+.emdash/migrations.json
+uploads
+data.db
+data.db-*
+.env
+.env.*
+!.env.example

@@ -1,0 +1,19 @@
+---
+import { renderInlineMarkdown, renderMarkdown } from "../lib/markdown.mjs";
+import "./blocks.css";
+
+interface Props {
+	node: { _type: "callout"; _key: string; tone?: string; title?: string; body?: string };
+}
+const { node } = Astro.props;
+const tone = node?.tone ?? "info";
+---
+
+<aside class={`callout callout--${tone}`}>
+	{node?.title && <p class="callout__title" set:html={renderInlineMarkdown(node.title)} />}
+	<div set:html={renderMarkdown(node?.body)} />
+</aside>
+
+<script>
+	import "./mermaid-client.mjs";
+</script>

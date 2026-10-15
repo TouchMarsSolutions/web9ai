@@ -1,0 +1,79 @@
+---
+import { renderMarkdown } from "../lib/markdown.mjs";
+import "./blocks.css";
+
+interface Tab {
+	label?: string;
+	body?: string;
+}
+interface Props {
+	node: { _type: "tabs"; _key: string; tabs?: Tab[]; default_tab?: number; fullscreen?: boolean };
+}
+const { node } = Astro.props;
+const tabs = Array.isArray(node?.tabs) ? node.tabs : [];
+const active = Math.min(Math.max((node?.default_tab ?? 1) - 1, 0), Math.max(tabs.length - 1, 0));
+const uid = `w9t-${node?._key ?? "x"}`;
+---
+
+<div class="w9-tabs" data-w9-tabs>
+	{node?.fullscreen && <button class="w9-tabs__fs" type="button" data-fs aria-label="Toggle fullscreen">⛶</button>}
+	<div class="w9-tabs__list" role="tablist">
+		{
+			tabs.map((tab, i) => (
+				<button
+					type="button"
+					role="tab"
+					id={`${uid}-tab-${i}`}
+					aria-controls={`${uid}-panel-${i}`}
+					aria-selected={i === active ? "true" : "false"}
+					tabindex={i === active ? 0 : -1}
+				>
+					{tab.label}
+				</button>
+			))
+		}
+	</div>
+	{
+		tabs.map((tab, i) => (
+			<div
+				role="tabpanel"
+				id={`${uid}-panel-${i}`}
+				aria-labelledby={`${uid}-tab-${i}`}
+				hidden={i !== active}
+				set:html={renderMarkdown(tab.body)}
+			/>
+		))
+	}
+</div>
+
+<script>
+	import "./mermaid-client.mjs";
+
+	for (const root of document.querySelectorAll<HTMLElement>("[data-w9-tabs]")) {
+		const tabs = [...root.querySelectorAll<HTMLButtonElement>(":scope > [role=tablist] > [role=tab]")];
+		const select = (tab: HTMLButtonElement) => {
+			for (const t of tabs) {
+				const on = t === tab;
+				t.setAttribute("aria-selected", String(on));
+				t.tabIndex = on ? 0 : -1;
+				const panel = document.getElementById(t.getAttribute("aria-controls")!);
+				if (panel) panel.hidden = !on;
+				if (on && panel) (window as any).w9RenderMermaid?.(panel);
+			}
+		};
+		tabs.forEach((tab, i) => {
+			tab.addEventListener("click", () => select(tab));
+			tab.addEventListener("keydown", (e) => {
+				const next = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+				if (!next) return;
+				const target = tabs[(i + next + tabs.length) % tabs.length];
+				target.focus();
+				select(target);
+			});
+		});
+		root.querySelector("[data-fs]")?.addEventListener("click", () => {
+			if (document.fullscreenElement) document.exitFullscreen();
+			else root.requestFullscreen();
+		});
+	}
+</script>

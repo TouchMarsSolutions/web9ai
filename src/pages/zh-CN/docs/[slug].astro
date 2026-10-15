@@ -1,0 +1,14 @@
+---
+import { decodeSlug, getEmDashEntry } from "emdash";
+import DocsPage from "../../../components/DocsPage.astro";
+
+const locale = "zh-CN";
+const slug = decodeSlug(Astro.params.slug);
+const { entry: doc, cacheHint, fallbackLocale } = slug
+	? await getEmDashEntry("docs", slug, { locale })
+	: { entry: undefined, cacheHint: undefined, fallbackLocale: undefined };
+if (!doc) return Astro.rewrite("/404");
+if (Astro.cache?.enabled && cacheHint) Astro.cache.set(cacheHint);
+---
+
+<DocsPage doc={doc} locale={locale} fallbackLocale={fallbackLocale} />

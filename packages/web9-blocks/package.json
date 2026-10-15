@@ -1,0 +1,16 @@
+{
+  "name": "@web9/blocks",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Web9.AI custom Portable Text blocks (editor definitions + Astro renderers)",
+  "exports": {
+    ".": "./index.mjs",
+    "./astro": "./astro/index.mjs",
+    "./markdown": "./lib/markdown.mjs"
+  },
+  "peerDependencies": {
+    "astro": "*",
+    "emdash": "*"
+  }
+}
