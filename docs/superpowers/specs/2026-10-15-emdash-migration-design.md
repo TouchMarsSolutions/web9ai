@@ -1,0 +1,125 @@
+# Web9.AI 迁移到 EmDash + Astro — 架构设计
+
+- 日期：2026-10-15
+- 分支：`emdash`（仓库 `TouchMarsSolutions/web9ai`）
+- 状态标记：**已定** = 已验证或已由 owner 拍板；**建议** = 默认方案，可改；**待验证** = 计划第一个里程碑里实测
+
+## 0. 目标与取舍
+
+目标（按优先级）：
+
+1. **自建 component**：内容里能用 Web9 自己定义的组件。
+2. **AI 通过 API / MCP 管理内容**：Claude 等 agent 能读写、发布内容。
+3. 后台可视化编辑；中英双语；托管在 Cloudflare。
+
+明确放弃：手写 MDX、内容的 git 历史 / PR review、纯静态托管、Starlight。
+
+## 1. 仓库与运行时
+
+- **已定**：沿用现有仓库，在 `emdash` 分支上开发。Docusaurus 源文件放在 `legacy/`，只作为迁移脚本的输入，切换后删除。`static/` 改为 `public/`，所有 `/img/...` URL 保持不变。
+- **已定**：目录结构
+  - `src/` — Astro 路由、布局、`components/DocsPage.astro`
+  - `packages/web9-blocks/` — native plugin（`file:` 依赖）：块定义 `index.mjs`、渲染组件 `astro/`、Markdown 渲染 `lib/markdown.mjs`
+  - `scripts/` — 迁移脚本
+  - `seed/` — 内容模型快照，用于复现环境（schema 变更后用 `site_export` 或手工同步）
+  - `.agents/skills/` — 模板自带的 skill，加上新增的 `web9-blocks` skill
+- **已定**：`output: "server"`，EmDash 1.3.x。
+  - 本地：Node + SQLite（`data.db`）+ dev-bypass。
+  - 生产：Cloudflare Workers + D1 + R2。不启用 sandboxed 插件，免费套餐即可。
+  - 本地切到生产的差异已经实测（用 `--platform cloudflare` 生成探针项目比对）：`src/` 完全相同，只多一个 `src/worker.ts`；adapter 从 `node()` 换成 `cloudflare()`，`sqlite()` 换成 `d1({binding:"DB"})`，`local()` 换成 `r2({binding:"MEDIA"})`，另加 `wrangler.jsonc` 和 `@emdash-cms/cloudflare`。
+- **待验证**：`sanitize-html`（依赖 postcss）和 `marked` 能否在 Workers runtime 里运行。如果不行，改用 Workers 兼容的 sanitizer。
+
+## 2. 内容模型
+
+| Collection | 用途 | 字段 | 状态 |
+|---|---|---|---|
+| `docs` | AI / Dev 知识库 | `title`(string, searchable) · `description`(text) · `section`(select ai\|dev, 不可翻译) · `category`(string) · `sort_order`(integer, indexed, 不可翻译) · `body`(portableText, searchable)；supports drafts/revisions/preview/search/seo | **已定**，已通过 MCP 创建 |
+| `posts` | Blog | 模板自带；Docusaurus tags 映射到 `tag` taxonomy | **已定** |
+| `pages` | 首页及落地页 | 加一个 `layout` 字段（`blocks` 类型），块类型包括 `hero`、`feature_grid`，以后可以继续加 | **已定**（owner 选择首页可在后台编辑） |
+
+- **已定的规则**：doc 正文一律用 `portableText` 字段加内联块，**不用 `blocks` 字段**。原因是 issue #3670 还没解决，`blocks` 字段不会进入全文搜索。`blocks` 只用于首页这类以排版为主的页面。
+- **建议**：URL 用 `/docs/{slug}` 和 `/zh-CN/docs/{slug}`。owner 已表示 URL 不重要。slug 全站唯一，转换脚本遇到重名时加前缀。
+- 首页路由 `/` 读取 `pages` 里 slug 为 `home` 的条目，用 `<Blocks>` 渲染。
+
+## 3. 组件契约（目标 1）
+
+| 层 | 内容 | 新增一种组件需要做什么 |
+|---|---|---|
+| 布局层 | 侧边栏、TOC、语言切换、全屏 | 在 `src/` 里写普通 Astro 组件 |
+| 内联块（`@web9/blocks`） | 已实现：`callout`、`tabs`、`details`、`mermaid`、`tool_grid`、`investment_warning` | 在 `index.mjs` 加定义，在 `astro/` 加渲染组件，在 skill 里补 cookbook 条目，然后部署，**之后**内容才能使用 |
+| core 自带 | `image`、`code`、`table`、`embed`（YouTube/Vimeo）、`htmlBlock`、`break`、`gallery`、`columns`、`button` | 直接使用，不重复实现 |
+| 页面块（`pages.layout`） | `hero`、`feature_grid` | 通过 MCP 的 `schema_create_block_type` 定义块类型，在 `src/components/blocks/` 写渲染组件 |
+
+- 一句话：**用组件写内容**在后台或 MCP 里完成；**新增一种组件**需要改代码并部署。
+- **已定的折中**：Block Kit 没有富文本类型的字段，repeater 里也不能放 `portableText`。所以 callout、tabs、details 的正文和工具介绍都存成 Markdown 字符串，由 `lib/markdown.mjs` 在服务端渲染（`marked`，支持 GFM、`:::tone title` 提示块、mermaid 代码块），再经过 `sanitize-html` 白名单过滤。代价是后台弹窗里看到的是 Markdown 原文，不是所见即所得。
+- Docusaurus 里的 logo 表格统一转成 `tool_grid`：一组 `{name, tagline, logo, url, featured}`。core 的表格单元格只能放文字、强调和链接，放不了图片；而且结构化的数据更方便 AI 维护（"往声控必备里加一个工具"）。纯文字的表格转成 core `table`。
+- **待验证**：repeater 里的多行 `text_input` 在后台弹窗中能正常编辑。
+
+## 4. 搜索
+
+- **待验证，结果会影响架构**：自定义块里的文字（tab 正文、callout 正文、工具名称）会不会进入全文搜索索引。`ai-tools-adhoc` 这一页的大部分文字都在块里。
+  - 如果不会：在 `docs` 上加一个隐藏的 `search_text`（text, searchable）字段，由 `web9-blocks` 插件的 `content:beforeSave` hook 把块里的文字摊平写进去。先测，确认需要再做。
+- **建议**：在布局里加上 core 自带的 `WebMcpSearch`，让访客浏览器里的 AI agent 可以通过 WebMCP 搜索本站。
+
+## 5. i18n
+
+- **已定**：Astro `i18n`，`en` 为默认语言、不加前缀；`zh-CN` 加前缀，fallback 到 `en`。EmDash 要求默认语言不加前缀，正好和现在的站点一致。
+- 每种语言单独存一行，用 `translationOf` 关联。没有翻译的页面显示 fallback 提示条。`DocsPage` 根据 `getTranslations()` 渲染语言切换。
+- 注意：现在默认语言下的源文件很多本身就是中文。迁移时保持原样：哪个目录的源文件就进哪个 locale，不按内容语言重新归类。
+
+## 6. 媒体
+
+- **已定**：`public/img/` 直接沿用旧站的图片，URL 不变，mermaid 图里引用的图片节点也照常可用。转换脚本里的 `SITE` 常量改成 `""`。POC 期间用的 `https://www.web9.ai/img/...` 只在开发阶段临时使用，**不能上线**。
+- 媒体库（R2）只用于以后在后台或通过 MCP 新上传的图片。
+
+## 7. 迁移流程
+
+- `scripts/convert-mdx.mjs`：已经能把最复杂的一页转出 51 个块。正式使用前要修两个问题：
+  1. `cssObjectToString` 会把 `rgba()` / `linear-gradient()` 里的逗号当成分隔符切断；
+  2. tab 的顺序要按 `values` 数组排，而不是 `<TabItem>` 在源码里的顺序。
+- Runner（`scripts/migrate.mjs`，走 MCP）：
+  1. 遍历 `legacy/docs/**` 和 `legacy/i18n/zh-CN/.../current/**`；
+  2. 先写 en 条目，再写 zh-CN 条目，用 `translationOf` 关联；
+  3. 发布。
+
+  幂等：按 slug 查找已有条目，存在就用 `_rev` 调 `content_update`，不存在就 `content_create`。
+- Blog：用同一个转换脚本写入 `posts`，`draft: true` 的文章保持草稿状态。
+- 首页：通过 MCP 创建 `hero`、`feature_grid` 块类型，再写入 `pages/home`，内容来自旧首页的 hero 和 3 个 features。
+
+## 8. AI 管理内容（目标 2）
+
+- MCP endpoint：`/_emdash/api/mcp`。仓库根目录的 `.mcp.json` 增加生产站点的连接，token 从环境变量读取，不写进仓库。
+- **已定（owner 选择 AI 可以直接发布）**：为 AI 单独建一个用户，角色用 **Editor**。Author 只能发布和修改自己的内容，而迁移进来的内容属于管理员账号。PAT 或 OAuth 授予的 scopes 为 `content:write`、`media:write`、`menus:manage`、`taxonomies:manage`，**不给** `schema:write` 和 `settings:manage`。schema 变更由开发者用 admin token 做。出错时用 `revision_list` / `revision_restore` 回滚。
+- AI 写内容的方式，写进 `web9-blocks` skill：
+  - 普通正文用 Markdown（EmDash 会自动转换；不支持表格）；
+  - 表格、复杂结构用 Portable Text JSON；
+  - 在 Markdown 里插入自定义块，用单独一行 `<!--ec:block {json} -->`，已从源码确认解析器支持；
+  - skill 里列出每种块的 JSON 示例。
+- **待验证**：让 agent 只通过 MCP，用上面的写法从头写一篇带表格、callout、tabs 的 doc 并发布。
+- 让 AI 读站点：`/llms.txt` 路由，从 `docs` 集合生成；可以再加 `/docs/{slug}.md`，用 `emdash/client` 的 `portableTextToMarkdown` 输出。
+
+## 9. 部署与运维
+
+- **已定**：用 Cloudflare **Workers Builds** 连接 GitHub 仓库，生产分支是 `main`。
+- 切换步骤：
+  1. 在 Cloudflare 后台创建 Worker，连接仓库（需要 owner 操作）；
+  2. 在 `emdash` 分支的预览构建（`*.workers.dev`）上验证；
+  3. 跑迁移；
+  4. 合并到 `main`；
+  5. 在 Worker 上绑定 `www.web9.ai` custom domain（DNS 已经在 Cloudflare），apex 重定向到 www；
+  6. GitHub Pages 保留作为回退，确认稳定后再关闭。
+- **待验证**：Workers 的预览版本是否和生产共用 D1/R2 binding。如果共用：切换前没有影响，因为 D1 里只有新站的数据；切换后，分支预览会读写生产数据库。届时需要加一个 staging environment，使用独立的 D1 和 R2。
+- **待验证**：D1 和 R2 是由 wrangler 在部署时自动创建，还是需要先手动创建。
+- 备份：首次部署前备份 `EMDASH_ENCRYPTION_KEY`；定时导出 D1，再定期通过 MCP `site_export` 做整站导出。
+- 缓存：v1 不配置。`Astro.cache` 的 warning 是预期内的。上线后先测性能，再按 EmDash 文档加 object cache。
+- 模板的 cron trigger（`* * * * *`，用于定时发布）每天约 1440 次调用，在免费额度之内。
+
+## 10. 风险
+
+| 风险 | 影响 | 应对 |
+|---|---|---|
+| 自定义块里的文字不进搜索 | 搜索结果残缺 | §4 的 `search_text` hook |
+| Markdown 字段不是所见即所得 | 后台编辑体验一般 | 已接受；AI 和开发者是主要作者 |
+| EmDash 1.x 刚发布（1.1.0 在 10-01） | API 变动较快 | 锁定 minor 版本，升级前读 changelog |
+| 预览环境和生产共用数据库 | 分支代码可能改到生产数据 | §9 staging environment |
+| Markdown 渲染出的 HTML | XSS | `sanitize-html` 白名单；`htmlBlock` 使用 core 的 `sanitizeContent` |
