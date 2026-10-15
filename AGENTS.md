@@ -105,3 +105,4 @@ CSS variables worth knowing (see `tokens.css` for the full list):
 - Don't use stock blog copy ("Welcome to my blog", "Stay tuned for more"). Write a real tagline that says what this blog is about.
 - Don't seed the home page with three identical placeholder posts. If you only have one real post, show one real post.
 - Comments are enabled on posts and rendered on the post detail page. Configure moderation before publishing the site, or remove `commentsEnabled` and the comments UI together.
+- Writing or editing site content over MCP: read `.agents/skills/web9-blocks/SKILL.md` first.
