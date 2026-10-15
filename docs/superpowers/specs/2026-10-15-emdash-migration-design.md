@@ -59,8 +59,12 @@
 
 ## 4. 搜索
 
-- **待验证，结果会影响架构**：自定义块里的文字（tab 正文、callout 正文、工具名称）会不会进入全文搜索索引。`ai-tools-adhoc` 这一页的大部分文字都在块里。
-  - 如果不会：在 `docs` 上加一个隐藏的 `search_text`（text, searchable）字段，由 `web9-blocks` 插件的 `content:beforeSave` hook 把块里的文字摊平写进去。先测，确认需要再做。
+- **已验证（计划 1 Task 8）**：自定义块里的文字不进全文搜索索引，需要做 Task 9。实测方法：在 workerd dev 里建探针 doc `search-probe`，每个位置放一个独一无二的词，再对 `docs` 逐个搜索。
+  - 命中：正文段落 1 条；core `table` 的单元格 1 条。
+  - 未命中（0 条）：`callout` 正文、`tabs` 的 tab 正文、`tool_grid` 的工具名称。
+  - 原因：core 的 FTS 触发器只提取 portableText JSON 里 key 为 `text`、`alt`、`caption`、`code` 的字符串（读 `emdash` 的 `fts-manager` 源码确认）。自定义块的字段叫 `title`、`body`、`label`、`name`、`tagline`、`summary`，都不在其中。
+  - Task 9 要覆盖的块：`callout`（`title`、`body`）、`tabs`（`tabs[].label`、`tabs[].body`）、`tool_grid`（`title`、`tools[].name`、`tools[].tagline`）。`details`（`summary`、`body`）按同一规则推断也不会被索引，探针里没有单独实测。`mermaid` 的字段叫 `code`，按规则会被 core 索引，也没有实测。
+  - 做法：在 `docs` 上加一个隐藏的 `search_text`（text, searchable）字段，由 `web9-blocks` 插件的 `content:beforeSave` hook 把块里的文字摊平写进去。
 - **建议**：在布局里加上 core 自带的 `WebMcpSearch`，让访客浏览器里的 AI agent 可以通过 WebMCP 搜索本站。
 
 ## 5. i18n
