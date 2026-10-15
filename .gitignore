@@ -44,3 +44,6 @@ data.db-*
 
 # Local scratch (dev token, payloads)
 .local/
+.wrangler
+.dev.vars
+.dev.vars.*

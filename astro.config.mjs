@@ -1,8 +1,8 @@
-import node from "@astrojs/node";
+import cloudflare from "@astrojs/cloudflare";
 import react from "@astrojs/react";
+import { d1, r2 } from "@emdash-cms/cloudflare";
 import { defineConfig, fontProviders } from "astro/config";
-import emdash, { local } from "emdash/astro";
-import { sqlite } from "emdash/db";
+import emdash from "emdash/astro";
 import { web9Blocks } from "@web9/blocks";
 
 export default defineConfig({
@@ -15,9 +15,8 @@ export default defineConfig({
 		fallback: { "zh-CN": "en" },
 		routing: { prefixDefaultLocale: false },
 	},
-	adapter: node({
-		mode: "standalone",
-	}),
+	// Dev and production both run in workerd; locally D1/R2 are simulated under .wrangler/state.
+	adapter: cloudflare(),
 	image: {
 		layout: "constrained",
 		responsiveStyles: true,
@@ -25,11 +24,8 @@ export default defineConfig({
 	integrations: [
 		react(),
 		emdash({
-			database: sqlite({ url: "file:./data.db" }),
-			storage: local({
-				directory: "./uploads",
-				baseUrl: "/_emdash/api/media/file",
-			}),
+			database: d1({ binding: "DB", session: "auto" }),
+			storage: r2({ binding: "MEDIA" }),
 			plugins: [web9Blocks()],
 		}),
 	],
