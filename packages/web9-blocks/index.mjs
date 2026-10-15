@@ -1,4 +1,5 @@
 import { definePlugin } from "emdash";
+import { extractBlockText } from "./lib/search-text.mjs";
 
 const ID = "web9-blocks";
 const VERSION = "0.1.0";
@@ -115,6 +116,16 @@ export function createPlugin() {
 	return definePlugin({
 		id: ID,
 		version: VERSION,
+		// content:beforeSave is skipped without this capability
+		capabilities: ["content:write"],
+		hooks: {
+			// Spec §4: core search does not index custom-block text; mirror it into docs.search_text.
+			"content:beforeSave": async ({ content, collection }) => {
+				// Updates pass only the changed fields; when body didn't change, keep search_text as is.
+				if (collection !== "docs" || content.body === undefined) return content;
+				return { ...content, search_text: extractBlockText(content.body) };
+			},
+		},
 		admin: { portableTextBlocks: BLOCKS },
 	});
 }

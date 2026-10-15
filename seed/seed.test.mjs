@@ -14,11 +14,12 @@ describe("seed/seed.json", () => {
 		const docs = seed.collections.find((c) => c.slug === "docs");
 		expect(docs.supports).toEqual(["drafts", "revisions", "preview", "search", "seo"]);
 		const f = Object.fromEntries(docs.fields.map((x) => [x.slug, x]));
-		expect(Object.keys(f)).toEqual(["title", "description", "section", "category", "sort_order", "body"]);
+		expect(Object.keys(f)).toEqual(["title", "description", "section", "category", "sort_order", "body", "search_text"]);
 		expect(f.title).toMatchObject({ type: "string", required: true, searchable: true });
 		expect(f.section).toMatchObject({ type: "select", required: true, translatable: false });
 		expect(f.section.validation.options).toEqual(["ai", "dev"]);
 		expect(f.sort_order).toMatchObject({ type: "integer", indexed: true, translatable: false });
 		expect(f.body).toMatchObject({ type: "portableText", searchable: true });
+		expect(f.search_text).toMatchObject({ type: "text", searchable: true });
 	});
 });

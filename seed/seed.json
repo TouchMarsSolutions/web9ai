@@ -135,6 +135,12 @@
 					"label": "Body",
 					"type": "portableText",
 					"searchable": true
+				},
+				{
+					"slug": "search_text",
+					"label": "Search text (auto-generated, do not edit)",
+					"type": "text",
+					"searchable": true
 				}
 			]
 		}

@@ -15,6 +15,7 @@ export interface Doc {
   category?: string;
   sort_order?: number;
   body?: PortableTextBlock[];
+  search_text?: string;
   createdAt: Date;
   updatedAt: Date;
   publishedAt: Date | null;
