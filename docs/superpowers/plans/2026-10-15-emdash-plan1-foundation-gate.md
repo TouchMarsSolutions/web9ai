@@ -549,10 +549,12 @@ require("fs").writeFileSync(f, JSON.stringify(s, null, "\t") + "\n");
 Run: `npx vitest run seed/seed.test.mjs`
 Expected: 2 个测试 PASS。如果 `validateSeed` 报 `indexed` 或 `urlPattern` 相关的错误，删掉报错的那个属性再跑一次，并在 commit message 里写明删了什么、为什么删。
 
-- [ ] **Step 5: 提交**
+- [ ] **Step 5: 同步 spec，提交**
+
+spec §2 表格里 `docs` 那一行，把最后一格的 `**已定**，已通过 MCP 创建` 改成 `**已定**，在 \`seed/seed.json\` 里定义（通过 MCP 建的 collection 没有全文搜索索引表）`。
 
 ```bash
-git add seed/
+git add seed/ docs/superpowers/specs/
 git commit -m "feat(seed): docs collection in the seed
 
 MCP-created collections get no full-text index table (_emdash_fts_docs was
@@ -1061,6 +1063,9 @@ npm i tailwindcss@4.3.3 @tailwindcss/vite@4.3.3 @tailwindcss/typography@0.5.20
 	--color-on-brand: white;
 	--color-brand-ring: color-mix(in srgb, var(--color-brand) 25%, transparent);
 }
+
+/* (If the build cannot resolve "@web9/blocks/styles.css", use @import "../../packages/web9-blocks/astro/blocks.css"
+   instead and drop the "./styles.css" export added in Step 4.) */
 
 /* prose colors follow the same tokens, so prose-invert is never needed. */
 @layer utilities {
@@ -1621,7 +1626,16 @@ Expected: `search_text` 里包含 4 个探针词，4 次搜索都 ≥1。
 
 如果 `status` 显示有待发布的草稿（`content_update` 在支持 drafts 的 collection 上可能只更新草稿），先发布再搜：`node scripts/mcp.mjs content_publish "{\"collection\":\"docs\",\"id\":\"search-probe\",\"_rev\":\"<content_get 返回的 _rev>\"}"`。把这个行为记进 Task 10 的 skill。
 
-如果发布之后还是搜不到，**停下来报告**。
+如果发布之后还是搜不到，先排除一个已知的坑：通过 MCP 在已有的库上加字段，可能不会扩展全文索引表（同一个原因下，MCP 建的 collection 连索引表都没有，见 Task 3）。`search_text` 已经写进 seed，所以正确的做法是用 seed 重建本地库：
+
+```bash
+npx astro dev stop; rm -rf .wrangler/state; npm run dev -- --port 4321; sleep 8
+curl -s -X POST 'http://localhost:4321/_emdash/api/setup/dev-bypass?token=1&content=0' > .local/bypass.json
+node -e "const d=require('./.local/bypass.json');require('fs').writeFileSync('.local/dev-token',d.data.token)"
+node scripts/mcp.mjs content_create @.local/search-probe.json > /dev/null
+```
+
+然后重跑上面的 4 次搜索，不需要再走 `content_update`，因为 create 也会触发 hook。由 seed 建的库仍然搜不到时，才**停下来报告**。重建之后，Task 5 的冒烟 doc 和 Task 7 的 hot-tools 页面都没了（Task 11 还要用 hot-tools），按 Task 5 Step 8 和 Task 7 Step 1 的命令重新推一次。
 
 - [ ] **Step 5: 记录，提交**
 
