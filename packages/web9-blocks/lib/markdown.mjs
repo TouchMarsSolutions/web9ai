@@ -48,15 +48,35 @@ marked.use({
 	},
 });
 
+// Content is published by AI agents without review, so inline CSS is limited to cosmetic
+// properties. No positioning (overlays), no url()/expression() (tracking, exfiltration).
+const SAFE_VALUE = /^(?!.*(?:url\s*\(|expression\s*\(|@import|\\))[\w\s#%.,()+\-/'"]+$/i;
+const STYLE_PROPS = [
+	"color", "background", "background-color", "text-align", "font-size", "font-weight", "font-style",
+	"padding", "margin", "border", "border-radius", "box-shadow", "line-height", "width", "max-width",
+];
 const SANITIZE = {
 	allowedTags: sanitizeHtml.defaults.allowedTags.concat(["img", "details", "summary", "del", "s", "h1", "h2"]),
 	allowedAttributes: {
-		"*": ["class", "style", "id"],
-		a: ["href", "target", "rel", "title"],
+		"*": ["style"],
+		a: ["href", "title", "target", "rel"],
 		img: ["src", "alt", "width", "height", "loading"],
+		pre: ["class"],
 		code: ["class"],
+		aside: ["class"],
+		p: ["class"],
 	},
+	allowedClasses: {
+		pre: ["mermaid"],
+		code: [/^language-[\w-]+$/],
+		aside: ["callout", /^callout--(note|tip|info|warning|danger|caution)$/],
+		p: ["callout__title"],
+	},
+	allowedStyles: { "*": Object.fromEntries(STYLE_PROPS.map((p) => [p, [SAFE_VALUE]])) },
 	allowedSchemes: ["http", "https", "mailto"],
+	transformTags: {
+		a: sanitizeHtml.simpleTransform("a", { rel: "noopener noreferrer", target: "_blank" }, true),
+	},
 };
 
 /** Dedent a block so indented MDX children don't turn into code blocks. */

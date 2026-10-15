@@ -9,6 +9,7 @@ import { PortableText } from "emdash/ui";
 import Base from "../../layouts/Base.astro";
 import { resolveBlogSiteIdentity } from "../../utils/site-identity";
 
+const SITE_ORIGIN = (Astro.site ?? new URL("https://www.web9.ai")).origin;
 const slug = decodeSlug(Astro.params.slug);
 
 if (!slug) {
@@ -25,7 +26,7 @@ if (Astro.cache?.enabled) Astro.cache.set(cacheHint);
 const { siteTitle } = resolveBlogSiteIdentity(await getSiteSettings());
 const seo = getSeoMeta(page, {
 	siteTitle,
-	siteUrl: Astro.url.origin,
+	siteUrl: SITE_ORIGIN,
 	path: Astro.url.pathname.replace(/\/$/, ""),
 });
 ---

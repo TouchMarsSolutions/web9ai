@@ -6,6 +6,8 @@ import { sqlite } from "emdash/db";
 import { web9Blocks } from "@web9/blocks";
 
 export default defineConfig({
+	// Canonical origin for absolute URLs (RSS, OG, SEO). Never derive it from the request Host header.
+	site: "https://www.web9.ai",
 	output: "server",
 	i18n: {
 		defaultLocale: "en",

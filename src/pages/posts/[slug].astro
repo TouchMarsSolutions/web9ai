@@ -14,6 +14,7 @@ import PostCard from "../../components/PostCard.astro";
 import { getReadingTime } from "../../utils/reading-time";
 import { resolveBlogSiteIdentity } from "../../utils/site-identity";
 
+const SITE_ORIGIN = (Astro.site ?? new URL("https://www.web9.ai")).origin;
 const slug = decodeSlug(Astro.params.slug);
 
 if (!slug) {
@@ -37,7 +38,7 @@ function getImageUrl(img: unknown): string | undefined {
 	if (typeof image.src === "string" && image.src) {
 		return image.src.startsWith("http")
 			? image.src
-			: `${Astro.url.origin}${image.src}`;
+			: `${SITE_ORIGIN}${image.src}`;
 	}
 	// Build from storageKey for local images
 	const meta = image.meta as Record<string, unknown> | undefined;
@@ -45,7 +46,7 @@ function getImageUrl(img: unknown): string | undefined {
 		(typeof meta?.storageKey === "string" ? meta.storageKey : undefined) ||
 		(typeof image.id === "string" ? image.id : undefined);
 	if (storageKey) {
-		return `${Astro.url.origin}/_emdash/api/media/file/${storageKey}`;
+		return `${SITE_ORIGIN}/_emdash/api/media/file/${storageKey}`;
 	}
 	return undefined;
 }
@@ -55,7 +56,7 @@ const { siteTitle } = resolveBlogSiteIdentity(await getSiteSettings());
 // Generate SEO meta from content
 const seo = getSeoMeta(post, {
 	siteTitle,
-	siteUrl: Astro.url.origin,
+	siteUrl: SITE_ORIGIN,
 	path: Astro.url.pathname.replace(/\/$/, ""),
 	defaultOgImage: featuredImageUrl,
 });

@@ -3,8 +3,9 @@ import { getEmDashCollection, getSiteSettings } from "emdash";
 
 import { resolveBlogSiteIdentity } from "../utils/site-identity";
 
-export const GET: APIRoute = async ({ site, url }) => {
-	const siteUrl = site ?? new URL(url.origin);
+export const GET: APIRoute = async ({ site }) => {
+	if (!site) throw new Error("astro.config `site` must be set for RSS");
+	const siteUrl = site;
 	const { siteTitle, siteTagline } = resolveBlogSiteIdentity(await getSiteSettings());
 
 	const { entries: posts } = await getEmDashCollection("posts", {

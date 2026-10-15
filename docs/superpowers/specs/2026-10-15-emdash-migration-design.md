@@ -27,6 +27,7 @@
   - 本地：Node + SQLite（`data.db`）+ dev-bypass。
   - 生产：Cloudflare Workers + D1 + R2。不启用 sandboxed 插件，免费套餐即可。
   - 本地切到生产的差异已经实测（用 `--platform cloudflare` 生成探针项目比对）：`src/` 完全相同，只多一个 `src/worker.ts`；adapter 从 `node()` 换成 `cloudflare()`，`sqlite()` 换成 `d1({binding:"DB"})`，`local()` 换成 `r2({binding:"MEDIA"})`，另加 `wrangler.jsonc` 和 `@emdash-cms/cloudflare`。
+- 当前状态：`emdash` 分支在 Node 环境下 `npm run build` 和 `npm run typecheck` 都通过（0 errors），说明 `componentsEntry` 的解析和 `marked` / `sanitize-html` 的打包都没问题。
 - **待验证**：`sanitize-html`（依赖 postcss）和 `marked` 能否在 Workers runtime 里运行。如果不行，改用 Workers 兼容的 sanitizer。
 
 ## 2. 内容模型
@@ -90,25 +91,36 @@
 
 - MCP endpoint：`/_emdash/api/mcp`。仓库根目录的 `.mcp.json` 增加生产站点的连接，token 从环境变量读取，不写进仓库。
 - **已定（owner 选择 AI 可以直接发布）**：为 AI 单独建一个用户，角色用 **Editor**。Author 只能发布和修改自己的内容，而迁移进来的内容属于管理员账号。PAT 或 OAuth 授予的 scopes 为 `content:write`、`media:write`、`menus:manage`、`taxonomies:manage`，**不给** `schema:write` 和 `settings:manage`。schema 变更由开发者用 admin token 做。出错时用 `revision_list` / `revision_restore` 回滚。
+- **前置条件：创建 AI 账号（owner 手动操作一次）**。CLI 和 MCP 都没有创建用户的命令。步骤：
+  1. 管理员在后台点 **Invite User**，填一个邮箱（如 `ai-agent@web9.ai`），角色选 Editor；
+  2. 没有配置邮件服务时，后台会生成邀请链接，复制出来；
+  3. 打开链接，用 passkey 注册账号；
+  4. 以这个账号登录，创建 `ec_pat_` token，勾选上面列出的 scopes。
+
+  简化方案：用管理员自己的 PAT，只勾选同样的 scopes。权限上等价，因为 scope 本身就会挡住 schema 和 settings 类工具；缺点是修订记录里分不清是人改的还是 AI 改的。
 - AI 写内容的方式，写进 `web9-blocks` skill：
   - 普通正文用 Markdown（EmDash 会自动转换；不支持表格）；
   - 表格、复杂结构用 Portable Text JSON；
   - 在 Markdown 里插入自定义块，用单独一行 `<!--ec:block {json} -->`，已从源码确认解析器支持；
-  - skill 里列出每种块的 JSON 示例。
+  - skill 里列出每种块的 JSON 示例；
+  - **发布**：MCP 的 `content_create` 默认创建草稿（已实测）。要直接上线，传 `status: "published"`，或者之后再调用 `content_publish`。
 - **待验证**：让 agent 只通过 MCP，用上面的写法从头写一篇带表格、callout、tabs 的 doc 并发布。
 - 让 AI 读站点：`/llms.txt` 路由，从 `docs` 集合生成；可以再加 `/docs/{slug}.md`，用 `emdash/client` 的 `portableTextToMarkdown` 输出。
 
 ## 9. 部署与运维
 
-- **已定**：用 Cloudflare **Workers Builds** 连接 GitHub 仓库，生产分支是 `main`。
+- **已定**：用 Cloudflare **Workers Builds** 连接 GitHub 仓库。
+- **迁移期间生产分支设为 `emdash`**，切换时再改成 `main`。这样做有两个好处：
+  - 切换前推到 `main` 的提交仍然是 Docusaurus，不会触发一次必然失败的 Worker 构建；
+  - "预览环境是否和生产共用数据库"这个问题，可以等到真正有第二个环境需要保护时再处理。
 - 切换步骤：
-  1. 在 Cloudflare 后台创建 Worker，连接仓库（需要 owner 操作）；
-  2. 在 `emdash` 分支的预览构建（`*.workers.dev`）上验证；
-  3. 跑迁移；
-  4. 合并到 `main`；
+  1. 在 Cloudflare 后台创建 Worker，连接仓库，生产分支选 `emdash`（需要 owner 操作）；
+  2. 在 `*.workers.dev` 上验证；
+  3. 对生产环境跑迁移；
+  4. 把 `emdash` 合并到 `main`，再把 Worker 的生产分支改成 `main`；
   5. 在 Worker 上绑定 `www.web9.ai` custom domain（DNS 已经在 Cloudflare），apex 重定向到 www；
-  6. GitHub Pages 保留作为回退，确认稳定后再关闭。
-- **待验证**：Workers 的预览版本是否和生产共用 D1/R2 binding。如果共用：切换前没有影响，因为 D1 里只有新站的数据；切换后，分支预览会读写生产数据库。届时需要加一个 staging environment，使用独立的 D1 和 R2。
+  6. GitHub Pages 保留作为回退：`gh-pages` 分支还在，可以随时把 DNS 切回去。确认稳定后再关闭。
+- **待验证（切换后）**：Workers 的预览版本是否和生产共用 D1/R2 binding。如果共用，就加一个 staging environment，使用独立的 D1 和 R2，再开启分支预览。
 - **待验证**：D1 和 R2 是由 wrangler 在部署时自动创建，还是需要先手动创建。
 - 备份：首次部署前备份 `EMDASH_ENCRYPTION_KEY`；定时导出 D1，再定期通过 MCP `site_export` 做整站导出。
 - 缓存：v1 不配置。`Astro.cache` 的 warning 是预期内的。上线后先测性能，再按 EmDash 文档加 object cache。
@@ -122,4 +134,5 @@
 | Markdown 字段不是所见即所得 | 后台编辑体验一般 | 已接受；AI 和开发者是主要作者 |
 | EmDash 1.x 刚发布（1.1.0 在 10-01） | API 变动较快 | 锁定 minor 版本，升级前读 changelog |
 | 预览环境和生产共用数据库 | 分支代码可能改到生产数据 | §9 staging environment |
-| Markdown 渲染出的 HTML | XSS | `sanitize-html` 白名单；`htmlBlock` 使用 core 的 `sanitizeContent` |
+| AI 直接发布的 Markdown / HTML | XSS、CSS 注入（全屏遮罩钓鱼、`url()` 追踪） | `sanitize-html` 白名单（已实现并测试）：<br>• 去掉事件属性和 `javascript:` 链接<br>• class 只允许白名单里的几个<br>• inline style 只允许排版类属性，不允许定位，也不允许 `url()`、`expression()` 和 CSS 转义<br>`htmlBlock` 使用 core 的 `sanitizeContent` |
+| 用请求的 Host 头拼绝对 URL（模板代码） | RSS / OG 链接被投毒 | `astro.config` 固定 `site: "https://www.web9.ai"`；`rss.xml.ts`、`posts/[slug]`、`pages/[slug]` 改为用 `site`（已修） |
