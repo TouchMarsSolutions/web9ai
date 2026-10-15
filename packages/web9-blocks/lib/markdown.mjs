@@ -5,6 +5,9 @@ import sanitizeHtml from "sanitize-html";
 
 const TONES = new Set(["note", "tip", "info", "warning", "danger", "caution"]);
 
+/** Block data reaches class attributes; only whitelisted tones may (Tailwind makes any class a style). */
+export const safeTone = (tone) => (TONES.has(tone) ? tone : "info");
+
 const escapeHtml = (s) =>
 	s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 

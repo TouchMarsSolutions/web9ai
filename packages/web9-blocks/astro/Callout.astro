@@ -1,12 +1,12 @@
 ---
-import { renderInlineMarkdown, renderMarkdown } from "../lib/markdown.mjs";
+import { renderInlineMarkdown, renderMarkdown, safeTone } from "../lib/markdown.mjs";
 import "./blocks.css";
 
 interface Props {
 	node: { _type: "callout"; _key: string; tone?: string; title?: string; body?: string };
 }
 const { node } = Astro.props;
-const tone = node?.tone ?? "info";
+const tone = safeTone(node?.tone);
 ---
 
 <aside class={`callout callout--${tone}`}>
