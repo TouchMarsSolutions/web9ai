@@ -34,7 +34,7 @@
 
 | Collection | 用途 | 字段 | 状态 |
 |---|---|---|---|
-| `docs` | AI / Dev 知识库 | `title`(string, searchable) · `description`(text) · `section`(select ai\|dev, 不可翻译) · `category`(string) · `sort_order`(integer, indexed, 不可翻译) · `body`(portableText, searchable)；supports drafts/revisions/preview/search/seo | **已定**，已通过 MCP 创建 |
+| `docs` | AI / Dev 知识库 | `title`(string, searchable) · `description`(text) · `section`(select ai\|dev, 不可翻译) · `category`(string) · `sort_order`(integer, indexed, 不可翻译) · `body`(portableText, searchable)；supports drafts/revisions/preview/search/seo | **已定**，在 `seed/seed.json` 里定义（通过 MCP 建的 collection 没有全文搜索索引表） |
 | `posts` | Blog | 模板自带；Docusaurus tags 映射到 `tag` taxonomy | **已定** |
 | `pages` | 首页及落地页 | 加一个 `layout` 字段（`blocks` 类型），块类型包括 `hero`、`feature_grid`，以后可以继续加 | **已定**（owner 选择首页可在后台编辑） |
 
