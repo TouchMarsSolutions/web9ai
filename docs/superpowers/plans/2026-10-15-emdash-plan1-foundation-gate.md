@@ -1890,7 +1890,7 @@ Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
 
 ### 计划 1 遗留，计划 2 必须处理
 
-- **安全关口（建 AI Editor 账号之前）**：web9 自己的 `htmlBlock` renderer（去掉 class/id，`isolated` 交给 core）；构建后扫描 `dist/client/_astro/*.css` 的 denylist（`.fixed{`、`.inset-`、`.z-[0-9]`、`-screen{`、`-dvh{`）；收紧 `SAFE_VALUE`（函数名 allowlist，拒绝 `//`，覆盖 `image-set()`、超大 `box-shadow`/负 `margin`）。
+- **安全关口（建 AI Editor 账号之前）**：web9 自己的 `htmlBlock` renderer（去掉 class/id，`isolated` 交给 core）；构建后扫描公开页面加载的 CSS 的 denylist（`.fixed{`、`.inset-`、`.z-[0-9]`、`-screen{`、`-dvh{`）。不能直接扫 `dist/client/_astro/*.css`：emdash 后台的 `styles.*.css` 也在那里，自带这些类，只给 `/_emdash/admin` 用，第一次跑就会失败；计划 2 的模板改造如果在 `src/` 里合法用到 `fixed`/`sticky`，denylist 要配一个显式 allowlist；renderer 覆盖也要管住迁移产生的 `htmlBlock`：`convertMdx` 会把 legacy MDX 里的原始 HTML 转成 `htmlBlock`，带着原来的 class；收紧 `SAFE_VALUE`（函数名 allowlist，拒绝 `//`，覆盖 `image-set()`、超大 `box-shadow`/负 `margin`）。
 - **明暗切换**：生产构建把 `light-dark()` 降级，手动切换失效。两种修法：调高 `build.cssTarget`/lightningcss targets（Chrome 123、Safari 17.5、Firefox 120，放弃旧浏览器，由 owner 决定），或改成 `:root.light`/`.dark` 显式 token。验收：构建产物里 `--lightningcss-light` 为 0。
 - **部署绑定**：D1 `database_id`、R2、adapter 注入的 KV `SESSION` 和 `IMAGES`；构建产物的 worker 体积对照免费额度；用 workerd 跑一次构建产物。
 - **已有库加字段的顺序**：如果生产库不是用 seed 从空库建的，先 `schema_create_field search_text`，再上线带 hook 的插件（hook 的 `errorPolicy` 是 abort）。
