@@ -24,11 +24,11 @@
   - `seed/` — 内容模型快照，用于复现环境（schema 变更后用 `site_export` 或手工同步）
   - `.agents/skills/` — 模板自带的 skill，加上新增的 `web9-blocks` skill
 - **已定**：`output: "server"`，EmDash 1.3.x。
-  - 本地：Node + SQLite（`data.db`）+ dev-bypass。
   - 生产：Cloudflare Workers + D1 + R2。不启用 sandboxed 插件，免费套餐即可。
-  - 本地切到生产的差异已经实测（用 `--platform cloudflare` 生成探针项目比对）：`src/` 完全相同，只多一个 `src/worker.ts`；adapter 从 `node()` 换成 `cloudflare()`，`sqlite()` 换成 `d1({binding:"DB"})`，`local()` 换成 `r2({binding:"MEDIA"})`，另加 `wrangler.jsonc` 和 `@emdash-cms/cloudflare`。
+  - **本地和生产用同一份配置（2026-10-15 修订）**：`@astrojs/cloudflare` 14.x 的 `astro dev` 直接跑在 workerd 里，不是 Node（adapter changelog #14306）。D1 和 R2 用 wrangler 的本地模拟，数据在 `.wrangler/state`；dev-bypass 照常可用。这样一来，Workers 兼容性问题在每次本地开发时就会暴露，不用等到部署。原先的 Node + SQLite（`data.db`）只在 POC 阶段使用。
+  - 配置直接采用探针项目的做法（用 `--platform cloudflare` 生成后比对过）：`src/` 不变，多一个 `src/worker.ts`；adapter 用 `cloudflare()`，数据库用 `d1({binding:"DB", session:"auto"})`，存储用 `r2({binding:"MEDIA"})`，另加 `wrangler.jsonc` 和 `@emdash-cms/cloudflare`。
 - 当前状态：`emdash` 分支在 Node 环境下 `npm run build` 和 `npm run typecheck` 都通过（0 errors），说明 `componentsEntry` 的解析和 `marked` / `sanitize-html` 的打包都没问题。
-- **待验证**：`sanitize-html`（依赖 postcss）和 `marked` 能否在 Workers runtime 里运行。如果不行，改用 Workers 兼容的 sanitizer。
+- **待验证**：`sanitize-html`（依赖 postcss）和 `marked` 能否在 Workers runtime 里运行。切到 workerd dev 之后，第一次渲染就能回答这个问题。如果不行，改用 Workers 兼容的 sanitizer。
 
 ## 2. 内容模型
 
@@ -134,5 +134,19 @@
 | Markdown 字段不是所见即所得 | 后台编辑体验一般 | 已接受；AI 和开发者是主要作者 |
 | EmDash 1.x 刚发布（1.1.0 在 10-01） | API 变动较快 | 锁定 minor 版本，升级前读 changelog |
 | 预览环境和生产共用数据库 | 分支代码可能改到生产数据 | §9 staging environment |
-| AI 直接发布的 Markdown / HTML | XSS、CSS 注入（全屏遮罩钓鱼、`url()` 追踪） | `sanitize-html` 白名单（已实现并测试）：<br>• 去掉事件属性和 `javascript:` 链接<br>• class 只允许白名单里的几个<br>• inline style 只允许排版类属性，不允许定位，也不允许 `url()`、`expression()` 和 CSS 转义<br>`htmlBlock` 使用 core 的 `sanitizeContent` |
+| AI 直接发布的 Markdown / HTML | XSS、CSS 注入（全屏遮罩钓鱼、`url()` 追踪） | `sanitize-html` 白名单（已实现并测试）：<br>• 去掉事件属性和 `javascript:` 链接<br>• class 只允许白名单里的几个。用了 Tailwind 之后，这条白名单**不能放宽**：`<div class="fixed inset-0 z-50">` 只靠 class 就能做出全屏遮罩<br>• inline style 只允许排版类属性，不允许定位，也不允许 `url()`、`expression()` 和 CSS 转义<br>`htmlBlock` 使用 core 的 `sanitizeContent` |
 | 用请求的 Host 头拼绝对 URL（模板代码） | RSS / OG 链接被投毒 | `astro.config` 固定 `site: "https://www.web9.ai"`；`rss.xml.ts`、`posts/[slug]`、`pages/[slug]` 改为用 `site`（已修） |
+
+## 11. 样式（2026-10-15 新增：owner 要求用 Tailwind）
+
+- **已定**：Tailwind CSS 4.3.3，通过 `@tailwindcss/vite` 接入；Markdown 和 Portable Text 正文用 `@tailwindcss/typography` 0.5.20 的 `prose`。入口文件是 `src/styles/global.css`，由 `Base.astro` 第一个 import。
+- **颜色沿用模板的 token**（`--color-bg`、`--color-text`、`--color-surface`、`--color-border`、`--color-brand` 等），名字不变，挪进 `@theme static`，生成 `bg-surface`、`text-muted`、`border-border` 这类 utility：
+  - token 用的是 `light-dark()`，模板自带的明暗切换（cookie 控制 `color-scheme`）可以直接生效；
+  - **不用 `dark:` variant**，因为它只认系统偏好，和模板的手动切换会不一致；
+  - 用 `static` 是因为模板里不经过 Tailwind 的 CSS 也在读这些变量。Tailwind 默认只输出用到的变量，不加 `static` 它们会消失。
+  - `prose` 的配色同样通过 `--tw-prose-*` 变量指向这些 token，因此也不需要 `prose-invert`。
+- **内容 HTML 不带 utility class**（安全规则，见 §10）。`renderMarkdown()` 输出的 HTML 只能靠两种方式加样式：外层容器上的 `prose`，以及 `packages/web9-blocks/astro/blocks.css` 里针对 `.callout`、`pre.mermaid` 这类白名单 class 写的选择器。块组件自己的 markup（Tabs、ToolGrid 等）是代码，可以直接写 utility。
+- `blocks.css` 里的规则放在 **`@layer utilities`**，不放 `components`。已实测：`@tailwindcss/typography` 把 `.prose` 放在 utilities layer，而 layer 的优先级高于选择器权重，放在 components layer 的规则会被 `prose` 的段落边距覆盖。
+- `blocks.css` 里用了 `@apply`，所以必须由 `global.css` 用 `@import "@web9/blocks/styles.css"` 引入，块组件里不再各自 import CSS。
+- 扫描范围：`@source not` 排除 `legacy/` 和 `docs/`，否则 Docusaurus 源文件和 spec 里的单词会生成多余的 utility（已实测，排除后不再生成）。
+- 分期：计划 1 只把 docs 页面和 web9 块改成 Tailwind；`Base.astro`、blog 列表、文章页这些模板页面在计划 2 里整体重写。在此期间，Tailwind 的 preflight 可能让模板页面出现细微的样式变化，这在预期之内。
