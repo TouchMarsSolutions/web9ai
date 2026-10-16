@@ -9,8 +9,28 @@
 //   <InvestmentWarning />           -> investment_warning
 //   tables with logos/images        -> tool_grid; text-only tables -> core `table`
 //   everything else (prose)         -> standard Portable Text via the marked lexer
+//
+// Output is deterministic: block keys come from the slug and the traversal order (fnv1a), so the
+// same source always gives the same JSON and the migration runner can skip unchanged entries.
 
 import { marked } from "marked";
+import { parseFrontmatter } from "./frontmatter.mjs";
+
+/** 32-bit FNV-1a; no dependencies, same result in Node and workerd. */
+export function fnv1a(str) {
+	let h = 0x811c9dc5;
+	for (let i = 0; i < str.length; i++) {
+		h ^= str.charCodeAt(i);
+		h = Math.imul(h, 0x01000193) >>> 0;
+	}
+	return h >>> 0;
+}
+
+/** Entry slug: frontmatter `slug` (leading "/" dropped, other "/" -> "-"), else the file name without its number prefix. */
+export function deriveSlug(frontmatter, path) {
+	const raw = frontmatter.slug ?? path.split("/").pop().replace(/\.mdx?$/, "").replace(/^\d+[-_]/, "");
+	return String(raw).replace(/^\//, "").replace(/\//g, "-");
+}
 
 /** Split on `sep` at the top level only: separators inside (...) or quotes don't count. */
 export function splitTopLevel(text, sep = ",") {
@@ -70,20 +90,37 @@ export function parseTabs(jsx) {
 	return { tabs, defaultIndex: Math.max(0, tabs.findIndex((t) => t.value === defaultValue)) };
 }
 
+/** Markdown links and href attributes in `text`, passed through `rewriteHref`. */
+function rewriteLinks(text, rewriteHref) {
+	return text
+		.replace(/(\]\()([^)\s]+)((?:\s+"[^"]*")?\))/g, (_, open, href, close) => `${open}${rewriteHref(href)}${close}`)
+		.replace(/(\bhref=")([^"]+)(")/g, (_, open, href, close) => `${open}${rewriteHref(href)}${close}`);
+}
+
 /**
- * Convert one Docusaurus MDX doc into an EmDash `docs` payload.
- * `site` prefixes /img/... URLs; the default "" keeps them site-relative (served from public/img).
+ * Parse one Docusaurus MDX file into Portable Text blocks. Shared by docs (convertMdx) and posts.
+ * - `slug` overrides the derived slug (the legacy inventory de-duplicates slugs).
+ * - `lang` is the InvestmentWarning language when the file does not import one (the import decides:
+ *   `InvestmentWarning.cn.mdx` -> "zh", `InvestmentWarning.mdx` -> "en").
+ * - `site` prefixes /img/... URLs; the default "" keeps them site-relative (served from public/img).
+ * - `rewriteHref(href)` maps legacy links to new URLs; it must return unknown hrefs unchanged.
+ * Returns { frontmatter, slug, title, blocks }. Title = frontmatter title, else the first H1;
+ * the first H1 is always removed from the body (Docusaurus pages repeat the title as an H1).
  */
-export function convertMdx(src, { path, section = "ai", category = "general", order = 0, lang = "zh", site = "" }) {
+export function mdxToBlocks(src, { path, slug: slugOption, lang = "en", site = "", rewriteHref = (href) => href }) {
+	const { data: frontmatter, body: afterFrontmatter } = parseFrontmatter(src);
+	const slug = slugOption ?? deriveSlug(frontmatter, path);
+	const warningImport = /^import\s+InvestmentWarning\s+from\s+['"]([^'"]+)['"]/m.exec(src)?.[1];
+	const warningLang = warningImport ? (/\.cn\.mdx$/.test(warningImport) ? "zh" : "en") : lang;
+
 	let keySeq = 0;
-	const key = () => `k${(keySeq++).toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+	const key = () => {
+		const n = keySeq++; // key() call order is the converter's deterministic traversal order
+		return `k${n.toString(36)}${fnv1a(`${slug}:${n}`).toString(36).padStart(7, "0").slice(-4)}`;
+	};
 
 	// ---------------------------------------------------------------- MDX -> Markdown helpers
-	const fm = /^---\n([\s\S]*?)\n---\n/.exec(src);
-	const frontmatter = Object.fromEntries(
-		(fm?.[1] ?? "").split("\n").map((l) => l.match(/^(\w+):\s*(.*)$/)).filter(Boolean).map((m) => [m[1], m[2]]),
-	);
-	let body = fm ? src.slice(fm[0].length) : src;
+	let body = afterFrontmatter;
 
 	const images = {};
 	body = body.replace(/^import\s+(\w+)\s+from\s+['"]([^'"]+)['"];?\s*$/gm, (_, name, path) => {
@@ -95,7 +132,7 @@ export function convertMdx(src, { path, section = "ai", category = "general", or
 
 	/** Rewrite MDX/JSX inline constructs into plain Markdown/HTML. */
 	function mdxToMarkdown(text) {
-		return (
+		const markdown =
 			text
 				// <Image img={X} .../>  and  <XSvg width={w} height={h} />
 				.replace(/<Image\s+img=\{(\w+)\}[^>]*\/>/g, (_, n) => `![${n}](${img(n)})`)
@@ -107,8 +144,8 @@ export function convertMdx(src, { path, section = "ai", category = "general", or
 				.replace(/style=\{\{([\s\S]*?)\}\}/g, (_, obj) => `style="${cssObjectToString(obj)}"`)
 				.replace(/img:\s*'(\/img\/[^']+)'/g, (_, p) => `img: '${site}${p}'`) // mermaid image nodes
 				.replace(/\s*\{#[\w-]+\}\s*$/gm, "") // Docusaurus heading ids
-				.replace(/^\s*<!--.*?-->\s*$/gm, "")
-		);
+				.replace(/^\s*<!--.*?-->\s*$/gm, "");
+		return rewriteLinks(markdown, rewriteHref);
 	}
 
 	function dedent(text) {
@@ -286,9 +323,21 @@ export function convertMdx(src, { path, section = "ai", category = "general", or
 		if (prose.join("").trim()) blocks.push(...markdownToBlocks(mdxToMarkdown(prose.join("\n"))));
 		prose = [];
 	};
+	/** Lines from i up to the first line matching endRe; lines inside fenced code never end the run. */
 	const collectUntil = (i, endRe) => {
 		const out = [];
-		while (i < lines.length && !endRe.test(lines[i])) out.push(lines[i++]);
+		let fence = null;
+		for (; i < lines.length; i++) {
+			const line = lines[i];
+			if (fence) {
+				if (new RegExp(`^\\s*${fence[0]}{${fence.length},}\\s*$`).test(line)) fence = null;
+			} else if (endRe.test(line)) {
+				break;
+			} else {
+				fence = /^\s*(`{3,}|~{3,})/.exec(line)?.[1] ?? null;
+			}
+			out.push(line);
+		}
 		return [out, i];
 	};
 
@@ -298,7 +347,16 @@ export function convertMdx(src, { path, section = "ai", category = "general", or
 		if (/^\s*<!--.*-->\s*$/.test(line) || /^\s*<TOCInline/.test(line)) continue;
 		if (/^\s*<InvestmentWarning\s*\/>/.test(line)) {
 			flush();
-			blocks.push({ _type: "investment_warning", _key: key(), lang });
+			blocks.push({ _type: "investment_warning", _key: key(), lang: warningLang });
+		} else if ((m = line.match(/^::::(\w+)[ \t]*(.*)$/))) {
+			// 4-colon admonition wrapping a 3-colon one: a callout body is Markdown and cannot nest a callout,
+			// so the outer one ends at the first nested `:::tone` line and the inner one follows as its own block.
+			flush();
+			const [inner, end] = collectUntil(i + 1, /^:{3,4}(?:\w+.*)?\s*$/);
+			i = /^::::\s*$/.test(lines[end] ?? "") ? end : end - 1;
+			blocks.push({ _type: "callout", _key: key(), tone: m[1], title: m[2].trim(), body: mdxToMarkdown(dedent(inner.join("\n"))) });
+		} else if (/^::::\s*$/.test(line)) {
+			// closing line of a 4-colon admonition whose nested callout was emitted separately
 		} else if ((m = line.match(/^:::(\w+)[ \t]*(.*)$/))) {
 			flush();
 			const [inner, end] = collectUntil(i + 1, /^:::\s*$/);
@@ -352,20 +410,21 @@ export function convertMdx(src, { path, section = "ai", category = "general", or
 	}
 	flush();
 
-	// The first H1 becomes the entry title (Docusaurus pages repeat the title as an H1)
 	const h1 = blocks.findIndex((b) => b.style === "h1");
-	const title = h1 >= 0 ? blocks.splice(h1, 1)[0].children.map((c) => c.text).join("") : frontmatter.title;
+	const h1Text = h1 >= 0 ? blocks.splice(h1, 1)[0].children.map((c) => c.text).join("") : undefined;
+	const title = String(frontmatter.title ?? h1Text ?? slug);
+	return { frontmatter, slug, title, blocks };
+}
 
-	const slug = (frontmatter.slug ?? path.split("/").pop().replace(/\.mdx?$/, "").replace(/^\d+[-_]/, ""))
-		.replace(/^\//, "")
-		.replace(/\//g, "-");
-
+/** Convert one Docusaurus MDX doc into an EmDash `docs` payload (options as for mdxToBlocks, plus the doc fields). */
+export function convertMdx(src, { section = "ai", category = "general", order = 0, ...options }) {
+	const { frontmatter, slug, title, blocks } = mdxToBlocks(src, options);
 	return {
 		collection: "docs",
 		slug,
 		data: {
 			title,
-			description: frontmatter.description ?? frontmatter.title ?? "",
+			description: String(frontmatter.description ?? frontmatter.title ?? ""),
 			section,
 			category,
 			sort_order: Number(order),
