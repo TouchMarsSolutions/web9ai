@@ -18,7 +18,8 @@ function fakeCms() {
 		content_create: ({ collection, slug, locale, status, data, translationOf }) => {
 			const id = `01ID${++n}`;
 			const group = translationOf ? find(collection, translationOf).translationGroup : id;
-			rows.push({ id, collection, slug, locale, status, data, translationGroup: group, draftRevisionId: null, rev: 1 });
+			const live = status === "published";
+			rows.push({ id, collection, slug, locale, status, data, translationGroup: group, draftRevisionId: null, liveRevisionId: live ? `live${id}` : null, publishedAt: live ? "2026-01-01T00:00:00.000Z" : null, rev: 1 });
 			return view(rows.at(-1));
 		},
 		content_update: ({ collection, id, data, _rev }) => {
@@ -32,7 +33,14 @@ function fakeCms() {
 			const r = find(collection, id);
 			if (_rev !== `rev${r.rev}`) throw new Error("content_publish: CONFLICT");
 			if (r.locked) throw new Error("content_publish: ENTRY_LOCKED");
-			Object.assign(r, { status: "published", draftRevisionId: null, rev: r.rev + 1 });
+			Object.assign(r, { status: "published", draftRevisionId: null, liveRevisionId: `live${r.id}`, publishedAt: r.publishedAt ?? "2026-01-02T00:00:00.000Z", rev: r.rev + 1 });
+			return view(r);
+		},
+		// The admin's unpublish: status draft, no live revision, published_at kept, a draft copy of the live version.
+		content_unpublish: ({ collection, id, _rev }) => {
+			const r = find(collection, id);
+			if (_rev !== `rev${r.rev}`) throw new Error("content_unpublish: CONFLICT");
+			Object.assign(r, { status: "draft", liveRevisionId: null, draftRevisionId: r.draftRevisionId ?? `copy${r.rev}`, rev: r.rev + 1 });
 			return view(r);
 		},
 		menu_get: () => structuredClone(menu),
@@ -148,6 +156,58 @@ describe("upsertEntry", () => {
 		expect(await upsertEntry(cms.callTool, draft("Two"), { overwrite: true })).toMatchObject({ action: "updated" });
 		expect(cms.writes()).toEqual(["content_create", "content_update"]);
 		expect(cms.rows[0].status).toBe("draft");
+		await expect(upsertEntry(cms.callTool, draft("Three"), { overwrite: true })).rejects.toThrow(/\[PENDING_DRAFT\]/);
+	});
+	it("never republishes an entry that was unpublished in the admin", async () => {
+		const cms = fakeCms();
+		const created = await upsertEntry(cms.callTool, doc({ title: "Intro" }));
+		const { _rev } = await cms.callTool("content_get", { collection: "docs", id: created.id, locale: "en" });
+		await cms.callTool("content_unpublish", { collection: "docs", id: created.id, _rev });
+		const writesBefore = cms.writes().length;
+		for (const options of [{}, { overwrite: true }, { dryRun: true }]) {
+			await expect(upsertEntry(cms.callTool, doc({ title: "Intro" }), options)).rejects.toThrow(/^\[STATUS_MISMATCH\] docs\/intro \(en\)/);
+		}
+		expect(cms.writes().length).toBe(writesBefore);
+		expect(cms.rows[0].status).toBe("draft");
+	});
+	it("never overwrites a draft-status entry that was saved since, whatever the status", async () => {
+		const cms = fakeCms();
+		const draft = (text) => doc({ title: text }, { status: "draft" });
+		const created = await upsertEntry(cms.callTool, draft("One"));
+		const { _rev } = await cms.callTool("content_get", { collection: "docs", id: created.id, locale: "en" });
+		await cms.callTool("content_update", { collection: "docs", id: created.id, data: { title: "Edited by a human" }, _rev });
+		const writesBefore = cms.writes().length;
+		for (const options of [{}, { overwrite: true }, { dryRun: true }]) {
+			await expect(upsertEntry(cms.callTool, draft("One"), options)).rejects.toThrow(/^\[PENDING_DRAFT\] docs\/intro \(en\): title: stored "Edited by a human" \/ wanted "One"/);
+		}
+		expect(cms.writes().length).toBe(writesBefore);
+		// Wanted draft that already equals the stored draft stays unchanged (it carries a draft revision after any save).
+		expect(await upsertEntry(cms.callTool, draft("Edited by a human"))).toMatchObject({ action: "unchanged" });
+	});
+	it("publishes the draft that a crashed create leaves behind, and nothing that merely looks like it", async () => {
+		const leftover = async (mutate = () => {}) => {
+			const cms = fakeCms();
+			// content_create(status published) is create-as-draft then publish; a crash in between leaves this row.
+			await cms.callTool("content_create", { collection: "docs", slug: "intro", locale: "en", status: "draft", data: { title: "Intro" } });
+			mutate(cms.rows[0]);
+			return cms;
+		};
+		const cms = await leftover();
+		expect(await upsertEntry(cms.callTool, doc({ title: "Intro" }), { dryRun: true })).toMatchObject({ action: "published" });
+		expect(await upsertEntry(cms.callTool, doc({ title: "Intro" }))).toMatchObject({ action: "published" });
+		expect(cms.rows[0]).toMatchObject({ status: "published", draftRevisionId: null });
+		// A leftover that differs from the migration follows the ordinary overwrite rule.
+		const stale = await leftover();
+		await expect(upsertEntry(stale.callTool, doc({ title: "Changed" }))).rejects.toThrow(/\[WOULD_OVERWRITE\]/);
+		expect(await upsertEntry(stale.callTool, doc({ title: "Changed" }), { overwrite: true })).toMatchObject({ action: "updated" });
+		expect(stale.rows[0]).toMatchObject({ status: "published", data: { title: "Changed" } });
+		// Anything that has been published or saved before is somebody's decision, not a leftover.
+		const wasPublished = await leftover((r) => (r.publishedAt = "2026-01-01T00:00:00.000Z"));
+		const wasSaved = await leftover((r) => (r.draftRevisionId = "saved"));
+		for (const other of [wasPublished, wasSaved]) {
+			await expect(upsertEntry(other.callTool, doc({ title: "Intro" }))).rejects.toThrow(/\[STATUS_MISMATCH\]/);
+			expect(other.rows[0].status).toBe("draft");
+		}
 	});
 	it("stops when publishing hits a lock", async () => {
 		const cms = fakeCms();

@@ -7,12 +7,16 @@
 //
 // Fail closed (plan 2 Task 9 review): a re-run in production must not undo what editors or AI agents did
 // since the migration. content_get returns a pending draft's data in place of the live data (liveData then
-// holds the live version), so "stored" below is the draft when there is one. The rules, for an entry that exists:
-//   - stored equals want and nothing is pending      -> unchanged
-//   - pending draft equal to want (an interrupted run) -> publish it
-//   - pending draft that differs from want            -> [PENDING_DRAFT], always (a human resolves it in the admin)
-//   - published entry that differs from want          -> [WOULD_OVERWRITE] unless `overwrite` (a dry run reports it)
-//   - want is a draft but the entry is published      -> [STATUS_MISMATCH] (the runner never unpublishes)
+// holds the live version), and every save of a revisions collection stages a draft, in any status. So
+// "stored" below is the draft when draftRevisionId is set. The rules, for an entry that exists:
+//   - draftRevisionId set and the draft differs from want -> [PENDING_DRAFT], always (a human resolves it in
+//     the admin), whatever the status, with or without overwrite, in a dry run too
+//   - stored equals want and nothing needs publishing      -> unchanged
+//   - want is published and the entry has a draft equal to want (an interrupted overwrite) -> publish it
+//   - want is published and the entry is a draft           -> [STATUS_MISMATCH] (an admin unpublished it, or a
+//     person drafted it), unless it is a crashed create's leftover, see isCreateLeftover
+//   - want is a draft but the entry is not                 -> [STATUS_MISMATCH] (the runner never unpublishes)
+//   - otherwise it differs from want                       -> [WOULD_OVERWRITE] unless `overwrite` (a dry run reports it)
 
 /** JSON with object keys sorted, for comparing stored and wanted values. */
 export function canonical(value) {
@@ -60,6 +64,17 @@ async function write(callTool, name, args) {
 }
 
 /**
+ * The row a crashed create leaves behind. The MCP content_create with status "published" creates a draft and
+ * then publishes it (mcp/server.ts), so a crash in between leaves a draft that was never published and never
+ * saved. An entry unpublished in the admin differs: unpublish keeps published_at, drops the live revision and
+ * stages a draft copy, and every later save stages a draft too. All four fields must say "never touched";
+ * a doubtful row fails closed ([STATUS_MISMATCH]) and a person publishes or deletes it. (A create that passes
+ * publishedAt, as the posts step will, sets published_at on the draft and is not recognised here.)
+ */
+const isCreateLeftover = (item) =>
+	item.status === "draft" && item.liveRevisionId == null && item.draftRevisionId == null && item.publishedAt == null;
+
+/**
  * Make one entry look like `want` = { collection, slug, locale, status: "published" | "draft", data,
  * translationOf?, translationGroup?, taxonomies?, publishedAt? }. Only the keys in want.data are compared
  * (search_text and other generated fields are left alone; taxonomies and publishedAt are only sent on create
@@ -91,20 +106,22 @@ export async function upsertEntry(callTool, want, { dryRun = false, overwrite = 
 	if (want.translationGroup && item.translationGroup && item.translationGroup !== want.translationGroup) {
 		throw new Error(`${where} is not linked to its en original; delete it and run again`);
 	}
-	// The only status change the runner makes is to published.
-	if (status !== "published" && item.status !== status) {
-		throw new Error(`[STATUS_MISMATCH] ${where}: the migration wants status ${status} but the entry is ${item.status}; the runner never unpublishes, change it in the admin`);
-	}
 	const stored = Object.fromEntries(Object.keys(data).map((k) => [k, item.data?.[k]]));
 	const diff = firstDifference(stored, data);
-	const pendingDraft = item.status === "published" && item.draftRevisionId != null;
+	const pendingDraft = item.draftRevisionId != null;
 	const result = { id: item.id, translationGroup: item.translationGroup };
 	if (pendingDraft && diff) {
 		throw new Error(`[PENDING_DRAFT] ${where}: ${diff}; this entry has an unpublished draft that differs from the migration, publish or discard it in the admin (the runner never overwrites a draft)`);
 	}
+	// The only status change the runner makes is to published, and only for an entry that was never touched.
+	const wantsLive = status === "published";
+	if ((!wantsLive && item.status !== status) || (wantsLive && item.status !== "published" && !isCreateLeftover(item))) {
+		throw new Error(`[STATUS_MISMATCH] ${where}: the migration wants status ${status} but the entry is ${item.status}${item.status === "draft" ? " (unpublished or drafted by a person)" : ""}; the runner never changes that, fix it in the admin`);
+	}
+	const needsPublish = wantsLive && (item.status !== "published" || pendingDraft);
 	if (!diff) {
-		if (item.status === status && !pendingDraft) return { action: "unchanged", ...result };
-		// A draft equal to want (left by an interrupted run), or an unpublished entry that should be live.
+		if (!needsPublish) return { action: "unchanged", ...result };
+		// A draft equal to want (left by an interrupted overwrite), or a crashed create's leftover.
 		if (dryRun) return { action: "published", ...result };
 		await write(callTool, "content_publish", { collection, id: item.id, _rev: found._rev, ...(want.publishedAt ? { publishedAt: want.publishedAt } : {}) });
 		return { action: "published", ...result };
