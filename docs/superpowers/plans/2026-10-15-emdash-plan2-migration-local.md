@@ -6112,3 +6112,179 @@ cd /Users/john/git/web9ai && rm -rf "$CI_DIR"
 Expected：`node --version` 是 `v22.x`；vitest PASS，并且 `postPayloads on legacy/blog` 那组显示为 skipped；构建和 CSS 检查都通过。如果 `npx -p node@22` 下载不了（离线），用本机的 node 跑同样三条命令，并在任务报告里写明没有在 Node 22 上验证。
 
 ---
+
+### Task 15: 全量验收：从空库完整迁移一遍、安全探针、浏览器检查、文档收尾 ⏹ 🚦
+
+**模型：** standard
+
+前面每个任务都在同一个本地库上增量完成。计划 3 在生产上面对的是空库 + seed + 一次 runner，所以最后从空库再完整跑一遍，证明这条路径本身可以重复。全部是本地操作，不部署。
+
+**Files:**
+- Modify: spec（开头的状态、§1 "当前状态"）、`CLAUDE.md`（Commands）
+
+**Interfaces:**
+- Consumes: 前面所有任务。`node scripts/migrate.mjs all|verify`、`scripts/check-page.mjs`、`scripts/mcp.mjs`、`npm run build`（含 `postbuild`）。
+- Produces: 计划 2 的完成证据（命令输出），计划 3 的起点。
+
+- [ ] **Step 1: ⏹ 测试、构建、类型检查、源码规则**
+
+```bash
+cd /Users/john/git/web9ai
+npx astro dev stop
+npm test
+npm run build
+npm run typecheck
+command grep -rn 'light-dark(' src packages --include='*.astro' --include='*.css' --include='*.mjs' --include='*.ts' | command grep -v '\.test\.mjs' ; echo "light-dark: $?"
+command grep -rnE '\bdark:' src packages/web9-blocks/astro ; echo "dark-variant: $?"
+```
+
+Expected：`npm test` PASS；`npm run build` 成功并且 `check-public-css` PASS；`npm run typecheck` 0 errors；两个 `grep` 都没有输出，`$?` 是 `1`。
+
+worker 体积（只在本地量，不调用 wrangler，不联网）：
+
+```bash
+node -e 'const fs=require("fs"),z=require("zlib"),p=require("path");let raw=0,gz=0;(function w(d){for(const f of fs.readdirSync(d)){const q=p.join(d,f);if(fs.statSync(q).isDirectory())w(q);else if(/\.(m?js|wasm)$/.test(f)){const b=fs.readFileSync(q);raw+=b.length;gz+=z.gzipSync(b).length}}})("dist/server");console.log({rawKiB:raw>>10,gzipKiB:gz>>10})'
+```
+
+Expected：打印两个数，记进任务报告和 spec §9（计划 3 要用）。这个 gzip 是逐个文件压缩后相加，比 wrangler 打包后的单个 bundle 偏大。Workers 免费套餐的上限是压缩后 3 MiB：`gzipKiB` 超过 3072 时**停下来报告**，计划 3 需要先决定（拆分、换付费套餐）。
+
+- [ ] **Step 2: ⏹ 🚦 从空库完整迁移**
+
+```bash
+rm -rf .wrangler/state
+npm run dev -- --port 4321
+curl -s -X POST 'http://localhost:4321/_emdash/api/setup/dev-bypass?token=1&content=0' > .local/bypass.json
+node -e "const r=JSON.parse(require('fs').readFileSync('.local/bypass.json','utf8'));require('fs').writeFileSync('.local/dev-token',r.data.token+'\n');console.log('token saved:',r.data.token.slice(0,8)+'…')"
+node scripts/migrate.mjs all --dry-run
+```
+
+（`npm run dev` 是 daemon；curl 连不上就等几秒再试。）
+
+Expected（dry run，只读）：`docs (dry run): created 35`、`menu (dry run): updated 1`、`posts (dry run): created 2`、`redirects (dry run): created 73`、`home (dry run): created 2`。
+
+```bash
+node scripts/migrate.mjs all
+node scripts/migrate.mjs all
+node scripts/migrate.mjs verify
+```
+
+Expected：
+- 第一次：`docs: created 35`、`menu: updated 1`、`posts: created 2`、`redirects: created 73`、`home: created 2`，exit 0；
+- 第二次：每一步都只有 `unchanged`（`docs: unchanged 35`、`menu: unchanged 1`、`posts: unchanged 2`、`redirects: unchanged 73`、`home: unchanged 2`），没有任何 `created`/`updated`/`published`/`extra` 行；
+- `verify: 54/54 pages ok`、`verify: 74/74 redirects ok`。
+
+任何一项不符：停下来，把三条命令的完整输出报告给用户。
+
+- [ ] **Step 3: 🚦 安全探针（在完整内容上再确认一次）**
+
+```bash
+node -e '
+const fs = require("fs");
+const body = ["probe body", `<!--ec:block ${JSON.stringify({ _type: "htmlBlock", _key: "h1", html: "<div class=\"fixed inset-0 z-50\">x</div>" })} -->`].join("\n\n") + "\n";
+fs.writeFileSync(".local/guard-final.json", JSON.stringify({ collection: "posts", slug: "probe-guard-final", locale: "en", status: "published", data: { title: "probe", content: body } }));
+'
+node scripts/mcp.mjs content_create @.local/guard-final.json; echo "exit=$?"
+node scripts/mcp.mjs content_list '{"collection":"posts"}' | command grep -c probe-guard-final
+node scripts/check-page.mjs http://localhost:4321/docs/tools-summary 'data-w9-tools' --absent 'class="fixed' 'inset-0' 'z-50'
+```
+
+Expected：`content_create` 失败（exit 非 0），信息含 `Save rejected (spec §10)` 和 `htmlBlock`；`grep -c` 输出 `0`；`check-page` 通过。
+
+- [ ] **Step 4: 给 AI 读的入口和搜索**
+
+```bash
+node scripts/check-page.mjs http://localhost:4321/llms.txt '# Web9.AI' '## Use Case' '## Optional' --absent 'localhost' 'ec:block'
+node scripts/check-page.mjs http://localhost:4321/zh-CN/llms.txt '## 神兵利器' --absent 'localhost'
+for s in $(curl -s http://localhost:4321/llms.txt | command grep -o 'docs/[^)]*\.md' | sed 's#docs/##; s#\.md$##'); do
+  curl -s http://localhost:4321/docs/$s.md | command grep -q 'ec:block' && echo "LEAK $s"
+done; echo done
+node scripts/mcp.mjs search '{"query":"Workflow Automation","collections":["docs"]}'
+node scripts/check-page.mjs http://localhost:4321/ 'emdash-webmcp-search'
+```
+
+Expected：两个 `check-page` 通过；循环只打印 `done`；`search` 结果里有 `tools-summary`；首页有 `emdash-webmcp-search`。
+
+- [ ] **Step 5: 浏览器验收（CDP，page 8）**
+
+库重建过，先让 page 8 重新登录：`navigate_page` 到 `http://localhost:4321/_emdash/api/auth/dev-bypass?redirect=/`。然后逐页 `navigate_page` + `take_screenshot`，并用 `list_console_messages` 确认没有错误：
+
+| 页面 | 看什么 |
+|---|---|
+| `/`（浅色、深色各一张） | hero、三格 features；主题按钮切换后 `<html>` 的 class 变成 `dark`/`light`，颜色跟着变 |
+| `/zh-CN/` | 魔法启动、中文 features；菜单的 AI/Dev 链接带 `/zh-CN` |
+| `/docs/intro`（浅色、深色） | 侧栏 AI、Use Case、Articles、Cloud、Prompt Engineering、Model、Dev；标题和正文排版 |
+| `/docs/tools-summary` | 8 组 tool 卡片，logo 大小一致 |
+| `/docs/learn_ai_coding` | details 展开后的 Tabs 文字和代码块；有序列表续号 |
+| `/docs/guide` | 嵌入的 YouTube（`youtube-nocookie.com`）；行内 code 没有反引号 |
+| 有 Mermaid 图的页面（`/docs/ai-tools-adhoc`） | 深色主题下图里的文字看得清 |
+| `/zh-CN/docs/lambda` | fallback 提示条 + en 内容 |
+| `/posts/ai-tools-adhoc` | 正文链接到 `/docs/ai-tools-adhoc` |
+| `/search?q=Coze` | 有结果 |
+
+再打开后台 `/_emdash/admin`：Docs 列表有 26 篇 en、9 篇 zh-CN；打开 `tools-summary`，tool_grid 块能展开显示（只看，不保存）。
+
+截图里任何一处明显不对（块没渲染、样式丢失、控制台报错）：记下 URL 和截图，停下来报告。Mermaid 深色文字看不清不算阻塞：记进"未决事项"。
+
+- [ ] **Step 6: 文档收尾**
+
+spec：
+- 开头的 "分支：`emdash`……" 换成 "分支：`main`（计划 1 的 PR #2 已合并；计划 2 在 `plan2` 分支）"，下面加一行 "进度：计划 1 完成（2026-10-15）；计划 2 完成（本地迁移和安全关口，YYYY-MM-DD）；计划 3（部署、生产迁移、切换）未开始"，日期填当天。
+- §1 "当前状态：`emdash` 分支在 Node 环境下……" 换成 "当前状态（计划 2 结束）：本地 workerd dev 里完整迁移可从空库重复（`node scripts/migrate.mjs all`，第二次 0 写入）；`npm test`、`npm run build`（含公开 CSS 检查）、`npm run typecheck` 通过；CI 跑测试和构建。"
+- §9 末尾加 "worker 体积（计划 2 Task 15，本地逐文件 gzip 相加）：raw … KiB，gzip … KiB"，填 Step 1 的数字。
+
+`CLAUDE.md` 的 Commands 里，`MCP from the shell` 那一行后面加：
+
+```markdown
+- Migration runner (idempotent; a second run writes nothing): `node scripts/migrate.mjs <docs|menu|posts|redirects|home|all>... [--dry-run]`, then `node scripts/migrate.mjs verify`; env `EMDASH_URL`, `EMDASH_TOKEN` (redirects need an admin token)
+```
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add docs/superpowers/specs/2026-10-15-emdash-migration-design.md CLAUDE.md
+git commit -m "docs: Plan 2 complete: full local migration from an empty database, acceptance results
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
+git status --short
+```
+
+Expected：`git status --short` 没有输出（`.local/`、`.wrangler/`、`dist/` 都被 ignore）。之后按 `superpowers:finishing-a-development-branch` 由用户决定 push / PR。
+
+---
+
+## 完成标准
+
+全部满足才算计划 2 完成：
+
+1. `npm test`、`npm run build`（`postbuild` 的公开 CSS 检查 PASS）、`npm run typecheck`（0 errors）在最终代码上通过；浅克隆 + Node 22 的 CI 模拟通过（Task 14 Step 8）。
+2. 从空的本地库，`node scripts/migrate.mjs all` 写入 35 篇 doc（26 en + 9 zh-CN）、菜单、2 篇 post（1 篇草稿）、73 条重定向、2 个首页；第二次运行 0 写入；`verify` 是 54/54 页面、74/74 重定向。
+3. 内容安全关口生效：写入时拒绝 `htmlBlock`、`iframe`、带 `html` 的 `embed`、未知块和危险的样式值（docs、posts、pages 都覆盖）；渲染时用 web9 的 `htmlBlock`/`embed`；公开 CSS 里没有遮罩类 utility，也没有被降级的 `light-dark()`。
+4. `/llms.txt`、`/zh-CN/llms.txt` 和全部 `.md` 里没有 `ec:block`；fallback 页面的 canonical 指向 en URL。
+5. spec、`CLAUDE.md`、`AGENTS.md`、`.agents/skills/web9-blocks/SKILL.md` 记录了本计划的结论。
+6. 没有部署，没有改 Cloudflare、GitHub 设置或 `gh-pages`，没有创建 AI 账号或 PAT。
+
+## 计划 3 路线图（部署、生产迁移、切换）
+
+不在本计划内。按顺序：
+
+1. **部署配置**：`wrangler.jsonc` 里 D1 的 `database_id`（或确认 wrangler 自动创建）、R2 bucket、adapter 注入的 KV `SESSION` 和 `IMAGES` binding；对照 Task 15 量出来的 worker 体积和免费套餐上限；用 workerd 跑一次构建产物。
+2. **Workers Builds**：连接仓库，生产分支 `main`，构建命令 `npm run build`（`postbuild` 的 CSS 检查失败会挡住部署）。在第一次推 `main` 以外的分支之前，确认预览版本是否和生产共用 D1/R2（spec §9 待验证）。首次部署前备份 `EMDASH_ENCRYPTION_KEY`。在 `*.workers.dev` 上验证。
+3. **生产首次启动**：空 D1 上 EmDash 自动应用 seed（块类型、字段、tag terms、`settings.url`）。如果生产库不是从空库建的，先 `schema_create_field` 补 `search_text`，再上线带 hook 的插件（hook 的 `errorPolicy` 是 abort）。
+4. **生产迁移**：owner 建管理员账号（passkey），拿 admin token；`EMDASH_URL=https://<worker>.workers.dev EMDASH_TOKEN=<admin token> node scripts/migrate.mjs all`，再跑一次确认 0 写入，再 `verify`（`verify` 也读 `EMDASH_URL`）。
+5. **切换**：Worker 绑定 `www.web9.ai`，apex 重定向到 www；GitHub Pages（`gh-pages` 上已构建的旧站）保留作回退，稳定后关闭。
+6. **AI 账号**：owner 邀请 Editor 账号、passkey 注册、创建 PAT（spec §8）。安全关口已经在计划 2 落地，这一步才可以做。
+7. **切换后**：看 `/_emdash/api/redirects/404s`，给还在被访问的旧 URL 补规则（doc 的 `/tags/*`、`/markdown-page` 等现在会 404）；确认 `site_import_*` 等导入路径是否经过 `content:beforeSave`（不经过的话，AI 账号不能有导入权限）。
+8. **清理**：生产迁移验证完以后删掉 `legacy/`。依赖它的测试都有 `skipIf`，删掉后自动跳过；同时删掉只为迁移存在的代码和测试：`scripts/lib/legacy-tree.mjs`、`docs-payloads.mjs`、`posts.mjs`、`redirects.mjs` 及其测试、`scripts/lib/legacy-convert.test.mjs`，`migrate.mjs` 只保留 `menu`、`home`、`verify`（或整个删掉）；`docs-nav.test.mjs` 里对照 legacy 的那组也删掉。
+
+## 未决事项（已知，不阻塞计划 2）
+
+- Mermaid 在深色主题下的文字颜色（`themeCSS`）只能在浏览器里确认（Task 15 Step 5）。
+- 标题没有 `id`，旧站的页内锚点（`#programming-code`、`#function`、`#what-is-not`）跳不过去了。
+- 12 张图片是外站热链，可能失效；以后下载到 `public/img/`。
+- 图片的 alt 是 MDX 里的 import 名（例如 `varInKt`），对读屏不友好；需要人工补。
+- `tool_grid` 里宽 logo（NotebookLM、海绵）在正方形框里缩小显示（Task 14 之后不再变形，但比旧站小）。
+- 被图片或视频打断的嵌套有序列表，后半段丢了父级上下文（续号是对的）。
+- 模板 token `text-on-brand`（白）配深色的 `bg-brand`（`#4d9fff`）对比度约 2.9:1，首页按钮在深色主题下偏淡；改 token 是以后样式计划的事。
+- 草稿 `ai-tiny-course` 以后发布时，如果 `publishedAt` 是空的，要传 `2025-03-08T00:19:14Z`（Task 10 Step 6 记录实际情况）。
+- 搜索只搜当前语言（已写进 spec §4）。
