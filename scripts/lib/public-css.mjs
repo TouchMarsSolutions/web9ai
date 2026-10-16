@@ -85,9 +85,10 @@ export function classifySheets({ manifest, urlImports, clientCss }) {
 	return { sheets: [...sheets.values()], report, errors };
 }
 
-// Viewport units (`100vh`, `50DVW`, `100vmax`, `100dvmin`...). `(?![a-z])` instead of `\b`: Tailwind writes spaces
-// inside arbitrary values as `_`, and `_` is a word character, so `\b` never matched in `100vmax_black`.
-const VIEWPORT_UNIT = /\d[sld]?v(?:[hwib]|min|max)(?![a-z])/i;
+// Viewport units (`100vh`, `50DVW`, `100vmax`, `100dvmin`...) and container-query units (`100cqh`...): public CSS
+// has no `container-type`, so `cq*` falls back to the small viewport. `(?![a-z])` instead of `\b`: Tailwind writes
+// spaces inside arbitrary values as `_`, and `_` is a word character, so `\b` never matched in `100vmax_black`.
+const VIEWPORT_UNIT = /\d(?:[sld]?v(?:[hwib]|min|max)|cq(?:[whib]|min|max))(?![a-z])/i;
 
 /** Class-name patterns that let content build a page overlay (spec §10). */
 export const CLASS_DENY = [
@@ -96,7 +97,8 @@ export const CLASS_DENY = [
 	[/^-?z-/, "z-index utility"],
 	[/-screen$/, "*-screen size utility"],
 	[/-[sld]?v[hw]$/, "viewport-unit size utility"],
-	[new RegExp(String.raw`\[[^\]]*${VIEWPORT_UNIT.source}`, "i"), "arbitrary viewport-unit value"],
+	// `[...]` (`h-[80vh]`) and `(...)` (`h-(--x,100vh)` is `height:var(--x,100vh)`) arbitrary values.
+	[new RegExp(String.raw`[\[(][^\]]*${VIEWPORT_UNIT.source}`, "i"), "arbitrary viewport-unit value"],
 ];
 
 /** Arbitrary properties (`[z-index:50]`, `md:[inset:0]`) as a whole class name, important modifier already dropped. */
@@ -118,25 +120,44 @@ export function denyReasons(cls) {
 	return CLASS_DENY.filter(([re]) => re.test(cls)).map(([, why]) => why);
 }
 
-/** The part of a class name after its last variant, ignoring colons inside `[...]` and `(...)`. */
+/**
+ * The part of a class name after its last variant, ignoring colons inside `[...]` and `(...)`. Quoted text is skipped:
+ * a bracket inside quotes (`data-[x='[']:z-50`) does not open anything. A quote that never closes is an ordinary character.
+ */
 function utilityPart(cls) {
 	let depth = 0;
 	let start = 0;
 	for (let i = 0; i < cls.length; i++) {
 		const c = cls[i];
-		if (c === "[" || c === "(") depth++;
+		if (c === "'" || c === '"') {
+			const end = cls.indexOf(c, i + 1);
+			if (end > i) i = end;
+		} else if (c === "[" || c === "(") depth++;
 		else if (c === "]" || c === ")") depth = Math.max(0, depth - 1);
 		else if (c === ":" && depth === 0) start = i + 1;
 	}
 	return cls.slice(start);
 }
 
+/** CSS escapes: 1 to 6 hex digits and one optional space (`\32 ` is "2"), or any other character after a backslash. */
+const CSS_ESCAPE = /\\([0-9a-f]{1,6})[ \t\n\r\f]?|\\([\s\S])/gi;
+const decodeEscapes = (s) =>
+	s.replace(CSS_ESCAPE, (_, hex, ch) => {
+		if (ch !== undefined) return ch;
+		const cp = parseInt(hex, 16);
+		return cp === 0 || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff) ? "\ufffd" : String.fromCodePoint(cp);
+	});
+
 /**
  * Class names in a selector, unescaped, without variant prefixes and without the important modifier
- * (`.md\:fixed` → "fixed", `.h-screen\!` → "h-screen", `.md\:\[z-index\:9\]` → "[z-index:9]").
+ * (`.md\:fixed` → "fixed", `.h-screen\!` → "h-screen", `.\32 xl\:z-50` → "z-50", `.md\:\[z-index\:9\]` → "[z-index:9]").
+ * The name is decoded twice: once for the selector, once more for escapes the class name itself carries into the value
+ * (`h-[100v\68]` is selector `.h-\[100v\\68\]` and declaration `height:100v\68`, which the minifier writes as `100vh`).
  */
 export function classTokens(selector) {
-	return [...selector.matchAll(/\.((?:\\.|[\w-])+)/g)].map((m) => utilityPart(m[1].replace(/\\(.)/g, "$1")).replace(/^!|!$/g, ""));
+	return [...selector.matchAll(/\.((?:\\[0-9a-f]{1,6}[ \t\n\r\f]?|\\[\s\S]|[\w-])+)/gi)].map((m) =>
+		utilityPart(decodeEscapes(decodeEscapes(m[1]))).replace(/^!|!$/g, ""),
+	);
 }
 
 /** Problems in one stylesheet: denied class names, position:fixed, `@import`, and light-dark() lowered by the minifier. */

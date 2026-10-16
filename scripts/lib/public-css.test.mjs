@@ -76,6 +76,51 @@ describe("scanSheet", () => {
 		[String.raw`@layer base{.a{color:red}}@import url(x.css);`, [hit("@import url(x.css)", IMPORT_WHY)]],
 	])("rejects @import: %s", (css, expected) => expect(sheet(css)).toEqual(expected));
 
+	// Tailwind and lightningcss write a leading digit as a hex escape: `2xl:z-50` is `.\32 xl\:z-50`.
+	it.each([
+		[String.raw`@media (width>=96rem){.\32 xl\:z-50{z-index:50}}`, String.raw`.\32 xl\:z-50`, "z-index utility"],
+		[String.raw`@media (width>=96rem){.\32 xl\:inset-0{inset:0}}`, String.raw`.\32 xl\:inset-0`, "inset utility"],
+		[String.raw`@media (width>=96rem){.\32 xl\:h-screen{height:100vh}}`, String.raw`.\32 xl\:h-screen`, "*-screen size utility"],
+		[String.raw`@media (width>=96rem){.\32 xl\:min-h-dvh{min-height:100dvh}}`, String.raw`.\32 xl\:min-h-dvh`, "viewport-unit size utility"],
+		[String.raw`@media (width>=96rem){.\32 xl\:h-screen\!{height:100vh!important}}`, String.raw`.\32 xl\:h-screen\!`, "*-screen size utility"],
+	])("flags a hex-escaped variant: %s", (css, selector, why) => expect(sheet(css)).toEqual([hit(selector, why)]));
+
+	// `h-(--x,100vh)` is `height:var(--x,100vh)`: a viewport unit in a parenthesised value.
+	it.each([
+		[String.raw`.h-\(--x\,100vh\){height:var(--x,100vh)}`, String.raw`.h-\(--x\,100vh\)`],
+		[String.raw`.min-h-\(--x\,100dvh\){min-height:var(--x,100dvh)}`, String.raw`.min-h-\(--x\,100dvh\)`],
+		[String.raw`.w-\(--x\,100vw\){width:var(--x,100vw)}`, String.raw`.w-\(--x\,100vw\)`],
+		[String.raw`.size-\(--x\,100vmax\){width:var(--x,100vmax);height:var(--x,100vmax)}`, String.raw`.size-\(--x\,100vmax\)`],
+	])("flags the parenthesised value: %s", (css, selector) => expect(sheet(css)).toEqual([hit(selector, "arbitrary viewport-unit value")]));
+
+	// Public CSS has no container-type, so container-query units resolve against the small viewport.
+	it.each([
+		[String.raw`.h-\[100cqh\]{height:100cqh}`, String.raw`.h-\[100cqh\]`],
+		[String.raw`.size-\[100cqmax\]{width:100cqmax;height:100cqmax}`, String.raw`.size-\[100cqmax\]`],
+		[String.raw`.w-\[50cqw\]{width:50cqw}`, String.raw`.w-\[50cqw\]`],
+		[String.raw`.w-\[50cqi\]{width:50cqi}`, String.raw`.w-\[50cqi\]`],
+		[String.raw`.h-\[50cqb\]{height:50cqb}`, String.raw`.h-\[50cqb\]`],
+		[String.raw`.h-\[50cqmin\]{height:50cqmin}`, String.raw`.h-\[50cqmin\]`],
+	])("flags the container-query unit: %s", (css, selector) => expect(sheet(css)).toEqual([hit(selector, "arbitrary viewport-unit value")]));
+	it("flags a container-query unit in an arbitrary property", () => {
+		expect(sheet(String.raw`.\[--x\:100cqh\]{--x:100cqh}`)).toEqual([
+			hit(String.raw`.\[--x\:100cqh\]`, "arbitrary property with a viewport-unit value"),
+		]);
+	});
+
+	// The minifier turns `100v\68` (an escape in the value) into `100vh`; the class name still holds the escape.
+	it("flags a viewport unit written with a CSS escape", () => {
+		expect(sheet(String.raw`.h-\[100v\\68\]{height:100vh}`)).toEqual([hit(String.raw`.h-\[100v\\68\]`, "arbitrary viewport-unit value")]);
+		expect(sheet(String.raw`.h-\[100v\68 \]{height:100vh}`)).toEqual([hit(String.raw`.h-\[100v\68 \]`, "arbitrary viewport-unit value")]);
+	});
+
+	// A quote hides a bracket from the variant split: `data-[x='[']:z-50`.
+	it.each([
+		[String.raw`:is(.data-\[x\=\'\[\'\]\:z-50)[data-x='[']{z-index:50}`, String.raw`:is(.data-\[x\=\'\[\'\]\:z-50)[data-x='[']`, "z-index utility"],
+		[String.raw`:is(.data-\[x\=\"\[\"\]\:z-50)[data-x="["]{z-index:50}`, String.raw`:is(.data-\[x\=\"\[\"\]\:z-50)[data-x="["]`, "z-index utility"],
+		[String.raw`:is(.\[\&\[title\=\'\[\'\]\]\:inset-0)[title='[']{inset:0}`, String.raw`:is(.\[\&\[title\=\'\[\'\]\]\:inset-0)[title='[']`, "inset utility"],
+	])("flags a utility behind a quoted variant: %s", (css, selector, why) => expect(sheet(css)).toEqual([hit(selector, why)]));
+
 	it.each([
 		[".text-brand{color:var(--color-brand)}"],
 		[".site-header{position:sticky;top:0;z-index:100}"],
@@ -92,12 +137,16 @@ describe("scanSheet", () => {
 		[String.raw`.h-\[10vhx\]{height:1px}`],
 		[String.raw`.has-\[\:checked\]\:flex:has(:checked){display:flex}`],
 		["@font-face{font-family:x;src:url(/fonts/x.woff2)}"],
+		[String.raw`@media (width>=96rem){.\32 xl\:flex{display:flex}}`],
+		[String.raw`.h-\(--x\,3rem\){height:var(--x,3rem)}`],
+		[String.raw`.w-\[50cqx\]{width:1px}`],
+		[".card{container-type:inline-size}"],
 	])("allows %s", (css) => expect(sheet(css)).toEqual([]));
 });
 
 // The selectors above are written by hand; this one asks the pinned Tailwind what it really emits for each class.
 describe("scanSheet on Tailwind's own output", () => {
-	const THEME = "@theme { --spacing: .25rem; --breakpoint-sm: 40rem; --breakpoint-md: 48rem; } @tailwind utilities;";
+	const THEME = "@theme { --spacing: .25rem; --breakpoint-sm: 40rem; --breakpoint-md: 48rem; --breakpoint-2xl: 96rem; } @tailwind utilities;";
 	const emit = async (cls) => (await compile(THEME)).build([cls]);
 	const flaggedOf = async (classes) => {
 		const out = [];
@@ -112,6 +161,10 @@ describe("scanSheet on Tailwind's own output", () => {
 		"w-dvw", "h-svh", "h-lvh", "min-h-dvh", "min-h-dvh!", "sm:h-dvh!",
 		"h-[80vh]", "h-[100VH]", "h-[100dvmin]", "h-[calc(100vh_-_4rem)]", "w-[calc(100%+100vw)]", "top-[100vh]", "md:top-[100vh]",
 		"shadow-[0_0_0_100vmax_black]",
+		"2xl:z-50", "2xl:inset-0", "2xl:h-screen", "2xl:min-h-dvh", "2xl:h-screen!",
+		"h-(--x,100vh)", "min-h-(--x,100dvh)", "w-(--x,100vw)", "size-(--x,100vmax)",
+		"h-[100cqh]", "size-[100cqmax]", "w-[50cqw]", "w-[50cqi]", "h-[50cqb]", "h-[50cqmin]", "[--x:100cqh]",
+		"h-[100v\\68]", "data-[x='[']:z-50", "data-[x=\"[\"]:z-50", "[&[title='[']]:inset-0",
 		"[z-index:50]", "md:[z-index:9999]", "[inset:0]", "[inset-inline:0]", "[top:0]", "[left:-5px]", "[height:100vh]", "hover:[inset:0]!",
 	];
 	const HARMLESS = ["flex", "md:flex!", "p-4", "h-full", "size-full", "sticky", "absolute", "h-[3rem]", "w-[10%]", "[color:red]", "[--gap:1rem]"];
@@ -137,6 +190,19 @@ describe("classTokens", () => {
 			"[z-index:50]",
 			"[z-index:9999]",
 			"[inset:0]",
+		]);
+	});
+	it("decodes hex escapes, so a leading digit survives", () => {
+		expect(classTokens(String.raw`.\32 xl\:z-50 .\32 xl\:h-screen\! .\32xl\:inset-0`)).toEqual(["z-50", "h-screen", "inset-0"]);
+	});
+	it("decodes a hex escape in a value, also behind an escaped backslash", () => {
+		expect(classTokens(String.raw`.h-\[100v\68 \] .h-\[100v\\68\]`)).toEqual(["h-[100vh]", "h-[100vh]"]);
+	});
+	it("ignores quoted brackets when dropping variants", () => {
+		expect(classTokens(String.raw`.data-\[x\=\'\[\'\]\:z-50 .\[\&\[title\=\'\[\'\]\]\:inset-0 .data-\[x\=\"\[\"\]\:z-50`)).toEqual([
+			"z-50",
+			"inset-0",
+			"z-50",
 		]);
 	});
 	it("ignores colons inside brackets when dropping variants", () => {
