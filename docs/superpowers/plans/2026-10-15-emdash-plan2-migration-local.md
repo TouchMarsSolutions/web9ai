@@ -5905,3 +5905,210 @@ Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
 ```
 
 ---
+
+### Task 14: 样式小问题、依赖清理、CI 加构建 ⏹
+
+**模型：** cheap
+
+计划 1 遗留里剩下的几件小事（Task 2 已处理"站内链接被强制新窗口"，Task 12 已处理侧栏对比度和 canonical）：
+- `prose` 给行内 `code` 前后加反引号（typography 插件的默认样式），旧站没有；
+- ToolGrid 的 `object-contain` 被 preflight 的 `img { height: auto }` 抵消，非正方形 logo 会被拉成不同高度；`logo_size` 来自内容，没有上下限；
+- `astro` 下限提到 `^7.4.0`（`@astrojs/cloudflare` 14 的 peer；本机已经是 7.4.0）；删掉没有用到的 `@cloudflare/workers-types`（`tsconfig.json` 只用 `types: ["node"]` 和 wrangler 生成的 `worker-configuration.d.ts`；这个包仍然作为 `@emdash-cms/cloudflare`、`wrangler` 的依赖装着）；
+- CI 只跑 `npm test`。加上 `npm run build`，它的 `postbuild` 就是 Task 5 的公开 CSS 检查，这样 PR 上也会挡住遮罩类 utility 和被降级的 `light-dark()`。
+
+写计划时把 ToolGrid 的改动临时放进 dev 渲染过：`/docs/ai-tools-adhoc` 的 logo 输出 `width="100" height="100" style="width:100px;height:100px"`。
+
+**Files:**
+- Create: `packages/web9-blocks/lib/tool-grid.mjs`、`packages/web9-blocks/lib/tool-grid.test.mjs`
+- Modify: `packages/web9-blocks/astro/ToolGrid.astro`、`src/styles/global.css`、`package.json`、`package-lock.json`、`.github/workflows/ci.yml`
+
+**Interfaces:**
+- Consumes: Task 5 的 `postbuild`（`scripts/check-public-css.mjs`）。
+- Produces: `logoSize(value) → number`、`LOGO_SIZE`（`packages/web9-blocks/lib/tool-grid.mjs`）；CI job "Tests and build"。
+
+- [ ] **Step 1: 写失败的测试**
+
+Create `packages/web9-blocks/lib/tool-grid.test.mjs`：
+
+```js
+import { describe, expect, it } from "vitest";
+import { logoSize } from "./tool-grid.mjs";
+
+describe("logoSize", () => {
+	it("keeps sizes in range and clamps the rest", () => {
+		expect(logoSize(100)).toBe(100);
+		expect(logoSize("48")).toBe(48);
+		expect(logoSize(5)).toBe(16);
+		expect(logoSize(99999)).toBe(300);
+		expect(logoSize(72.6)).toBe(73);
+	});
+	it("uses the default for missing or invalid values", () => {
+		for (const v of [undefined, null, 0, -10, "big", Number.NaN, Number.POSITIVE_INFINITY]) expect(logoSize(v)).toBe(72);
+	});
+});
+```
+
+- [ ] **Step 2: 跑测试，确认失败**
+
+Run: `npx vitest run packages/web9-blocks/lib/tool-grid.test.mjs`
+Expected: FAIL：`tool-grid.mjs` 不存在。
+
+- [ ] **Step 3: 实现**
+
+Create `packages/web9-blocks/lib/tool-grid.mjs`：
+
+```js
+// tool_grid logo size in px. The value comes from content (editor or MCP), so it is clamped: an
+// oversized logo is the cheapest way to cover a page with one image.
+export const LOGO_SIZE = { default: 72, min: 16, max: 300 };
+
+export function logoSize(value) {
+	const n = Math.round(Number(value));
+	if (!Number.isFinite(n) || n <= 0) return LOGO_SIZE.default;
+	return Math.min(LOGO_SIZE.max, Math.max(LOGO_SIZE.min, n));
+}
+```
+
+`packages/web9-blocks/astro/ToolGrid.astro`：
+
+```diff
+diff --git a/packages/web9-blocks/astro/ToolGrid.astro b/packages/web9-blocks/astro/ToolGrid.astro
+--- a/packages/web9-blocks/astro/ToolGrid.astro
++++ b/packages/web9-blocks/astro/ToolGrid.astro
+@@ -1,6 +1,7 @@
+ ---
+ import { sanitizeHref } from "emdash";
+ import { renderInlineMarkdown } from "../lib/markdown.mjs";
++import { logoSize } from "../lib/tool-grid.mjs";
+ 
+ interface Tool {
+ 	name?: string;
+@@ -14,7 +15,8 @@ interface Props {
+ }
+ const { node } = Astro.props;
+ const tools = Array.isArray(node?.tools) ? node.tools : [];
+-const size = node?.logo_size || 72;
++// Also set inline on the img: preflight's img { height: auto } would otherwise undo object-contain.
++const size = logoSize(node?.logo_size);
+ ---
+ 
+ {node?.title && <h4 class="mt-4 mb-2">{node.title}</h4>}
+@@ -31,7 +33,15 @@ const size = node?.logo_size || 72;
+ 				rel="noopener noreferrer"
+ 			>
+ 				{tool.logo && (
+-					<img class="max-w-full object-contain" src={sanitizeHref(tool.logo)} alt={tool.name ?? ""} width={size} height={size} loading="lazy" />
++					<img
++						class="max-w-full object-contain"
++						src={sanitizeHref(tool.logo)}
++						alt={tool.name ?? ""}
++						width={size}
++						height={size}
++						style={`width:${size}px;height:${size}px`}
++						loading="lazy"
++					/>
+ 				)}
+ 				<strong>{tool.name}</strong>
+ 				{tool.tagline && (
+```
+
+Run: `npx vitest run packages/web9-blocks/lib/tool-grid.test.mjs`
+Expected: PASS（2 个测试）。
+
+- [ ] **Step 4: 去掉行内 code 的反引号**
+
+`src/styles/global.css` 的 `@layer utilities { … }` 里，`.prose { … }` 那条规则后面（同一个 `@layer` 块内）加：
+
+```css
+	/* Typography adds backticks around inline code; the old site had none. (0,1,2) beats the plugin's (0,1,1). */
+	.prose code::before,
+	.prose code::after {
+		content: none;
+	}
+```
+
+- [ ] **Step 5: CI 加构建**
+
+```diff
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -10,7 +10,7 @@ permissions:
+ 
+ jobs:
+   test:
+-    name: Unit tests
++    name: Tests and build
+     runs-on: ubuntu-latest
+     steps:
+       - uses: actions/checkout@v4
+@@ -20,3 +20,5 @@ jobs:
+           cache: npm
+       - run: npm ci
+       - run: npm test
++      # postbuild runs scripts/check-public-css.mjs: no overlay utilities, no lowered light-dark() (spec §10, §11)
++      - run: npm run build
+```
+
+- [ ] **Step 6: ⏹ 依赖清理、构建、类型检查**
+
+```bash
+cd /Users/john/git/web9ai
+npx astro dev stop
+npm pkg set 'dependencies.astro=^7.4.0'
+npm pkg delete 'devDependencies.@cloudflare/workers-types'
+npm install
+npm ls @cloudflare/workers-types astro
+git diff --stat package.json package-lock.json
+```
+
+Expected：`npm ls` 显示 `astro@7.4.x`，`@cloudflare/workers-types` 只作为 `@emdash-cms/cloudflare` / `wrangler` 的依赖出现（deduped）；diff 只动了这两个文件里相关的几行。
+
+```bash
+npm test
+npm run build
+npm run typecheck
+```
+
+Expected：`npm test` PASS；`npm run build` 成功，最后是 `check-public-css` 的 PASS 输出（Task 5）；`npm run typecheck` 0 errors。
+
+```bash
+npm run dev -- --port 4321
+```
+
+用 CDP（page 8）打开 `/docs/guide`，执行：
+
+```js
+(() => { const c = document.querySelector(".prose p code"); return [c?.textContent, getComputedStyle(c, "::before").content, getComputedStyle(c, "::after").content]; })()
+```
+
+Expected：第二、三项都是 `"none"`。再打开 `/docs/tools-summary` 截图：logo 都是同样大小的方框，宽 logo（NotebookLM、海绵）完整显示、两边留白，不再被拉伸。
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add packages/web9-blocks/lib/tool-grid.mjs packages/web9-blocks/lib/tool-grid.test.mjs packages/web9-blocks/astro/ToolGrid.astro src/styles/global.css package.json package-lock.json .github/workflows/ci.yml
+git commit -m "fix: inline code without backticks, clamped square tool logos; astro ^7.4.0, drop workers-types; CI builds
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
+```
+
+- [ ] **Step 8: 模拟一次 CI（浅克隆 + Node 22）**
+
+CI 是 `actions/checkout` 的浅克隆（`posts.test.mjs` 读 git 历史的那组会跳过），Node 22，没有 `.wrangler/`、`.dev.vars`、`.local/`。在一个临时目录里重现：
+
+```bash
+CI_DIR=$(mktemp -d)
+git clone --depth 1 --branch plan2 "file://$PWD" "$CI_DIR/web9ai"
+cd "$CI_DIR/web9ai"
+npm ci
+npx -y -p node@22 node --version
+npx -y -p node@22 node node_modules/vitest/vitest.mjs run
+npx -y -p node@22 node node_modules/astro/bin/astro.mjs build && npx -y -p node@22 node scripts/check-public-css.mjs
+cd /Users/john/git/web9ai && rm -rf "$CI_DIR"
+```
+
+Expected：`node --version` 是 `v22.x`；vitest PASS，并且 `postPayloads on legacy/blog` 那组显示为 skipped；构建和 CSS 检查都通过。如果 `npx -p node@22` 下载不了（离线），用本机的 node 跑同样三条命令，并在任务报告里写明没有在 Node 22 上验证。
+
+---
