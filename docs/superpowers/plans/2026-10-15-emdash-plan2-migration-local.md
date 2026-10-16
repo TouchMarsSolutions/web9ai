@@ -4831,3 +4831,410 @@ Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
 ```
 
 ---
+
+### Task 11: 首页：`hero`、`feature_grid` 渲染，`/` 和 `/zh-CN/` 路由，`pages/home` 内容
+
+**模型：** standard
+
+模板首页（最新文章列表）换成旧站的首页：一个 hero（标题、tagline、"Magic Starts" 按钮）和三格 features（Web3、Energy、AI，三张 `/img/*.svg`）。内容存在 `pages/home` 的 `layout`（`blocks` 字段，块类型由 Task 1 的 seed 定义），en、zh-CN 各一行，用 `translationOf` 关联。文字来源：`legacy/src/pages/index.tsx`、`legacy/src/components/HomepageFeatures/index.tsx`、`legacy/i18n/zh-CN/code.json`（调研 `p2-research-2-pages.md` §5）。
+
+写计划时验证过的事实：
+- payload 经过 EmDash 自己的 `normalizeBlocksData`（按 seed 建的 schema）原样返回，所以 runner 重跑时比较结果相等；空字符串的 `primary_href` 会被拒绝（"URL must use http, https, mailto, or tel, or be a site-relative path"），所以没有第二个按钮时字段直接不写。
+- 图片用后台"从 URL 选择"同样的形状 `{ id: "", provider: "external", src, mimeType, alt }`，不带 `width`/`height`：两者都有时 EmDash 会把同源图片交给 `astro:assets`。三张 SVG 一共约 1.2 MB，渲染成 `<img loading="lazy">`。
+- 组件在 dev（workerd）里用临时探针页面渲染过：`<Blocks>` 输出 hero（第一个块是 `h1`，后面的是 `h2`）、按钮、三张懒加载的 `<img src="/img/...">`；库里没有 `pages/home` 时显示占位区块，`canonical` 是 `https://www.web9.ai/zh-CN/`。
+- `getEmDashEntry("pages", "home", { locale: "zh-CN" })` 在没有 zh-CN 行时沿 fallback 链返回 en 行（和 docs 一样）。现在没有 `src/pages/zh-CN/index.astro`，`/zh-CN/` 是 Astro 的 302 → `/`。
+
+**Files:**
+- Create: `scripts/lib/home-content.mjs`、`scripts/lib/home-content.test.mjs`、`src/components/blocks/Hero.astro`、`src/components/blocks/FeatureGrid.astro`、`src/components/HomePage.astro`、`src/pages/zh-CN/index.astro`
+- Modify: `src/pages/index.astro`（整个替换）、`scripts/migrate.mjs`、spec §3、§7
+
+**Interfaces:**
+- Consumes: Task 1 的块类型和 `PageLayoutBlock`、`PageLayoutHeroBlock`、`PageLayoutFeatureGridBlock`（`emdash-env.d.ts`）；Task 4 的 `localizeHref`（`packages/web9-site/lib/nav.mjs`）和 `Base.astro` 的 `canonical` prop；Task 9 的 `upsertEntry`；Task 10 的 `verify`。
+- Produces: `homePayload(locale) → want`（`scripts/lib/home-content.mjs`）；runner 步骤 `home`（`all` 的最后一步）；`verify` 多检查 `/` 和 `/zh-CN/` 两页。
+
+- [ ] **Step 1: 写失败的测试**
+
+Create `scripts/lib/home-content.test.mjs`（第二个测试把 seed 应用到临时 SQLite 库，再用 EmDash 的 `normalizeBlocksData` 校验，做法同 Task 1 的 `seed/seed.apply.test.mjs`）：
+
+```js
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { SchemaRegistry, normalizeBlocksData } from "emdash";
+import { runMigrations } from "emdash/db";
+import { createDialect } from "emdash/db/sqlite";
+import { applySeed } from "emdash/seed";
+import { Kysely } from "kysely";
+import { afterAll, describe, expect, it } from "vitest";
+import { homePayload } from "./home-content.mjs";
+
+describe("homePayload", () => {
+	it("links each locale's button to its own intro and fixes the Energe typo", () => {
+		expect(homePayload("en").data.layout[0]).toMatchObject({ primary_label: "Magic Starts", primary_href: "/docs/intro" });
+		expect(homePayload("zh-CN").data.layout[0]).toMatchObject({ primary_label: "魔法启动", primary_href: "/zh-CN/docs/intro" });
+		expect(JSON.stringify(homePayload("en"))).not.toContain("Energe");
+		expect(homePayload("zh-CN").data.layout[1].features.map((f) => f.image.src)).toEqual(["/img/metaverse.svg", "/img/energy_free.svg", "/img/ai.svg"]);
+		expect(() => homePayload("fr")).toThrow(/no home page text/);
+	});
+});
+
+// The block values must pass EmDash's own validation for the seeded schema, and come back unchanged:
+// otherwise every runner pass would see a difference and write again.
+const dir = mkdtempSync(join(tmpdir(), "web9-home-"));
+afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+describe("homePayload against the seeded schema", () => {
+	it("is valid and already normalized for both locales", async () => {
+		const db = new Kysely({ dialect: createDialect({ url: `file:${join(dir, "home.db")}` }) });
+		try {
+			await runMigrations(db);
+			await applySeed(db, JSON.parse(readFileSync(new URL("../../seed/seed.json", import.meta.url), "utf8")), { includeContent: false, onConflict: "skip" });
+			const pages = await new SchemaRegistry(db).getCollectionWithFields("pages");
+			for (const locale of ["en", "zh-CN"]) {
+				const { data } = homePayload(locale);
+				expect(await normalizeBlocksData(db, pages, data)).toEqual(data);
+			}
+			await expect(normalizeBlocksData(db, pages, { layout: [{ ...homePayload("en").data.layout[0], primary_href: "" }] })).rejects.toThrow(/URL must use/);
+		} finally {
+			await db.destroy();
+		}
+	});
+});
+```
+
+- [ ] **Step 2: 跑测试，确认失败**
+
+Run: `npx vitest run scripts/lib/home-content.test.mjs`
+Expected: FAIL：`home-content.mjs` 不存在。
+
+- [ ] **Step 3: 实现内容**
+
+Create `scripts/lib/home-content.mjs`：
+
+```js
+// pages/home for en and zh-CN (spec §2, §7): the old Docusaurus home (legacy/src/pages/index.tsx,
+// HomepageFeatures, i18n/zh-CN/code.json) as hero + feature_grid blocks in the `layout` field.
+// Stable _keys, so a re-run compares equal and an edit needs no replaceBlocks.
+
+/** A static file in public/img, in the shape the admin's "from URL" picker stores. No width/height:
+ * with both set, EmDash sends same-origin images through astro:assets. */
+const svg = (file, alt) => ({ id: "", provider: "external", src: `/img/${file}`, mimeType: "image/svg+xml", alt });
+
+const TEXT = {
+	en: {
+		start: "Magic Starts",
+		web3: "VR, AR and Decentralization is the passcode to Web3",
+		// The old site said "Energe free"; fixed on purpose (plan 2 rulings).
+		energy: "Energy free is the key milestone of technology",
+		ai: "Artificial Intelligence is the wind to blow you into immersive future",
+	},
+	"zh-CN": {
+		start: "魔法启动",
+		web3: "VR和AR搭载去中心化技术是去往Web3的通行证",
+		energy: "能源自由是人类科技颠覆的里程碑",
+		ai: "AI是风, 吹响科技跨越裂谷",
+	},
+};
+
+/** upsertEntry payload for one locale. Hero title, tagline and feature titles were never translated. */
+export function homePayload(locale) {
+	const t = TEXT[locale];
+	if (!t) throw new Error(`no home page text for ${locale}`);
+	return {
+		collection: "pages",
+		slug: "home",
+		locale,
+		status: "published",
+		data: {
+			title: "Web9.AI",
+			layout: [
+				{
+					_type: "hero",
+					_version: 1,
+					_key: "home-hero",
+					title: "Web9.AI",
+					tagline: "square of web3 to the power of AI",
+					primary_label: t.start,
+					primary_href: `${locale === "en" ? "" : `/${locale}`}/docs/intro`,
+				},
+				{
+					_type: "feature_grid",
+					_version: 1,
+					_key: "home-features",
+					features: [
+						{ title: "Web3", description: t.web3, image: svg("metaverse.svg", "Web3") },
+						{ title: "Energy", description: t.energy, image: svg("energy_free.svg", "Energy") },
+						{ title: "AI", description: t.ai, image: svg("ai.svg", "AI") },
+					],
+				},
+			],
+		},
+	};
+}
+```
+
+Run: `npx vitest run scripts/lib/home-content.test.mjs`
+Expected: PASS（2 个测试）。
+
+- [ ] **Step 4: 渲染组件和路由**
+
+Create `src/components/blocks/Hero.astro`：
+
+```astro
+---
+// `hero` block of pages.layout (seed blockTypes). Block props only reach text, href and src, never a
+// class attribute; the url fields only accept http(s), mailto, tel and site-relative paths.
+import { Image } from "emdash/ui";
+import type { PageLayoutHeroBlock } from "../../../emdash-env";
+
+interface Props {
+	value: PageLayoutHeroBlock;
+	index: number;
+	blockKey: string;
+}
+const { value: b, index } = Astro.props;
+// The first block of a page carries its h1.
+const Heading = index === 0 ? "h1" : "h2";
+const buttons = [
+	{ label: b.primary_label, href: b.primary_href, primary: true },
+	{ label: b.secondary_label, href: b.secondary_href, primary: false },
+].filter((x) => x.label && x.href);
+---
+
+<section class="border-b border-border bg-surface px-4 py-16 text-center">
+	<Heading class="text-5xl font-bold tracking-tight text-text">{b.title}</Heading>
+	{b.tagline && <p class="mx-auto mt-4 max-w-2xl text-xl text-text-secondary">{b.tagline}</p>}
+	{b.image && <Image image={b.image} class="mx-auto mt-8 max-h-64 w-auto" priority />}
+	{
+		buttons.length > 0 && (
+			<div class="mt-8 flex flex-wrap justify-center gap-3">
+				{buttons.map((x) =>
+					x.primary ? (
+						<a class="rounded-md bg-brand px-6 py-3 text-lg font-medium text-on-brand no-underline hover:bg-brand-hover" href={x.href}>
+							{x.label}
+						</a>
+					) : (
+						<a class="rounded-md border border-border px-6 py-3 text-lg font-medium text-text no-underline hover:bg-bg-subtle" href={x.href}>
+							{x.label}
+						</a>
+					),
+				)}
+			</div>
+		)
+	}
+</section>
+```
+
+Create `src/components/blocks/FeatureGrid.astro`：
+
+```astro
+---
+// `feature_grid` block of pages.layout (seed blockTypes): up to 12 features, three per row from md up.
+import { Image } from "emdash/ui";
+import type { PageLayoutFeatureGridBlock } from "../../../emdash-env";
+
+interface Props {
+	value: PageLayoutFeatureGridBlock;
+	index: number;
+	blockKey: string;
+}
+const { value: b } = Astro.props;
+---
+
+<section class="mx-auto max-w-5xl px-4 py-12">
+	{b.title && <h2 class="mb-8 text-center text-3xl font-semibold text-text">{b.title}</h2>}
+	<div class="grid gap-10 md:grid-cols-3">
+		{
+			(b.features ?? []).map((f) => (
+				<div class="text-center">
+					{f.image && <Image image={f.image} alt={f.image.alt ?? f.title} class="mx-auto size-48" />}
+					<h3 class="mt-4 text-xl font-semibold text-text">{f.title}</h3>
+					{f.description && <p class="mt-2 text-text-secondary">{f.description}</p>}
+				</div>
+			))
+		}
+	</div>
+</section>
+```
+
+Create `src/components/HomePage.astro`：
+
+```astro
+---
+// Home page for one locale: pages/home's `layout` blocks (spec §2). zh-CN without its own row gets the
+// en row through EmDash's fallback chain; an empty database gets a small stub, so `/` never 404s.
+import { getEmDashEntry, getSiteSettings } from "emdash";
+import { Blocks, defineBlockComponents } from "emdash/ui";
+import type { PageLayoutBlock } from "../../emdash-env";
+import { localizeHref } from "../../packages/web9-site/lib/nav.mjs";
+import Base from "../layouts/Base.astro";
+import { resolveBlogSiteIdentity } from "../utils/site-identity";
+import FeatureGrid from "./blocks/FeatureGrid.astro";
+import Hero from "./blocks/Hero.astro";
+
+interface Props {
+	locale: string;
+}
+const { locale } = Astro.props;
+
+const [{ entry: page, cacheHint }, settings] = await Promise.all([getEmDashEntry("pages", "home", { locale }), getSiteSettings()]);
+if (Astro.cache?.enabled && cacheHint) Astro.cache.set(cacheHint);
+const { siteTitle, siteTagline } = resolveBlogSiteIdentity(settings);
+const layout: PageLayoutBlock[] = page?.data.layout ?? [];
+const components = defineBlockComponents<PageLayoutBlock>({ hero: Hero, feature_grid: FeatureGrid });
+const canonical = new URL(localizeHref("/", locale), Astro.site).href;
+---
+
+<Base
+	title={page?.data.title ?? siteTitle}
+	description={siteTagline}
+	canonical={canonical}
+	content={page ? { collection: "pages", id: page.data.id, slug: "home" } : undefined}
+>
+	{
+		layout.length > 0 ? (
+			<Blocks value={layout} components={components} />
+		) : (
+			<section class="px-4 py-24 text-center">
+				<h1 class="text-4xl font-bold text-text">{siteTitle}</h1>
+				<p class="mt-3 text-text-secondary">{siteTagline}</p>
+				<a class="mt-6 inline-block text-brand" href={localizeHref("/docs/intro", locale)}>
+					Docs
+				</a>
+			</section>
+		)
+	}
+</Base>
+```
+
+`src/pages/index.astro` 整个替换成（模板的文章列表首页不再需要，`/posts` 已经有列表）：
+
+```astro
+---
+import HomePage from "../components/HomePage.astro";
+---
+
+<HomePage locale="en" />
+```
+
+Create `src/pages/zh-CN/index.astro`：
+
+```astro
+---
+import HomePage from "../../components/HomePage.astro";
+---
+
+<HomePage locale="zh-CN" />
+```
+
+只用模板 token（`bg-surface`、`text-text-secondary`、`bg-brand`……），没有 `dark:`，没有 Global Constraints 里禁止的定位/视口 utility。块的字段只进入文字、`href`、`src`，不进入 `class`。
+
+- [ ] **Step 5: runner 加 `home` 步骤**
+
+```diff
+diff --git a/scripts/migrate.mjs b/scripts/migrate.mjs
+--- a/scripts/migrate.mjs
++++ b/scripts/migrate.mjs
+@@ -3,11 +3,12 @@
+ // reports "unchanged" for everything already in place and writes nothing.
+ //
+ //   node scripts/migrate.mjs <step>... [--dry-run]
+-//   steps: docs, menu, posts, redirects, verify (reads only), all (every write step, in order)
++//   steps: docs, menu, posts, redirects, home, verify (reads only), all (every write step, in order)
+ // Env: EMDASH_URL (default http://localhost:4321), EMDASH_TOKEN (default: .local/dev-token). The
+ // redirects step needs an admin token (the dev-bypass token is one).
+ import { parseArgs } from "node:util";
+ import { docPayloads } from "./lib/docs-payloads.mjs";
++import { homePayload } from "./lib/home-content.mjs";
+ import { readLegacyTree } from "./lib/legacy-tree.mjs";
+ import { checkMarkers } from "./lib/markers.mjs";
+ import { callTool, defaultToken } from "./lib/mcp.mjs";
+@@ -37,6 +38,12 @@ const REDIRECT_SAMPLES = [
+ 	["/blog/atom.xml", "/rss.xml"],
+ ];
+ 
++/** The home pages (Task 11): blocks rendered, buttons localized, no missing-renderer placeholder. */
++const HOME_CHECKS = [
++	{ url: "/", present: [">Magic Starts</a>", 'href="/docs/intro"', 'src="/img/energy_free.svg"', "Energy free is"], absent: ["data-emdash-missing-block", "Energe"] },
++	{ url: "/zh-CN/", present: [">魔法启动</a>", 'href="/zh-CN/docs/intro"', "能源自由"], absent: ["data-emdash-missing-block"] },
++];
++
+ /** JSON `data` of an EmDash REST call made with the runner's token. */
+ async function request(method, path, body) {
+ 	const res = await fetch(new URL(path, site), {
+@@ -81,9 +88,18 @@ const STEPS = {
+ 	async redirects() {
+ 		return syncRedirects(request, legacyRedirects(readLegacyTree()), { dryRun });
+ 	},
++	async home() {
++		const en = await upsertEntry(callTool, homePayload("en"), { dryRun });
++		const zh = homePayload("zh-CN");
++		if (en.id) Object.assign(zh, { translationOf: en.id, translationGroup: en.translationGroup });
++		return [
++			{ name: "en home", ...en },
++			{ name: "zh-CN home", ...(await upsertEntry(callTool, zh, { dryRun })) },
++		];
++	},
+ 	async verify() {
+ 		const tree = readLegacyTree();
+-		const checks = docPageChecks(docPayloads(tree));
++		const checks = [...docPageChecks(docPayloads(tree)), ...HOME_CHECKS];
+ 		const failures = [];
+ 		for (const check of checks) {
+ 			const res = await fetch(new URL(check.url, site));
+@@ -104,7 +120,7 @@ const STEPS = {
+ 		return [];
+ 	},
+ };
+-const WRITE_STEPS = ["docs", "menu", "posts", "redirects"];
++const WRITE_STEPS = ["docs", "menu", "posts", "redirects", "home"];
+ 
+ const steps = positionals.includes("all") ? WRITE_STEPS : positionals;
+ if (!steps.length || steps.some((s) => !STEPS[s])) {
+```
+
+用 `git apply` 应用（写计划时在 Task 10 的 `migrate.mjs` 上验证过）。
+
+- [ ] **Step 6: 跑测试，确认通过**
+
+Run: `npm test`
+Expected: PASS。
+
+- [ ] **Step 7: 本地写入首页并检查**
+
+```bash
+cd /Users/john/git/web9ai
+node scripts/migrate.mjs home --dry-run
+node scripts/migrate.mjs home
+node scripts/migrate.mjs all
+node scripts/migrate.mjs verify
+```
+
+Expected：dry run `home (dry run): created 2`；写入 `home: created 2`；`all` 全部 unchanged（`home: unchanged 2`）；`verify: 54/54 pages ok`（52 个 doc 页 + 2 个首页）和 `verify: 74/74 redirects ok`。如果 `all` 里 home 是 "updated"：看 diff 路径（例如存储时给 image 加了字段），按 Task 9 Step 5 的规则处理。
+
+```bash
+node scripts/check-page.mjs http://localhost:4321/ '<h1 class="text-5xl' 'rel="canonical" href="https://www.web9.ai/"' 'loading="lazy"' --absent 'data-emdash-missing-block' 'No posts yet'
+node scripts/check-page.mjs http://localhost:4321/zh-CN/ '魔法启动' 'rel="canonical" href="https://www.web9.ai/zh-CN/"' 'href="/zh-CN/docs/intro"' --absent 'data-emdash-missing-block'
+curl -sI http://localhost:4321/zh-CN/ | command grep -i '^HTTP'
+```
+
+Expected：两个 `check-page` 通过；`/zh-CN/` 是 `200`（不再是 302）。
+
+用 CDP（page 8）分别打开 `/`、`/zh-CN/`，浅色和深色各截一张图：hero 居中、三张图三列（窄屏一列）、按钮可点到 intro。再打开后台 `/_emdash/admin` 里的 Pages → home，确认 Layout 字段显示 Hero 和 Feature grid 两个块、可以展开编辑（只看，不保存）。
+
+- [ ] **Step 8: 更新 spec**
+
+- §7 的 "首页：……" 那条换成："首页（计划 2 Task 11）：块类型 `hero`、`feature_grid` 和 `pages.layout` 在 seed 里（Task 1）；runner 的 `home` 步骤写入 `pages/home` 的 en、zh-CN 两行（内容在 `scripts/lib/home-content.mjs`，来自旧首页的 hero、3 个 features 和 `code.json` 的中文；"Energe" 改成了 "Energy"）。`/`、`/zh-CN/` 由 `HomePage.astro` 用 `<Blocks>` 渲染，库里没有首页时显示占位。"
+- §3 表格"页面块"那一行的"新增一种组件需要做什么"（Task 1 已改过）末尾，确认写的是 "在 `HomePage.astro` 的 components map 里登记"；不是的话改成这样。
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add scripts/lib/home-content.mjs scripts/lib/home-content.test.mjs src/components/blocks/Hero.astro src/components/blocks/FeatureGrid.astro src/components/HomePage.astro src/pages/index.astro src/pages/zh-CN/index.astro scripts/migrate.mjs docs/superpowers/specs/2026-10-15-emdash-migration-design.md
+git commit -m "feat(home): hero and feature_grid renderers, en and zh-CN home routes, pages/home content
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
+```
+
+---
