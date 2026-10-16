@@ -105,7 +105,7 @@
 | `packages/web9-blocks/lib/to-markdown.mjs` + test | `blocksToMarkdown()`：给 LLM 的 Markdown，不输出 `ec:block` JSON | 13 |
 | `packages/web9-blocks/lib/investment-warning.mjs` | 风险提示文字（`.astro` 和 Markdown 共用） | 13 |
 | `packages/web9-site/lib/llms.mjs` + test | `buildLlmsTxt()` | 13 |
-| `src/pages/llms.txt.ts`、`src/pages/zh-CN/llms.txt.ts`、`src/pages/docs/[slug].md.ts`、`src/pages/zh-CN/docs/[slug].md.ts` | 给 AI 读的入口 | 13 |
+| `src/utils/ai-entry.ts`、`src/pages/llms.txt.ts`、`src/pages/zh-CN/llms.txt.ts`、`src/pages/docs/[slug].md.ts`、`src/pages/zh-CN/docs/[slug].md.ts` | 给 AI 读的入口 | 13 |
 | `packages/web9-blocks/astro/ToolGrid.astro`、`src/styles/global.css` | 样式小问题 | 14 |
 | `package.json`、`.github/workflows/ci.yml` | 依赖清理；CI 加构建和 CSS 检查 | 14 |
 | spec、`CLAUDE.md`、`AGENTS.md` | 记录结论和规则 | 各任务 |
@@ -5457,6 +5457,448 @@ Expected：`npm test` PASS；三个 `check-page` 通过；`/pages/no-such-page` 
 ```bash
 git add packages/web9-site/lib/docs-nav.mjs packages/web9-site/lib/docs-nav.test.mjs src/components/DocsPage.astro 'src/pages/pages/[slug].astro' docs/superpowers/specs/2026-10-15-emdash-migration-design.md
 git commit -m "feat(docs): sidebar labels, canonical (fallback pages point at en), readable group headings; 404 for missing pages
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
+```
+
+---
+
+### Task 13: 给 AI 读的入口：`/llms.txt`、`/docs/<slug>.md`
+
+**模型：** standard
+
+spec §8 的最后一条：让 AI 不用解析 HTML 就能读站点。调研（`p2-research-4-ai-entry.md`）的结论：
+- EmDash 没有 llms.txt 或 Markdown 路由。`emdash/client` 导出的 `portableTextToMarkdown(blocks)` 是同步纯函数，能在 workerd 里跑（EmDash 自己的 MCP server 就在服务端用它），但它把 core 的 `block`、`code`、`image` 以外的所有块都写成 `<!--ec:block {json} -->`：真实的 `ai-tools-adhoc`（51 块）里有 28 个变成了 JSON，包括 web9 的块、core `table` 和 `break`。所以要包一层：web9 块、表格、分隔线、`embed` 自己写成 Markdown，`htmlBlock` 和未知类型直接丢掉（不输出 JSON：对 LLM 是噪音，也是 prompt injection 的入口）。
+- `[slug].md.ts` 这种部分动态的路由在 Astro 里优先于 `[slug].astro`，所以 `/docs/foo.md` 会进 endpoint。EmDash 的重定向中间件跳过带扩展名的路径，不会干扰。
+- zh-CN 的 `llms.txt` 只列有翻译的 doc；zh-CN 的 `.md` 在只有 en fallback 时返回 404（en 的 Markdown 有自己的 URL，和 Task 12 的 canonical 规则一致）。
+
+写计划时把本任务的全部文件临时放进 dev 跑过（之后已删除）：`/llms.txt`、`/zh-CN/llms.txt` 是 `200 text/plain`；`/docs/ai-tools-adhoc.md` 是 `200 text/markdown`，14 KB，没有 `ec:block`；有翻译的 `/zh-CN/docs/ai-e2e.md` 是 200；fallback 的 `/zh-CN/docs/ai-tools-adhoc.md` 和不存在的 `/docs/nope.md` 是 404；`/docs/ai-tools-adhoc` 仍然是 HTML 页面。
+
+**Files:**
+- Create: `packages/web9-blocks/lib/investment-warning.mjs`、`packages/web9-blocks/lib/to-markdown.mjs`、`packages/web9-blocks/lib/to-markdown.test.mjs`、`packages/web9-site/lib/llms.mjs`、`packages/web9-site/lib/llms.test.mjs`、`src/utils/ai-entry.ts`、`src/pages/llms.txt.ts`、`src/pages/zh-CN/llms.txt.ts`、`src/pages/docs/[slug].md.ts`、`src/pages/zh-CN/docs/[slug].md.ts`
+- Modify: `packages/web9-blocks/astro/InvestmentWarning.astro`、`packages/web9-blocks/package.json`（exports）、spec §8
+
+**Interfaces:**
+- Consumes: Task 12 的 `groupDocs`（`packages/web9-site/lib/docs-nav.mjs`）；Task 6–7 的 `mdxToBlocks` 和 fixture `scripts/lib/fixtures/01_ai_hot_tools.mdx`（只在测试里）。
+- Produces:
+  - `blocksToMarkdown(body, { origin? }) → string`（`@web9/blocks/to-markdown`）；
+  - `DISCLAIMER`、`disclaimerFor(lang)`（`packages/web9-blocks/lib/investment-warning.mjs`）；
+  - `buildLlmsTxt({ site, locale, siteTitle, tagline, entries }) → string`（`packages/web9-site/lib/llms.mjs`）；
+  - `llmsTxt(locale, context)`、`docMarkdown(locale, context)`（`src/utils/ai-entry.ts`），四个路由各一行调用。
+
+- [ ] **Step 1: 写失败的测试**
+
+Create `packages/web9-blocks/lib/to-markdown.test.mjs`：
+
+```js
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import { mdxToBlocks } from "../../../scripts/lib/mdx-to-pt.mjs";
+import { DISCLAIMER } from "./investment-warning.mjs";
+import { blocksToMarkdown } from "./to-markdown.mjs";
+
+const text = (t, style = "normal") => ({ _type: "block", _key: t, style, markDefs: [], children: [{ _type: "span", _key: `${t}s`, text: t, marks: [] }] });
+
+describe("blocksToMarkdown", () => {
+	it("writes web9 blocks, tables, breaks and embeds as Markdown", () => {
+		const md = blocksToMarkdown([
+			text("Intro", "h2"),
+			{ _type: "callout", tone: "warning", title: "Heads up", body: "Be **careful**." },
+			{ _type: "tabs", tabs: [{ label: "Mac", body: "brew install x" }, { label: "Linux", body: "apt install x" }] },
+			{ _type: "details", summary: "More", body: "Hidden text" },
+			{ _type: "mermaid", code: "graph TD; A-->B" },
+			{ _type: "tool_grid", title: "Tools", tools: [{ name: "Coze [beta]", url: "https://www.coze.com/", tagline: "AI\nAgent" }, { name: "Bad", url: "javascript:alert(1)" }] },
+			{ _type: "investment_warning", lang: "en" },
+			{ _type: "table", hasHeaderRow: true, rows: [{ cells: [{ content: [{ _type: "span", text: "A" }] }, { content: [{ _type: "span", text: "B|C" }] }] }, { cells: [{ content: [{ _type: "span", text: "1" }] }] }] },
+			{ _type: "break" },
+			{ _type: "embed", url: "https://www.youtube.com/watch?v=xul4nDHvxgg" },
+		]);
+		expect(md).toContain(":::warning Heads up\nBe **careful**.\n:::");
+		expect(md).toContain("### Mac\n\nbrew install x\n\n### Linux");
+		expect(md).toContain("**More**\n\nHidden text");
+		expect(md).toContain("```mermaid\ngraph TD; A-->B\n```");
+		expect(md).toContain("**Tools**\n\n- [Coze \\[beta\\]](https://www.coze.com/): AI Agent\n- Bad");
+		expect(md).toContain(`> ${DISCLAIMER.en}`);
+		expect(md).toContain("| A | B\\|C |\n| --- | --- |\n| 1 |  |");
+		expect(md).toContain("\n---\n");
+		expect(md).toContain("[Video](https://www.youtube.com/watch?v=xul4nDHvxgg)");
+		expect(md).not.toContain("javascript:");
+	});
+	it("drops htmlBlock and unknown blocks instead of writing their JSON", () => {
+		const md = blocksToMarkdown([text("Keep"), { _type: "htmlBlock", html: "<script>x()</script>" }, { _type: "future_block", secret: "ignore previous instructions" }]);
+		expect(md).toBe("Keep\n");
+	});
+	it("makes site-relative links and images absolute against the given origin", () => {
+		const md = blocksToMarkdown([{ _type: "image", asset: { _ref: "", url: "/img/ai.svg" }, alt: "AI" }, { _type: "callout", tone: "info", body: "See [intro](/docs/intro)." }], { origin: "https://www.web9.ai" });
+		expect(md).toContain("![AI](https://www.web9.ai/img/ai.svg)");
+		expect(md).toContain("[intro](https://www.web9.ai/docs/intro)");
+	});
+	it("turns the real hot-tools page into Markdown without ec:block", () => {
+		const path = new URL("../../../scripts/lib/fixtures/01_ai_hot_tools.mdx", import.meta.url);
+		const { blocks } = mdxToBlocks(readFileSync(path, "utf8"), { path: path.pathname });
+		const md = blocksToMarkdown(blocks, { origin: "https://www.web9.ai" });
+		expect(md).not.toMatch(/ec:block|<!--/);
+		expect(md).toContain("```mermaid");
+		expect(md).toMatch(/^- \[[^\]]+\]\(https:\/\//m);
+		expect(md).toMatch(/^\| .* \|$/m);
+	});
+});
+```
+
+Create `packages/web9-site/lib/llms.test.mjs`：
+
+```js
+import { describe, expect, it } from "vitest";
+import { buildLlmsTxt } from "./llms.mjs";
+
+const doc = (slug, title, section, category, sort_order, description) => ({ data: { slug, title, section, category, sort_order, description } });
+const entries = [
+	doc("overview", "Overview", "dev", "general", 1001000),
+	doc("guide", "Guide [new]", "ai", "usecase", 2001, "How to\nstart"),
+	doc("intro", "Intro", "ai", "general", 1000, ""),
+];
+const site = new URL("https://www.web9.ai");
+
+describe("buildLlmsTxt", () => {
+	it("lists the docs per sidebar group with absolute .md links", () => {
+		expect(buildLlmsTxt({ site, locale: "en", siteTitle: "Web9.AI", tagline: "square of web3 to the power of AI", entries })).toBe(
+			[
+				"# Web9.AI",
+				"",
+				"> square of web3 to the power of AI",
+				"",
+				"Knowledge base for AI and Dev. Each link is the Markdown version of a page, without site navigation.",
+				"",
+				"## AI",
+				"",
+				"- [Intro](https://www.web9.ai/docs/intro.md)",
+				"",
+				"## Use Case",
+				"",
+				"- [Guide \\[new\\]](https://www.web9.ai/docs/guide.md): How to start",
+				"",
+				"## Dev",
+				"",
+				"- [Overview](https://www.web9.ai/docs/overview.md)",
+				"",
+				"## Optional",
+				"",
+				"- [中文 llms.txt](https://www.web9.ai/zh-CN/llms.txt)",
+				"- [Blog RSS](https://www.web9.ai/rss.xml)",
+				"- [Sitemap](https://www.web9.ai/sitemap.xml)",
+				"",
+			].join("\n"),
+		);
+	});
+	it("uses the locale prefix and zh-CN labels", () => {
+		const txt = buildLlmsTxt({ site, locale: "zh-CN", siteTitle: "Web9.AI", tagline: "t", entries: [entries[1]] });
+		expect(txt).toContain("## 神兵利器\n\n- [Guide \\[new\\]](https://www.web9.ai/zh-CN/docs/guide.md)");
+		expect(txt).toContain("- [English llms.txt](https://www.web9.ai/llms.txt)");
+		expect(txt).toContain("AI 与 Dev 知识库");
+	});
+});
+```
+
+- [ ] **Step 2: 跑测试，确认失败**
+
+Run: `npx vitest run packages/web9-blocks/lib/to-markdown.test.mjs packages/web9-site/lib/llms.test.mjs`
+Expected: FAIL：`to-markdown.mjs`、`investment-warning.mjs`、`llms.mjs` 不存在。
+
+- [ ] **Step 3: 实现纯函数**
+
+Create `packages/web9-blocks/lib/investment-warning.mjs`（文字从 `InvestmentWarning.astro` 移过来，渲染和 Markdown 共用）：
+
+```js
+// Disclaimer text of the investment_warning block, shared by the renderer and the Markdown output.
+export const DISCLAIMER = {
+	zh: "请注意，本站一切内容并不构成投资指导或建议。所展示的资料仅用于信息传递，不应被理解为，也不应依赖于作为投资或财务决策的推荐。读者需对自己做出的任何投资决策承担全部责任，建议在需要的情况下寻求独立的财务或投资建议。",
+	en: "Please be duly advised that the content herein does not constitute investment guidance or advice. The material presented is purely for informational purposes and should not be construed as, nor relied upon as a recommendation for investment or financial decision-making. The reader bears sole responsibility for any investment decisions made, and it is recommended that they seek independent financial advice as required.",
+};
+
+/** Text for a block's `lang`; anything but "en" gets the Chinese text, as on the old site. */
+export const disclaimerFor = (lang) => (lang === "en" ? DISCLAIMER.en : DISCLAIMER.zh);
+```
+
+Create `packages/web9-blocks/lib/to-markdown.mjs`：
+
+```js
+// Portable Text -> Markdown for readers that are not browsers (llms.txt, /docs/<slug>.md; spec §8).
+// Core text, code and image go through EmDash's portableTextToMarkdown. That function writes every other
+// block as `<!--ec:block {json} -->`, which is noise to an LLM, so web9 blocks, tables, breaks and
+// embeds are written here, and anything else (htmlBlock, unknown or future types) is dropped.
+import { portableTextToMarkdown } from "emdash/client";
+import { disclaimerFor } from "./investment-warning.mjs";
+
+const CORE = new Set(["block", "code", "image"]);
+const oneLine = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
+const escLink = (s) => oneLine(s).replace(/([[\]\\])/g, "\\$1");
+const safeUrl = (u) => (typeof u === "string" && /^(?:https?:\/\/|\/(?!\/)|mailto:)/i.test(u) ? u : "");
+
+const cellText = (cell, tableDefs) =>
+	portableTextToMarkdown([{ _type: "block", children: cell.content ?? [], markDefs: [...tableDefs, ...(cell.markDefs ?? [])] }])
+		.trim()
+		.replace(/\|/g, "\\|")
+		.replace(/\s*\n\s*/g, " ");
+
+function tableToGfm(t) {
+	const rows = (t.rows ?? []).map((r) => (r.cells ?? []).map((c) => cellText(c, t.markDefs ?? [])));
+	if (!rows.length) return "";
+	const width = Math.max(...rows.map((r) => r.length));
+	const line = (r) => `| ${Array.from({ length: width }, (_, i) => r[i] ?? "").join(" | ")} |`;
+	// GFM needs a header row; a table without one gets an empty header
+	const [header, body] = t.hasHeaderRow === false ? [Array(width).fill(""), rows] : [rows[0], rows.slice(1)];
+	return [line(header), line(Array(width).fill("---")), ...body.map(line)].join("\n");
+}
+
+const SERIALIZERS = {
+	callout: ({ tone = "info", title, body }) => `:::${tone}${title ? ` ${oneLine(title)}` : ""}\n${(body ?? "").trim()}\n:::`,
+	// tab labels become headings one level below the last heading seen
+	tabs: ({ tabs = [] }, { level }) => tabs.map((t) => `${"#".repeat(Math.min(level + 1, 6))} ${oneLine(t.label)}\n\n${(t.body ?? "").trim()}`).join("\n\n"),
+	details: ({ summary, body }) => `**${oneLine(summary || "Details")}**\n\n${(body ?? "").trim()}`,
+	mermaid: ({ code }) => "```mermaid\n" + (code ?? "").trim() + "\n```",
+	tool_grid: ({ title, tools = [] }) =>
+		[
+			title && `**${oneLine(title)}**`,
+			tools
+				.map((t) => {
+					const url = safeUrl(t.url);
+					const tagline = oneLine(t.tagline);
+					return `- ${url ? `[${escLink(t.name)}](${url})` : escLink(t.name)}${tagline ? `: ${tagline}` : ""}`;
+				})
+				.join("\n"),
+		]
+			.filter(Boolean)
+			.join("\n\n"),
+	investment_warning: ({ lang }) => `> ${disclaimerFor(lang)}`,
+	embed: ({ url }) => (safeUrl(url) ? `[Video](${url})` : ""),
+	table: tableToGfm,
+	break: () => "---",
+};
+
+/** `](/img/x.png)` -> `](https://www.web9.ai/img/x.png)`. `origin` comes from Astro.site, never the request. */
+const absolutize = (md, origin) => md.replace(/\]\((\/(?!\/)[^)\s]*)\)/g, (_, p) => `](${new URL(p, origin).href})`);
+
+/** Markdown for a Portable Text value. Never contains `ec:block` JSON. */
+export function blocksToMarkdown(body, { origin } = {}) {
+	if (!Array.isArray(body)) return "";
+	const out = [];
+	let run = [];
+	let level = 1;
+	const flush = () => {
+		if (run.length) out.push(portableTextToMarkdown(run).trimEnd());
+		run = [];
+	};
+	for (const node of body) {
+		if (CORE.has(node?._type)) {
+			const heading = /^h([1-6])$/.exec(node.style ?? "");
+			if (heading) level = Number(heading[1]);
+			run.push(node); // consecutive core nodes are converted together, so lists keep their numbering
+			continue;
+		}
+		flush();
+		const md = Object.hasOwn(SERIALIZERS, node?._type) ? SERIALIZERS[node._type](node, { level }) : "";
+		if (md.trim()) out.push(md.trim());
+	}
+	flush();
+	const text = `${out.join("\n\n")}\n`;
+	return origin ? absolutize(text, origin) : text;
+}
+```
+
+Create `packages/web9-site/lib/llms.mjs`：
+
+```js
+// /llms.txt and /zh-CN/llms.txt (llmstxt.org; spec §8): site name, summary, then one list of docs per
+// sidebar group, each linking to the page's Markdown version (/docs/<slug>.md).
+import { groupDocs } from "./docs-nav.mjs";
+
+const oneLine = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
+const escLink = (s) => oneLine(s).replace(/([[\]\\])/g, "\\$1");
+
+const INTRO = {
+	en: "Knowledge base for AI and Dev. Each link is the Markdown version of a page, without site navigation.",
+	"zh-CN": "AI 与 Dev 知识库。每个链接都是页面的 Markdown 版本，不含站点导航。",
+};
+
+/**
+ * `site` is Astro.site (the configured origin), never the request Host. `entries` are the published docs
+ * of `locale` only: the zh-CN file lists translated docs, the untranslated ones are in the en file.
+ */
+export function buildLlmsTxt({ site, locale, siteTitle, tagline, entries }) {
+	const prefix = locale === "en" ? "" : `/${locale}`;
+	const abs = (path) => new URL(path, site).href;
+	const lines = [`# ${oneLine(siteTitle)}`, "", `> ${oneLine(tagline)}`, "", INTRO[locale] ?? INTRO.en, ""];
+	for (const { label, items } of groupDocs(entries, locale)) {
+		lines.push(`## ${label}`, "");
+		for (const e of items) {
+			const note = oneLine(e.data.description);
+			lines.push(`- [${escLink(e.data.title)}](${abs(`${prefix}/docs/${encodeURIComponent(e.data.slug)}.md`)})${note ? `: ${note}` : ""}`);
+		}
+		lines.push("");
+	}
+	lines.push("## Optional", "");
+	lines.push(locale === "en" ? `- [中文 llms.txt](${abs("/zh-CN/llms.txt")})` : `- [English llms.txt](${abs("/llms.txt")})`);
+	lines.push(`- [Blog RSS](${abs("/rss.xml")})`, `- [Sitemap](${abs("/sitemap.xml")})`);
+	return `${lines.join("\n")}\n`;
+}
+```
+
+`packages/web9-blocks/astro/InvestmentWarning.astro` 改用共享的文字：
+
+```diff
+diff --git a/packages/web9-blocks/astro/InvestmentWarning.astro b/packages/web9-blocks/astro/InvestmentWarning.astro
+--- a/packages/web9-blocks/astro/InvestmentWarning.astro
++++ b/packages/web9-blocks/astro/InvestmentWarning.astro
+@@ -1,12 +1,10 @@
+ ---
++import { disclaimerFor } from "../lib/investment-warning.mjs";
++
+ interface Props {
+ 	node: { _type: "investment_warning"; _key: string; lang?: "zh" | "en" };
+ }
+ const { node } = Astro.props;
+-const TEXT = {
+-	zh: "请注意，本站一切内容并不构成投资指导或建议。所展示的资料仅用于信息传递，不应被理解为，也不应依赖于作为投资或财务决策的推荐。读者需对自己做出的任何投资决策承担全部责任，建议在需要的情况下寻求独立的财务或投资建议。",
+-	en: "Please be duly advised that the content herein does not constitute investment guidance or advice. The material presented is purely for informational purposes and should not be construed as, nor relied upon as a recommendation for investment or financial decision-making. The reader bears sole responsibility for any investment decisions made, and it is recommended that they seek independent financial advice as required.",
+-};
+ ---
+ 
+-<aside class="callout callout--warning"><p>{Object.hasOwn(TEXT, node?.lang ?? "") ? TEXT[node.lang as keyof typeof TEXT] : TEXT.zh}</p></aside>
++<aside class="callout callout--warning"><p>{disclaimerFor(node?.lang)}</p></aside>
+```
+
+`packages/web9-blocks/package.json` 的 `exports` 里，在 `"./html"`（Task 2 加的）后面加一行：
+
+```json
+    "./to-markdown": "./lib/to-markdown.mjs",
+```
+
+- [ ] **Step 4: 跑测试，确认通过**
+
+Run: `npm test`
+Expected: PASS。
+
+- [ ] **Step 5: 路由**
+
+Create `src/utils/ai-entry.ts`：
+
+```ts
+// Responses for readers that are not browsers (spec §8): /llms.txt and /docs/<slug>.md, per locale.
+// Absolute URLs come from Astro.site, never the request Host.
+import type { APIContext } from "astro";
+import { decodeSlug, getEmDashCollection, getEmDashEntry, getSiteSettings } from "emdash";
+import { blocksToMarkdown } from "@web9/blocks/to-markdown";
+import { buildLlmsTxt } from "../../packages/web9-site/lib/llms.mjs";
+import { resolveBlogSiteIdentity } from "./site-identity";
+
+const notFound = () => new Response("Not found\n", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+
+/** llms.txt listing the published docs of `locale`. */
+export async function llmsTxt(locale: string, { site, cache }: APIContext): Promise<Response> {
+	if (!site) throw new Error("astro.config `site` must be set");
+	const [{ entries, cacheHint }, settings] = await Promise.all([
+		getEmDashCollection("docs", { locale, status: "published", limit: 500 }),
+		getSiteSettings(),
+	]);
+	if (cache?.enabled && cacheHint) cache.set(cacheHint);
+	const { siteTitle, siteTagline } = resolveBlogSiteIdentity(settings);
+	return new Response(buildLlmsTxt({ site, locale, siteTitle, tagline: siteTagline, entries }), {
+		headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=3600" },
+	});
+}
+
+/**
+ * One doc as Markdown. 404 when it does not exist, and on zh-CN when only the en fallback exists:
+ * the zh-CN llms.txt lists translated docs only, and the en Markdown has its own URL.
+ */
+export async function docMarkdown(locale: string, { params, site, cache }: APIContext): Promise<Response> {
+	if (!site) throw new Error("astro.config `site` must be set");
+	const slug = decodeSlug(params.slug);
+	if (!slug) return notFound();
+	const { entry: doc, cacheHint, fallbackLocale } = await getEmDashEntry("docs", slug, { locale });
+	if (!doc || fallbackLocale) return notFound();
+	if (cache?.enabled && cacheHint) cache.set(cacheHint);
+	const { title, description, body } = doc.data;
+	const md = `# ${title}\n\n${description ? `> ${description}\n\n` : ""}${blocksToMarkdown(body, { origin: site.origin })}`;
+	return new Response(md, { headers: { "Content-Type": "text/markdown; charset=utf-8", "Cache-Control": "public, max-age=3600" } });
+}
+```
+
+Create `src/pages/llms.txt.ts`：
+
+```ts
+import type { APIRoute } from "astro";
+import { llmsTxt } from "../utils/ai-entry";
+
+export const GET: APIRoute = (context) => llmsTxt("en", context);
+```
+
+Create `src/pages/zh-CN/llms.txt.ts`：
+
+```ts
+import type { APIRoute } from "astro";
+import { llmsTxt } from "../../utils/ai-entry";
+
+export const GET: APIRoute = (context) => llmsTxt("zh-CN", context);
+```
+
+Create `src/pages/docs/[slug].md.ts`：
+
+```ts
+import type { APIRoute } from "astro";
+import { docMarkdown } from "../../utils/ai-entry";
+
+export const GET: APIRoute = (context) => docMarkdown("en", context);
+```
+
+Create `src/pages/zh-CN/docs/[slug].md.ts`：
+
+```ts
+import type { APIRoute } from "astro";
+import { docMarkdown } from "../../../utils/ai-entry";
+
+export const GET: APIRoute = (context) => docMarkdown("zh-CN", context);
+```
+
+dev 会自动加载新路由。如果新文件刚建好时报 "Failed to load url … Does the file exist?"（写计划时遇到过：Vite 缓存了导入方先于被导入文件出现时的解析失败），`touch` 一下导入它的文件再请求。
+
+- [ ] **Step 6: 检查**
+
+```bash
+cd /Users/john/git/web9ai
+node scripts/check-page.mjs http://localhost:4321/llms.txt '# Web9.AI' '## Use Case' '(https://www.web9.ai/docs/ai-tools-adhoc.md)' '## Optional' --absent 'localhost' 'ec:block'
+node scripts/check-page.mjs http://localhost:4321/zh-CN/llms.txt '## 神兵利器' '(https://www.web9.ai/zh-CN/docs/guide.md)' --absent 'zh-CN/docs/lambda.md' 'localhost'
+node scripts/check-page.mjs http://localhost:4321/docs/ai-tools-adhoc.md '# Adhoc GenAI Tools' ':::' '```mermaid' '(https://www.web9.ai/img/' --absent 'ec:block' '<!--' 'localhost'
+node scripts/check-page.mjs http://localhost:4321/docs/tools-summary.md '- [Notion AI](' --absent 'ec:block'
+node scripts/check-page.mjs http://localhost:4321/zh-CN/docs/guide.md '#' --absent 'ec:block'
+for u in /zh-CN/docs/lambda.md /docs/no-such-doc.md; do curl -s -o /dev/null -w "$u %{http_code}\n" http://localhost:4321$u; done
+curl -sI http://localhost:4321/docs/intro.md | command grep -i '^content-type'
+```
+
+Expected：五个 `check-page` 通过；`/zh-CN/docs/lambda.md`（没有翻译）和 `/docs/no-such-doc.md` 都是 `404`；`content-type: text/markdown; charset=utf-8`。
+
+再对全部 26 篇 en doc 各请求一次 `.md`，确认都没有 `ec:block`：
+
+```bash
+for s in $(curl -s http://localhost:4321/llms.txt | command grep -o 'docs/[^)]*\.md' | sed 's#docs/##; s#\.md$##'); do
+  curl -s http://localhost:4321/docs/$s.md | command grep -q 'ec:block' && echo "LEAK $s"
+done; echo done
+```
+
+Expected：只打印 `done`。
+
+- [ ] **Step 7: 更新 spec**
+
+§8 最后一条 "让 AI 读站点：……" 换成：
+
+"让 AI 读站点（计划 2 Task 13）：`/llms.txt`（en doc）和 `/zh-CN/llms.txt`（有翻译的 zh-CN doc），按侧栏分组列出，每个链接指向 `/docs/{slug}.md`。`.md` 由 `@web9/blocks/to-markdown` 的 `blocksToMarkdown` 生成：core 文本、代码、图片用 `emdash/client` 的 `portableTextToMarkdown`；web9 块、表格、分隔线、`embed` 写成 Markdown；`htmlBlock` 和未知块丢掉，输出里永远没有 `ec:block` JSON；站内相对链接和图片改成 `https://www.web9.ai/...`。zh-CN 的 `.md` 只在有翻译时存在。站内搜索另外通过 `WebMcpSearch`（Task 4）暴露给支持 WebMCP 的浏览器 agent。"
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add packages/web9-blocks/lib/investment-warning.mjs packages/web9-blocks/lib/to-markdown.mjs packages/web9-blocks/lib/to-markdown.test.mjs packages/web9-blocks/astro/InvestmentWarning.astro packages/web9-blocks/package.json packages/web9-site/lib/llms.mjs packages/web9-site/lib/llms.test.mjs src/utils/ai-entry.ts src/pages/llms.txt.ts src/pages/zh-CN/llms.txt.ts 'src/pages/docs/[slug].md.ts' 'src/pages/zh-CN/docs/[slug].md.ts' docs/superpowers/specs/2026-10-15-emdash-migration-design.md
+git commit -m "feat(ai): llms.txt and per-doc Markdown (no ec:block JSON) for en and zh-CN
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
