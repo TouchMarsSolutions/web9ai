@@ -121,6 +121,29 @@ describe("scanSheet", () => {
 		[String.raw`:is(.\[\&\[title\=\'\[\'\]\]\:inset-0)[title='[']{inset:0}`, String.raw`:is(.\[\&\[title\=\'\[\'\]\]\:inset-0)[title='[']`, "inset utility"],
 	])("flags a utility behind a quoted variant: %s", (css, selector, why) => expect(sheet(css)).toEqual([hit(selector, why)]));
 
+	// A hex-escaped bracket in an attribute value must not open a bracket in the class name: `data-[x=\5b]:z-50`.
+	it.each([
+		[String.raw`.data-\[x\=\\5b\]\:z-50[data-x="\5b"]{z-index:50}`, String.raw`.data-\[x\=\\5b\]\:z-50[data-x="\5b"]`, "z-index utility"],
+		[String.raw`.data-\[x\=\\28\]\:z-50[data-x="\28"]{z-index:50}`, String.raw`.data-\[x\=\\28\]\:z-50[data-x="\28"]`, "z-index utility"],
+		[String.raw`.\[\&\[title\=\\5b\]\]\:inset-0[title=\5b]{inset:0}`, String.raw`.\[\&\[title\=\\5b\]\]\:inset-0[title=\5b]`, "inset utility"],
+		[
+			String.raw`.group-\[\[x\=\\5b\]\]\:z-50:is(:where(.group):is([x=\5b]) *){z-index:50}`,
+			String.raw`.group-\[\[x\=\\5b\]\]\:z-50:is(:where(.group):is([x=\5b]) *)`,
+			"z-index utility",
+		],
+	])("flags a utility behind an escaped-bracket variant: %s", (css, selector, why) => expect(sheet(css)).toEqual([hit(selector, why)]));
+
+	// Tailwind turns `_` into a space, and `\76 ` (v) absorbs it: `h-[100\76_h]` is `height:100vh` after minifying.
+	it("flags a viewport unit split by an escape and an underscore", () => {
+		expect(sheet(String.raw`.h-\[100\\76_h\]{height:100vh}`)).toEqual([hit(String.raw`.h-\[100\\76_h\]`, "arbitrary viewport-unit value")]);
+	});
+	it("flags position:fixed written with a leading underscore", () => {
+		expect(sheet(String.raw`.\[position\:_fixed\]{position:fixed}`)).toEqual([
+			hit(String.raw`.\[position\:_fixed\]`, "arbitrary position:fixed property"),
+			hit(String.raw`.\[position\:_fixed\]`, "position:fixed"),
+		]);
+	});
+
 	it.each([
 		[".text-brand{color:var(--color-brand)}"],
 		[".site-header{position:sticky;top:0;z-index:100}"],
@@ -141,6 +164,9 @@ describe("scanSheet", () => {
 		[String.raw`.h-\(--x\,3rem\){height:var(--x,3rem)}`],
 		[String.raw`.w-\[50cqx\]{width:1px}`],
 		[".card{container-type:inline-size}"],
+		[String.raw`.shadow-\[0_0_0_1px_black\]{box-shadow:0 0 0 1px black}`],
+		[String.raw`.\[position\:_sticky\]{position:sticky}`],
+		[String.raw`.data-\[x\=\\5b\]\:flex[data-x="\5b"]{display:flex}`],
 	])("allows %s", (css) => expect(sheet(css)).toEqual([]));
 });
 
@@ -164,6 +190,7 @@ describe("scanSheet on Tailwind's own output", () => {
 		"2xl:z-50", "2xl:inset-0", "2xl:h-screen", "2xl:min-h-dvh", "2xl:h-screen!",
 		"h-(--x,100vh)", "min-h-(--x,100dvh)", "w-(--x,100vw)", "size-(--x,100vmax)",
 		"h-[100cqh]", "size-[100cqmax]", "w-[50cqw]", "w-[50cqi]", "h-[50cqb]", "h-[50cqmin]", "[--x:100cqh]",
+		"data-[x=\\5b]:z-50", "data-[x=\\28]:z-50", "[&[title=\\5b]]:inset-0", "group-[[x=\\5b]]:z-50", "h-[100\\76_h]",
 		"h-[100v\\68]", "data-[x='[']:z-50", "data-[x=\"[\"]:z-50", "[&[title='[']]:inset-0",
 		"[z-index:50]", "md:[z-index:9999]", "[inset:0]", "[inset-inline:0]", "[top:0]", "[left:-5px]", "[height:100vh]", "hover:[inset:0]!",
 	];
@@ -197,6 +224,17 @@ describe("classTokens", () => {
 	});
 	it("decodes a hex escape in a value, also behind an escaped backslash", () => {
 		expect(classTokens(String.raw`.h-\[100v\68 \] .h-\[100v\\68\]`)).toEqual(["h-[100vh]", "h-[100vh]"]);
+	});
+	it("decodes the second time only after the variants are split off", () => {
+		expect(classTokens(String.raw`.data-\[x\=\\5b\]\:z-50 .data-\[x\=\\28\]\:z-50 .\[\&\[title\=\\5b\]\]\:inset-0 .group-\[\[x\=\\5b\]\]\:z-50`)).toEqual([
+			"z-50",
+			"z-50",
+			"inset-0",
+			"z-50",
+		]);
+	});
+	it("turns an underscore into a space before the second decode, so an escape can absorb it", () => {
+		expect(classTokens(String.raw`.h-\[100\\76_h\] .shadow-\[0_0_0_100vmax_black\]`)).toEqual(["h-[100vh]", "shadow-[0 0 0 100vmax black]"]);
 	});
 	it("ignores quoted brackets when dropping variants", () => {
 		expect(classTokens(String.raw`.data-\[x\=\'\[\'\]\:z-50 .\[\&\[title\=\'\[\'\]\]\:inset-0 .data-\[x\=\"\[\"\]\:z-50`)).toEqual([

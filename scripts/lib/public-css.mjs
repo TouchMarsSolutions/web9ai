@@ -104,7 +104,7 @@ export const CLASS_DENY = [
 /** Arbitrary properties (`[z-index:50]`, `md:[inset:0]`) as a whole class name, important modifier already dropped. */
 const ARBITRARY_PROPERTY = /^\[([a-z-]+):(.*)\]$/i;
 const ARBITRARY_PROPERTY_DENY = [
-	[(prop, value) => prop === "position" && /^_*fixed(?![a-z])/i.test(value), "arbitrary position:fixed property"],
+	[(prop, value) => prop === "position" && /^\s*fixed(?![a-z])/i.test(value), "arbitrary position:fixed property"],
 	[(prop) => /^(?:inset(?:-.+)?|top|right|bottom|left)$/.test(prop), "arbitrary inset property"],
 	[(prop) => prop === "z-index", "arbitrary z-index property"],
 	[(_prop, value) => VIEWPORT_UNIT.test(value), "arbitrary property with a viewport-unit value"],
@@ -151,12 +151,14 @@ const decodeEscapes = (s) =>
 /**
  * Class names in a selector, unescaped, without variant prefixes and without the important modifier
  * (`.md\:fixed` → "fixed", `.h-screen\!` → "h-screen", `.\32 xl\:z-50` → "z-50", `.md\:\[z-index\:9\]` → "[z-index:9]").
- * The name is decoded twice: once for the selector, once more for escapes the class name itself carries into the value
- * (`h-[100v\68]` is selector `.h-\[100v\\68\]` and declaration `height:100v\68`, which the minifier writes as `100vh`).
+ * The selector's escapes are decoded once and the variants split off. Only the utility part is decoded again, after
+ * `_` becomes a space the way Tailwind reads it: the class name itself can carry an escape into the value
+ * (`h-[100\76_h]` is selector `.h-\[100\\76_h\]` and declaration `height:100\76 h`, which the minifier writes as
+ * `100vh`). A variant must not take part: `data-[x=\5b]:z-50` would decode to an unbalanced `[`.
  */
 export function classTokens(selector) {
 	return [...selector.matchAll(/\.((?:\\[0-9a-f]{1,6}[ \t\n\r\f]?|\\[\s\S]|[\w-])+)/gi)].map((m) =>
-		utilityPart(decodeEscapes(decodeEscapes(m[1]))).replace(/^!|!$/g, ""),
+		decodeEscapes(utilityPart(decodeEscapes(m[1])).replaceAll("_", " ")).replace(/^!|!$/g, ""),
 	);
 }
 
