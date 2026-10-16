@@ -8,6 +8,7 @@ describe("seed/seed.json", () => {
 	it("passes EmDash seed validation", () => {
 		const result = validateSeed(seed);
 		expect(result.errors).toEqual([]);
+		expect(result.warnings).toEqual([]);
 		expect(result.valid).toBe(true);
 	});
 	it("defines the docs collection as spec §2 requires", () => {

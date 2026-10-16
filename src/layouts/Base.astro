@@ -79,6 +79,8 @@ const pageCtx = createPublicPageContext({
 	seo: { ogImage: image, robots },
 	articleMeta: { publishedTime, modifiedTime, author },
 	siteName: siteTitle,
+	// Absolute URLs in head (hreflang alternates) use the canonical origin, never the request Host
+	siteUrl: Astro.site?.origin,
 });
 
 // Check if user is logged in (for showing admin link)
