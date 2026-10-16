@@ -4,6 +4,15 @@
 // plus locale and throws when nothing matches; content_update always writes a draft, so a published
 // entry needs content_publish afterwards; publishing clears draftRevisionId; translationOf takes the
 // en entry's ULID. On ENTRY_LOCKED the runner stops: it never passes overrideLock.
+//
+// Fail closed (plan 2 Task 9 review): a re-run in production must not undo what editors or AI agents did
+// since the migration. content_get returns a pending draft's data in place of the live data (liveData then
+// holds the live version), so "stored" below is the draft when there is one. The rules, for an entry that exists:
+//   - stored equals want and nothing is pending      -> unchanged
+//   - pending draft equal to want (an interrupted run) -> publish it
+//   - pending draft that differs from want            -> [PENDING_DRAFT], always (a human resolves it in the admin)
+//   - published entry that differs from want          -> [WOULD_OVERWRITE] unless `overwrite` (a dry run reports it)
+//   - want is a draft but the entry is published      -> [STATUS_MISMATCH] (the runner never unpublishes)
 
 /** JSON with object keys sorted, for comparing stored and wanted values. */
 export function canonical(value) {
@@ -53,12 +62,13 @@ async function write(callTool, name, args) {
 /**
  * Make one entry look like `want` = { collection, slug, locale, status: "published" | "draft", data,
  * translationOf?, translationGroup?, taxonomies?, publishedAt? }. Only the keys in want.data are compared
- * (search_text and other generated fields are left alone). translationOf (the en ULID) is used on create;
- * translationGroup (the en entry's) checks an existing translation is linked. Returns { action: "created"
- * | "updated" | "published" | "unchanged", id, translationGroup, diff? }; with dryRun nothing is written
- * and id is null for a would-be create.
+ * (search_text and other generated fields are left alone; taxonomies and publishedAt are only sent on create
+ * and update, not compared). translationOf (the en ULID) is used on create; translationGroup (the en entry's)
+ * checks an existing translation is linked. Returns { action: "created" | "updated" | "published" |
+ * "unchanged", id, translationGroup, diff? }; with dryRun nothing is written and id is null for a would-be
+ * create. An existing entry that differs is only replaced with `overwrite` (see the rules at the top).
  */
-export async function upsertEntry(callTool, want, { dryRun = false } = {}) {
+export async function upsertEntry(callTool, want, { dryRun = false, overwrite = false } = {}) {
 	const { collection, slug, locale, status, data } = want;
 	const found = await getEntry(callTool, collection, slug, locale);
 	if (!found) {
@@ -77,39 +87,57 @@ export async function upsertEntry(callTool, want, { dryRun = false } = {}) {
 		return { action: "created", id: createdItem.id, translationGroup: createdItem.translationGroup };
 	}
 	const { item } = found;
+	const where = `${collection}/${slug} (${locale})`;
 	if (want.translationGroup && item.translationGroup && item.translationGroup !== want.translationGroup) {
-		throw new Error(`${collection}/${slug} (${locale}) is not linked to its en original; delete it and run again`);
+		throw new Error(`${where} is not linked to its en original; delete it and run again`);
+	}
+	// The only status change the runner makes is to published.
+	if (status !== "published" && item.status !== status) {
+		throw new Error(`[STATUS_MISMATCH] ${where}: the migration wants status ${status} but the entry is ${item.status}; the runner never unpublishes, change it in the admin`);
 	}
 	const stored = Object.fromEntries(Object.keys(data).map((k) => [k, item.data?.[k]]));
 	const diff = firstDifference(stored, data);
-	const pendingDraft = item.draftRevisionId != null;
+	const pendingDraft = item.status === "published" && item.draftRevisionId != null;
 	const result = { id: item.id, translationGroup: item.translationGroup };
-	if (!diff && item.status === status && !(status === "published" && pendingDraft)) return { action: "unchanged", ...result };
-	if (dryRun) return { action: diff ? "updated" : "published", ...result, diff };
-	let rev = found._rev;
-	if (diff) {
-		const updated = await write(callTool, "content_update", {
-			collection,
-			id: item.id,
-			locale,
-			data,
-			_rev: rev,
-			...(want.taxonomies ? { taxonomies: want.taxonomies } : {}),
-		});
-		rev = updated._rev;
+	if (pendingDraft && diff) {
+		throw new Error(`[PENDING_DRAFT] ${where}: ${diff}; this entry has an unpublished draft that differs from the migration, publish or discard it in the admin (the runner never overwrites a draft)`);
 	}
-	if (status === "published") await write(callTool, "content_publish", { collection, id: item.id, _rev: rev, ...(want.publishedAt ? { publishedAt: want.publishedAt } : {}) });
-	return { action: diff ? "updated" : "published", ...result, diff };
+	if (!diff) {
+		if (item.status === status && !pendingDraft) return { action: "unchanged", ...result };
+		// A draft equal to want (left by an interrupted run), or an unpublished entry that should be live.
+		if (dryRun) return { action: "published", ...result };
+		await write(callTool, "content_publish", { collection, id: item.id, _rev: found._rev, ...(want.publishedAt ? { publishedAt: want.publishedAt } : {}) });
+		return { action: "published", ...result };
+	}
+	if (dryRun) return { action: "updated", ...result, diff };
+	if (!overwrite) throw new Error(`[WOULD_OVERWRITE] ${where}: ${diff}; the entry differs from the migration, re-run with --overwrite to replace it`);
+	const updated = await write(callTool, "content_update", {
+		collection,
+		id: item.id,
+		locale,
+		data,
+		_rev: found._rev,
+		...(want.taxonomies ? { taxonomies: want.taxonomies } : {}),
+	});
+	if (status === "published") await write(callTool, "content_publish", { collection, id: item.id, _rev: updated._rev, ...(want.publishedAt ? { publishedAt: want.publishedAt } : {}) });
+	return { action: "updated", ...result, diff };
 }
 
 /** Comparable form of a menu item, from either menu_get output or menu_set_items input. */
 const menuItem = (i) => ({ label: i.label, url: i.customUrl ?? i.url ?? "", target: i.target || "" });
 
-/** Replace the menu's items when they differ. Returns { action: "updated" | "unchanged" }. */
-export async function upsertMenu(callTool, name, items, { dryRun = false } = {}) {
+/**
+ * Replace the menu's items when they differ. Returns { action: "updated" | "unchanged", diff? }. Like entries,
+ * a menu that differs is only replaced with `overwrite` ([WOULD_OVERWRITE] otherwise); a dry run reports it.
+ */
+export async function upsertMenu(callTool, name, items, { dryRun = false, overwrite = false } = {}) {
 	const current = await callTool("menu_get", { name });
 	const have = (current.items ?? current.menu?.items ?? []).map(menuItem);
-	if (canonical(have) === canonical(items.map(menuItem))) return { action: "unchanged" };
-	if (!dryRun) await callTool("menu_set_items", { name, items });
-	return { action: "updated", diff: firstDifference(have, items.map(menuItem)) };
+	const want = items.map(menuItem);
+	if (canonical(have) === canonical(want)) return { action: "unchanged" };
+	const diff = firstDifference(have, want);
+	if (dryRun) return { action: "updated", diff };
+	if (!overwrite) throw new Error(`[WOULD_OVERWRITE] menu/${name}: ${diff}; the menu differs from the migration, re-run with --overwrite to replace it`);
+	await callTool("menu_set_items", { name, items });
+	return { action: "updated", diff };
 }

@@ -93,7 +93,13 @@
   2. 先写 en 条目，再写 zh-CN 条目，用 `translationOf` 关联；
   3. 发布。
 
-  幂等（计划 2 Task 9 实现：`scripts/migrate.mjs`）：按 slug + locale 用 `content_get` 查找；不存在就 `content_create`（直接 `status: "published"`，zh-CN 带 en 条目的 ULID 作为 `translationOf`）；存在就只比较 payload 里的字段，有差异才 `content_update`（它总是写草稿）再 `content_publish`；一样就不写。遇到 `ENTRY_LOCKED` 停下，不覆盖锁。第二次运行必须是全部 unchanged；`node scripts/migrate.mjs verify` 检查 52 个 doc URL。
+  幂等且默认不覆盖（计划 2 Task 9 实现：`scripts/migrate.mjs`）：按 slug + locale 用 `content_get` 查找；不存在就 `content_create`（直接 `status: "published"`，zh-CN 带 en 条目的 ULID 作为 `translationOf`）；存在就只比较 payload 里的字段（`content_get` 在有待发布草稿时返回的是草稿内容，`liveData` 才是线上版本），一样就不写。第二次运行必须是全部 unchanged；`node scripts/migrate.mjs verify` 检查 52 个 doc URL。生产上重跑时，runner **遇到会改动已有内容的情况就停下**，不会悄悄撤销编辑者或 AI 之后的修改，四条规则：
+  1. 已发布条目与 payload 有差异：报 `[WOULD_OVERWRITE]`（带第一处差异）并停下；加 `--overwrite` 才会 `content_update`（它总是写草稿）再 `content_publish`。`--dry-run` 不报错，只把这类条目列为 "updated" 并给出差异，让操作者先看。
+  2. 有待发布草稿（`draftRevisionId` 非空）：草稿与 payload 有差异就报 `[PENDING_DRAFT]` 并停下，即使加了 `--overwrite` 也一样（`--dry-run` 同样报错），要人在后台发布或丢弃草稿。草稿与 payload 完全一致（中断的上一次运行留下的）就直接 `content_publish`，这是恢复路径。
+  3. payload 要的是草稿（`status: "draft"`）而条目已发布：报 `[STATUS_MISMATCH]`。runner 只会把条目变成已发布，不会取消发布。
+  4. 菜单同理：`menu_get` 的内容与目标有差异就报 `[WOULD_OVERWRITE] menu/<name>`，要 `--overwrite` 才会 `menu_set_items`；`--dry-run` 列出差异。
+
+  遇到 `ENTRY_LOCKED`（更新或发布时）停下，永远不传 `overrideLock`。**生产第一次运行**会改 seed 里的菜单（Blog、GitHub 两项，GitHub 没有 `target`），所以先 `--dry-run` 看差异，确认之后带 `--overwrite` 运行 `menu`。taxonomies 和 `publishedAt` 只在创建和更新时写入，不参与比较，所以这两项被人改了不会被发现。
 - Blog：用同一个转换脚本写入 `posts`，`draft: true` 的文章保持草稿状态。
 - 首页：块类型 `hero`、`feature_grid` 和 `pages.layout` 由 seed 定义（**已定**，计划 2 Task 1）；内容由 runner 写入 `pages/home`（en + zh-CN），来自旧首页的 hero 和 3 个 features。
 
