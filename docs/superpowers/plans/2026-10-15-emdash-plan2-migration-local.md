@@ -654,3 +654,493 @@ Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
 ```
 
 ---
+
+### Task 3: PT guard + hook 覆盖三个 collection + `htmlBlock`/`embed` renderer 覆盖 🚦
+
+**模型：** standard
+
+计划 1 遗留的安全关口，按调研结论扩大范围（调研：`p2-research-1-security.md` §0、§5）：
+- 只管 `htmlBlock` 不够。core 的 `embed.html` 走同一个保留 `class`/`id`/`data-*` 的 sanitizer；另有 9 个 core renderer 把块字段原样拼进 `style=` 或 `class=`。例如 `cover.minHeight = "300px;position:fixed;inset:0;z-index:99999"` 直接变成全屏遮罩，不经过任何 CSS 文件，构建期 CSS 检查看不到。
+- 写入路径不校验块结构：portableText 字段只校验 `{_type: string}`，MCP 的 Markdown 正文里一行 `<!--ec:block {json} -->` 就能写入任意块。所以"agent 不要用 `htmlBlock`"只能靠代码强制。
+- 做法：`content:beforeSave` hook 里先跑 PT guard，有问题就抛 `ContentSaveRejectedError`（编辑者和 agent 会看到这条消息，保存被取消）；没问题再生成 `search_text`。hook 对 docs、posts、pages 三个 collection 都生效。渲染时再用 web9 自己的 `htmlBlock`/`embed` renderer 覆盖 core，作为第二道防线（覆盖 seed/import 等可能不经过 hook 的写入）。
+
+**Files:**
+- Create: `packages/web9-blocks/lib/pt-guard.mjs`、`pt-guard.test.mjs`、`packages/web9-blocks/lib/embed-url.mjs`、`embed-url.test.mjs`、`packages/web9-blocks/index.test.mjs`、`packages/web9-blocks/astro/HtmlBlock.astro`、`packages/web9-blocks/astro/Embed.astro`
+- Modify: `packages/web9-blocks/index.mjs`（hook）、`packages/web9-blocks/astro/index.mjs`、`.agents/skills/web9-blocks/SKILL.md`、spec §4、§8、§10
+
+**Interfaces:**
+- Consumes: Task 1 的 `posts.search_text`、`pages.search_text` 字段；Task 2 的 `sanitizeHtmlFragment`（`../lib/html.mjs`）
+- Produces:
+  - `guardPortableText(value: unknown) → string[]`：问题列表，空数组表示通过。只查顶层块（嵌套在 `columns`/`cover`/表格里的块由 astro-portabletext 渲染，没有 type map，自定义类型只会渲染成隐藏的 unknown 提示）。规则：
+    - 拒绝 `htmlBlock`、`iframe`、未知 `_type`；
+    - `embed.html` 必须为空（embed 只按 `url` 渲染）；
+    - `image.alignment` ∈ left/center/right/wide/full；`image.dominantColor`、`image.asset.meta.dominantColor`、`gallery.images[].dominantColor`、`cover.overlayColor` 必须是 `#hex` 或 `rgb()/rgba()`；
+    - `gallery.columns` 是 1–6 的整数；`columns.columns[].width` 是 `数字 + px|rem|em|%`；
+    - `cover.minHeight` 是 `数字 + px|rem|em` 或 ≤ 100 的 `vh`；`cover.overlayOpacity` 是 0–1 的数字；`cover.alignment` ∈ left/center/right；
+    - `button.style`、`buttons.buttons[].style` ∈ default/outline/fill；`buttons.layout` ∈ horizontal/vertical；
+    - `code.language` 匹配 `^[\w+#.-]{1,32}$`；
+    - `tool_grid.logo_size` 是 16–300 的数字；`investment_warning.lang` ∈ zh/en；
+    - 字段不存在（`undefined`/`null`）一律通过；正文不是数组（字符串）时返回 `[]`。
+  - `PT_FIELDS = { docs: ["body"], posts: ["content"], pages: ["content"] }`（`index.mjs` 导出）：每次保存都 guard；第一个字段生成 `search_text`。
+  - `beforeSave({ content, collection }) → content`（`index.mjs` 导出，hook 的 handler）。
+  - `embedSrc(url: unknown) → string | null`（`lib/embed-url.mjs`）：YouTube（`watch?v=`、`youtu.be/`、`embed/`、`shorts/`，`t=644s` → `?start=644`）→ `https://www.youtube-nocookie.com/embed/<id>`；Vimeo → `https://player.vimeo.com/video/<id>`；其他返回 `null`。
+  - renderer：`htmlBlock` 只输出 `sanitizeHtmlFragment(node.html)`，忽略 `css`、`js`、`isolated`；`embed` 只对 YouTube/Vimeo 输出 iframe，其他 URL 输出一个外链，`html` 字段永远不用。
+
+- [ ] **Step 1: 写失败的测试**
+
+Create `packages/web9-blocks/lib/pt-guard.test.mjs`：
+
+```js
+import { describe, expect, it } from "vitest";
+import { guardPortableText } from "./pt-guard.mjs";
+
+const p = (text) => ({ _type: "block", _key: "b", style: "normal", markDefs: [], children: [{ _type: "span", _key: "s", text, marks: [] }] });
+
+describe("guardPortableText", () => {
+	it("passes prose, web9 blocks and safe core blocks", () => {
+		expect(
+			guardPortableText([
+				p("hello"),
+				{ _type: "callout", _key: "c", tone: "tip", title: "t", body: "md" },
+				{ _type: "tool_grid", _key: "g", logo_size: 100, tools: [] },
+				{ _type: "image", _key: "i", asset: { _ref: "x", url: "/img/a.png", meta: { dominantColor: "rgb(10,20,30)" } }, alignment: "center" },
+				{ _type: "embed", _key: "e", url: "https://www.youtube.com/watch?v=SKS-URw9a18" },
+				{ _type: "code", _key: "k", language: "c#", code: "x" },
+				{ _type: "cover", _key: "v", minHeight: "60vh", overlayColor: "#000", overlayOpacity: 0.4, alignment: "left" },
+				{ _type: "columns", _key: "o", columns: [{ width: "33.33%", content: [] }] },
+				{ _type: "buttons", _key: "u", layout: "vertical", buttons: [{ text: "a", style: "outline" }] },
+			]),
+		).toEqual([]);
+	});
+	it("rejects htmlBlock, iframe and unknown types", () => {
+		const problems = guardPortableText([
+			{ _type: "htmlBlock", _key: "h", html: "<b>x</b>" },
+			{ _type: "iframe", _key: "f", src: "https://example.com" },
+			{ _type: "marquee", _key: "m" },
+		]);
+		expect(problems).toHaveLength(3);
+		expect(problems[0]).toMatch(/#0 htmlBlock/);
+		expect(problems[1]).toMatch(/#1 iframe/);
+		expect(problems[2]).toMatch(/#2 marquee: unknown block type/);
+	});
+	it("rejects values that core renderers paste into style or class", () => {
+		const problems = guardPortableText([
+			{ _type: "cover", _key: "a", minHeight: "300px;position:fixed;inset:0;z-index:99999" },
+			{ _type: "image", _key: "b", asset: { meta: { dominantColor: "red;position:fixed" } } },
+			{ _type: "image", _key: "c", alignment: "x fixed inset-0" },
+			{ _type: "columns", _key: "d", columns: [{ width: "50%;position:fixed" }] },
+			{ _type: "button", _key: "e", style: "default fixed" },
+			{ _type: "code", _key: "f", language: "js fixed inset-0" },
+			{ _type: "gallery", _key: "g", columns: "3;position:fixed", images: [{ dominantColor: "url(//x)" }] },
+			{ _type: "cover", _key: "h", overlayOpacity: "0.5;position:fixed" },
+			{ _type: "embed", _key: "i", url: "https://x.example", html: '<div class="fixed">x</div>' },
+			{ _type: "tool_grid", _key: "j", logo_size: 5000 },
+			{ _type: "cover", _key: "k", minHeight: "500vh" },
+		]);
+		expect(problems.map((x) => x.split(":")[0])).toEqual([
+			"#0 cover minHeight",
+			"#1 image asset.meta.dominantColor",
+			"#2 image alignment",
+			"#3 columns columns[].width",
+			"#4 button style",
+			"#5 code language",
+			"#6 gallery columns",
+			"#6 gallery images[].dominantColor",
+			"#7 cover overlayOpacity",
+			"#8 embed html",
+			"#9 tool_grid logo_size",
+			"#10 cover minHeight",
+		]);
+	});
+	it("ignores absent fields and non-array values", () => {
+		expect(guardPortableText([{ _type: "image", _key: "a", asset: { _ref: "x" } }, { _type: "cover", _key: "b" }])).toEqual([]);
+		expect(guardPortableText("# markdown")).toEqual([]);
+		expect(guardPortableText(undefined)).toEqual([]);
+	});
+});
+```
+
+Create `packages/web9-blocks/lib/embed-url.test.mjs`：
+
+```js
+import { describe, expect, it } from "vitest";
+import { embedSrc } from "./embed-url.mjs";
+
+describe("embedSrc", () => {
+	it.each([
+		["https://www.youtube.com/watch?v=SKS-URw9a18", "https://www.youtube-nocookie.com/embed/SKS-URw9a18"],
+		["https://youtu.be/SKS-URw9a18", "https://www.youtube-nocookie.com/embed/SKS-URw9a18"],
+		["https://www.youtube.com/embed/SKS-URw9a18", "https://www.youtube-nocookie.com/embed/SKS-URw9a18"],
+		["https://www.youtube.com/watch?v=trXPfpV5iRQ&t=644s", "https://www.youtube-nocookie.com/embed/trXPfpV5iRQ?start=644"],
+		["https://vimeo.com/123456789", "https://player.vimeo.com/video/123456789"],
+	])("%s", (url, src) => expect(embedSrc(url)).toBe(src));
+	it.each([["https://evil.example/watch?v=SKS-URw9a18"], ["javascript:alert(1)"], ["http://www.youtube.com/watch?v=SKS-URw9a18"], [undefined]])(
+		"returns null for %s",
+		(url) => expect(embedSrc(url)).toBeNull(),
+	);
+});
+```
+
+Create `packages/web9-blocks/index.test.mjs`：
+
+```js
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import { PT_FIELDS, beforeSave } from "./index.mjs";
+
+const seed = JSON.parse(readFileSync(new URL("../../seed/seed.json", import.meta.url), "utf8"));
+const callout = { _type: "callout", _key: "c1", tone: "tip", title: "T", body: "probe-word" };
+
+describe("content:beforeSave", () => {
+	it("guards every portableText field the seed defines", () => {
+		const fromSeed = Object.fromEntries(
+			seed.collections
+				.map((c) => [c.slug, c.fields.filter((f) => f.type === "portableText").map((f) => f.slug)])
+				.filter(([, fields]) => fields.length),
+		);
+		expect(PT_FIELDS).toEqual(fromSeed);
+	});
+	it("mirrors web9 block text into search_text for docs, posts and pages", async () => {
+		expect((await beforeSave({ collection: "docs", content: { body: [callout] } })).search_text).toBe("T\nprobe-word");
+		expect((await beforeSave({ collection: "posts", content: { content: [callout] } })).search_text).toBe("T\nprobe-word");
+		expect((await beforeSave({ collection: "pages", content: { content: [callout] } })).search_text).toBe("T\nprobe-word");
+	});
+	it("leaves saves without the body field, and unknown collections, alone", async () => {
+		const c = { title: "x" };
+		expect(await beforeSave({ collection: "posts", content: c })).toBe(c);
+		const other = { body: [{ _type: "htmlBlock" }] };
+		expect(await beforeSave({ collection: "other", content: other })).toBe(other);
+	});
+	it("rejects a save with a message the editor sees", async () => {
+		await expect(
+			beforeSave({ collection: "docs", content: { body: [{ _type: "htmlBlock", _key: "h", html: "<b>x</b>" }] } }),
+		).rejects.toMatchObject({ name: "ContentSaveRejectedError", message: expect.stringContaining("body: #0 htmlBlock") });
+	});
+});
+```
+
+- [ ] **Step 2: 跑测试，确认失败**
+
+Run: `npx vitest run packages/web9-blocks/`
+Expected: FAIL：`pt-guard.mjs`、`embed-url.mjs` 不存在，`index.mjs` 没有导出 `PT_FIELDS`、`beforeSave`。
+
+- [ ] **Step 3: 实现 guard 和 embed URL**
+
+Create `packages/web9-blocks/lib/pt-guard.mjs`：
+
+```js
+// Write-time check of Portable Text values (spec §10). Returns a list of problems; empty means OK.
+// Core renderers paste some block fields straight into class="" or style="" (cover.minHeight,
+// image.dominantColor, columns[].width, button.style, code.language ...), core's htmlBlock/embed
+// sanitizer keeps class/id/data-*, and MCP accepts any _type through a `<!--ec:block {json} -->` line.
+// Only top-level blocks are checked: nested blocks (columns, cover, table cells) are rendered by
+// astro-portabletext without a type map, so a nested custom type renders as a hidden "unknown" div.
+
+const COLOR = /^(?:#[0-9a-f]{3,8}|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(?:,\s*(?:0|1|0?\.\d+)\s*)?\))$/i;
+const LENGTH = /^\d{1,4}(?:\.\d{1,2})?(?:px|rem|em|%)$/;
+const MIN_HEIGHT = /^(?:\d{1,4}(?:\.\d{1,2})?(?:px|rem|em)|(?:100|\d{1,2})(?:\.\d{1,2})?vh)$/;
+const LANGUAGE = /^[\w+#.-]{1,32}$/;
+
+const oneOf = (...values) => (v) => values.includes(v);
+const matches = (re) => (v) => typeof v === "string" && re.test(v);
+const numberIn = (min, max) => (v) => typeof v === "number" && Number.isFinite(v) && v >= min && v <= max;
+const integerIn = (min, max) => (v) => Number.isInteger(v) && v >= min && v <= max;
+const BUTTON_STYLE = oneOf("default", "outline", "fill");
+
+/** Field checks per allowed _type. Paths use `a.b` for nesting and `list[].field` for arrays. */
+const RULES = {
+	block: {},
+	blockquoteGroup: {},
+	break: {},
+	table: {},
+	file: {},
+	pullquote: {},
+	video: {},
+	image: { alignment: oneOf("left", "center", "right", "wide", "full"), dominantColor: matches(COLOR), "asset.meta.dominantColor": matches(COLOR) },
+	gallery: { columns: integerIn(1, 6), "images[].dominantColor": matches(COLOR), "images[].asset.meta.dominantColor": matches(COLOR) },
+	columns: { "columns[].width": matches(LENGTH) },
+	cover: { minHeight: matches(MIN_HEIGHT), overlayColor: matches(COLOR), overlayOpacity: numberIn(0, 1), alignment: oneOf("left", "center", "right") },
+	button: { style: BUTTON_STYLE },
+	buttons: { layout: oneOf("horizontal", "vertical"), "buttons[].style": BUTTON_STYLE },
+	code: { language: matches(LANGUAGE) },
+	embed: { html: (v) => v === "" }, // web9's Embed renders from url only
+	callout: {},
+	tabs: {},
+	details: {},
+	mermaid: {},
+	tool_grid: { logo_size: numberIn(16, 300) },
+	investment_warning: { lang: oneOf("zh", "en") },
+};
+
+const FORBIDDEN = {
+	htmlBlock: "raw HTML blocks are not allowed; use Markdown or a Web9 block",
+	iframe: "iframes are not allowed; use an embed block with a YouTube or Vimeo url",
+};
+
+/** Every value at `path` (absent ones skipped). */
+function valuesAt(node, path) {
+	let current = [node];
+	for (const part of path.split(".")) {
+		const list = part.endsWith("[]");
+		const key = list ? part.slice(0, -2) : part;
+		current = current.flatMap((v) => {
+			const next = v && typeof v === "object" ? v[key] : undefined;
+			if (list) return Array.isArray(next) ? next : [];
+			return [next];
+		});
+	}
+	return current.filter((v) => v !== undefined && v !== null);
+}
+
+export function guardPortableText(value) {
+	if (!Array.isArray(value)) return [];
+	const problems = [];
+	value.forEach((node, i) => {
+		const type = typeof node?._type === "string" ? node._type : "(no _type)";
+		if (Object.hasOwn(FORBIDDEN, type)) {
+			problems.push(`#${i} ${type}: ${FORBIDDEN[type]}`);
+			return;
+		}
+		if (!Object.hasOwn(RULES, type)) {
+			problems.push(`#${i} ${type}: unknown block type`);
+			return;
+		}
+		for (const [path, ok] of Object.entries(RULES[type])) {
+			for (const v of valuesAt(node, path)) {
+				if (!ok(v)) problems.push(`#${i} ${type} ${path}: value ${JSON.stringify(v).slice(0, 60)} is not allowed`);
+			}
+		}
+	});
+	return problems;
+}
+```
+
+Create `packages/web9-blocks/lib/embed-url.mjs`：
+
+```js
+// The only embeds the site renders: YouTube and Vimeo, from the block's url (never its html).
+const YOUTUBE = /^https:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{11})(?:[?&#].*)?$/;
+const VIMEO = /^https:\/\/(?:www\.|player\.)?vimeo\.com\/(?:video\/)?(\d{6,12})(?:[?#/].*)?$/;
+
+export function embedSrc(url) {
+	if (typeof url !== "string") return null;
+	const yt = YOUTUBE.exec(url);
+	if (yt) {
+		const start = /[?&]t=(\d+)s?(?:&|$)/.exec(url)?.[1];
+		return `https://www.youtube-nocookie.com/embed/${yt[1]}${start ? `?start=${start}` : ""}`;
+	}
+	const vimeo = VIMEO.exec(url);
+	return vimeo ? `https://player.vimeo.com/video/${vimeo[1]}` : null;
+}
+```
+
+- [ ] **Step 4: 改 hook**
+
+`packages/web9-blocks/index.mjs` 第一行改成：
+
+```js
+import { ContentSaveRejectedError, definePlugin } from "emdash";
+import { guardPortableText } from "./lib/pt-guard.mjs";
+import { extractBlockText } from "./lib/search-text.mjs";
+```
+
+在 `const BLOCK_TYPES = ...` 那行后面加：
+
+```js
+/** Portable Text fields per collection: all are guarded on every save; the first one feeds search_text. */
+export const PT_FIELDS = { docs: ["body"], posts: ["content"], pages: ["content"] };
+
+/**
+ * content:beforeSave. Rejects unsafe blocks (spec §10), then mirrors this plugin's block text into
+ * search_text, because core search only indexes text/alt/caption/code strings (spec §4).
+ */
+export async function beforeSave({ content, collection }) {
+	const fields = PT_FIELDS[collection];
+	if (!fields) return content;
+	const problems = fields.flatMap((f) => (content[f] === undefined ? [] : guardPortableText(content[f]).map((p) => `${f}: ${p}`)));
+	if (problems.length) throw new ContentSaveRejectedError(`Save rejected (spec §10): ${problems.join("; ")}`.slice(0, 1000));
+	const [main] = fields;
+	// Updates pass only the changed fields; when the body didn't change, keep search_text as is.
+	if (content[main] === undefined) return content;
+	return { ...content, search_text: extractBlockText(content[main], BLOCK_TYPES) };
+}
+```
+
+`createPlugin()` 里的 `hooks` 换成：
+
+```js
+		hooks: {
+			"content:beforeSave": beforeSave,
+		},
+```
+
+（原来那段注释和 `collection !== "docs"` 判断一起删掉，逻辑已经在 `beforeSave` 里。）
+
+- [ ] **Step 5: 跑测试，确认通过**
+
+Run: `npm test`
+Expected: PASS。
+
+- [ ] **Step 6: renderer 覆盖**
+
+Create `packages/web9-blocks/astro/HtmlBlock.astro`：
+
+```astro
+---
+// Replaces core's htmlBlock renderer (spec §10). Core keeps class/id/data-* and can render an isolated
+// srcdoc iframe that may navigate the top page on click; this renderer only ever emits sanitized inline
+// HTML. css, js and isolated are ignored on purpose. The save hook rejects new htmlBlocks; this covers
+// rows that reached the database some other way (seed, import).
+import { sanitizeHtmlFragment } from "../lib/html.mjs";
+
+interface Props {
+	node: { _type: "htmlBlock"; _key: string; html?: string; css?: string; js?: string; isolated?: boolean };
+}
+const { node } = Astro.props;
+const html = sanitizeHtmlFragment(node?.html);
+if (!html.trim()) return null;
+---
+
+<div class="my-6" set:html={html} />
+```
+
+Create `packages/web9-blocks/astro/Embed.astro`：
+
+```astro
+---
+// Replaces core's embed renderer (spec §10): core passes embed.html through a sanitizer that keeps
+// class/id/data-*. Only YouTube and Vimeo urls become an iframe; any other url is a plain external link.
+import { sanitizeHref } from "emdash";
+import { embedSrc } from "../lib/embed-url.mjs";
+
+interface Props {
+	node: { _type: "embed"; _key: string; url?: string; caption?: string };
+}
+const { node } = Astro.props;
+const src = embedSrc(node?.url);
+const href = node?.url ? sanitizeHref(node.url) : "#";
+const caption = typeof node?.caption === "string" ? node.caption : "";
+---
+
+{
+	src ? (
+		<figure class="not-prose my-6">
+			<div class="aspect-video w-full overflow-hidden rounded-lg bg-surface">
+				<iframe
+					class="size-full"
+					src={src}
+					title={caption || "Video"}
+					loading="lazy"
+					allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+					allowfullscreen
+					referrerpolicy="strict-origin-when-cross-origin"
+				/>
+			</div>
+			{caption && <figcaption class="mt-2 text-sm text-muted">{caption}</figcaption>}
+		</figure>
+	) : href !== "#" ? (
+		<p class="my-4">
+			<a href={href} rel="noopener noreferrer" target="_blank">{caption || node.url}</a>
+		</p>
+	) : null
+}
+```
+
+`packages/web9-blocks/astro/index.mjs`：加两行 import，并在 `blockComponents` 里登记：
+
+```js
+import Embed from "./Embed.astro";
+import HtmlBlock from "./HtmlBlock.astro";
+```
+
+```js
+	// Overrides of core renderers (plugin components win over core's, spec §10)
+	htmlBlock: HtmlBlock,
+	embed: Embed,
+```
+
+覆盖顺序是 core < 插件 `blockComponents` < 调用处的 `components` prop（`emdash/src/components/PortableText.astro:48-52`），所以三个 `PortableText` 调用处（`DocsPage.astro`、`posts/[slug].astro`、`pages/[slug].astro`）都会用 web9 的版本。
+
+- [ ] **Step 7: 🚦 在 workerd 里实测 guard 和覆盖**
+
+dev 要在运行（Task 1 起一直在跑；改了插件代码后 dev 会自动重载，如果 hook 行为没变就 `npx astro dev stop` 再 `npm run dev -- --port 4321`）。
+
+```bash
+cd /Users/john/git/web9ai
+node -e '
+const fs = require("fs");
+const line = (b) => `<!--ec:block ${JSON.stringify(b)} -->`;
+const doc = (slug, blocks) => ({ collection: "docs", slug, locale: "en", status: "published",
+  data: { title: slug, section: "ai", category: "probe", sort_order: 999999, body: ["probe body", ...blocks.map(line)].join("\n\n") + "\n" } });
+fs.writeFileSync(".local/guard-html.json", JSON.stringify(doc("probe-guard-html", [{ _type: "htmlBlock", _key: "h1", html: "<div class=\"fixed inset-0 z-50\">x</div>" }])));
+fs.writeFileSync(".local/guard-cover.json", JSON.stringify(doc("probe-guard-cover", [{ _type: "cover", _key: "c1", minHeight: "300px;position:fixed;inset:0;z-index:99999" }])));
+fs.writeFileSync(".local/guard-ok.json", JSON.stringify(doc("probe-guard-ok", [
+  { _type: "callout", _key: "c2", tone: "tip", title: "Probe", body: "zebraquartz" },
+  { _type: "embed", _key: "e1", url: "https://www.youtube.com/watch?v=SKS-URw9a18" },
+])));
+fs.writeFileSync(".local/guard-post.json", JSON.stringify({ collection: "posts", slug: "probe-guard-post", locale: "en", status: "published",
+  data: { title: "probe post", content: ["post body", line({ _type: "callout", _key: "c3", tone: "info", title: "", body: "yakpelican" })].join("\n\n") + "\n" } }));
+'
+node scripts/mcp.mjs content_create @.local/guard-html.json; echo "exit=$?"
+node scripts/mcp.mjs content_create @.local/guard-cover.json; echo "exit=$?"
+node scripts/mcp.mjs content_create @.local/guard-ok.json > /dev/null; echo "exit=$?"
+node scripts/mcp.mjs content_create @.local/guard-post.json > /dev/null; echo "exit=$?"
+node scripts/check-page.mjs http://localhost:4321/docs/probe-guard-ok "zebraquartz" "youtube-nocookie.com/embed/SKS-URw9a18" --absent "ec:block"
+node scripts/mcp.mjs content_get '{"collection":"posts","id":"probe-guard-post"}' | node -e "const g=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log('post search_text:',JSON.stringify(g.item.data.search_text))"
+node scripts/mcp.mjs search '{"query":"yakpelican","collections":["posts"]}'
+```
+
+Expected：
+- 前两个 `content_create` 失败（exit 非 0），错误信息分别包含 `body: #1 htmlBlock` 和 `body: #1 cover minHeight`，并且 `content_list` 里没有这两个 slug；
+- 后两个成功（exit 0）；
+- `check-page` 通过（callout 文字在，YouTube iframe 指向 `youtube-nocookie.com`）；
+- post 的 `search_text` 是 `"yakpelican"`，`search` 能搜到这篇 post（posts 的块文字现在也进索引）。
+
+如果 MCP 的 Markdown 转换把 `ec:block` 行放在了别的下标，错误信息里的 `#1` 可能是别的数字：只要信息里有 `htmlBlock` / `cover minHeight` 就算通过。任何一项不符：停下来报告。
+
+清理探针内容（runner 之后要从空库开始）：
+
+```bash
+for s in probe-guard-ok; do node scripts/mcp.mjs content_delete "{\"collection\":\"docs\",\"id\":\"$s\"}" && node scripts/mcp.mjs content_permanent_delete "{\"collection\":\"docs\",\"id\":\"$s\"}"; done
+node scripts/mcp.mjs content_delete '{"collection":"posts","id":"probe-guard-post"}' && node scripts/mcp.mjs content_permanent_delete '{"collection":"posts","id":"probe-guard-post"}'
+node scripts/mcp.mjs content_list '{"collection":"docs"}'
+node scripts/mcp.mjs content_list '{"collection":"posts"}'
+```
+
+Expected：两个列表都是空的。如果 `content_permanent_delete` 要求 ULID 而不是 slug，先 `content_list_trashed` 取 `id` 再删。
+
+- [ ] **Step 8: 更新 skill 和 spec**
+
+`.agents/skills/web9-blocks/SKILL.md`：
+- 把 "Never use `htmlBlock` (…)" 那一段换成：
+
+```markdown
+The site rejects some blocks on save (`SAVE_REJECTED`, the message lists each problem as `body: #<index> <type> …`):
+- `htmlBlock`, `iframe` and any `_type` not listed in this file;
+- an `embed` with `html` (an `embed` takes only `url`; YouTube and Vimeo render as a player, anything else as a link);
+- core block fields outside their allowed values: `image.alignment` (left, center, right, wide, full), colours that are not `#hex`/`rgb()`, `cover.minHeight` other than a plain length, `code.language` with spaces, `tool_grid.logo_size` outside 16–300.
+Fix the block and send the save again; never try to get around the check.
+```
+
+- 在 "Create and publish a doc" 一节的 `search_text` 那条后面加一条：`- Posts and pages work the same way: their block text also goes into an auto-generated \`search_text\` (field \`content\` instead of \`body\`).`
+
+spec：
+- §4 第一条"已实现并验证（计划 1 Task 9）"后面加一条："**已定（计划 2 Task 3）**：`posts.content`、`pages.content` 也用同一个 hook 写 `search_text`（hook 里的 collection → 字段映射 `{docs: body, posts: content, pages: content}`）。搜索只搜当前语言：zh-CN 页面上搜不到还没翻译的 en doc，接受（fallback 页面本来就是 en 内容）。"
+- §8 "AI 写内容的方式"列表最后加一条："写入时 guard：hook 拒绝 `htmlBlock`、`iframe`、带 `html` 的 `embed`、未知 `_type` 和 core 块里会被拼进 `class`/`style` 的非法字段值（计划 2 Task 3），错误码 `SAVE_REJECTED`。"
+- §10 "AI 直接发布的 Markdown / HTML"一行的应对一栏，把最后两个 `•`（"目前的不变式……"和"长期的控制……"）换成：
+
+```
+• **三层控制（计划 2 落地，必须在创建 AI Editor 账号之前）**：① 写入时 `content:beforeSave` 里的 PT guard（拒绝 `htmlBlock`、`iframe`、带 `html` 的 `embed`、未知类型，以及 `cover.minHeight`、`image.dominantColor`、`columns[].width`、`button.style`、`code.language` 等会被 core renderer 原样拼进 `style`/`class` 的字段值）；② 渲染时 web9 的 `htmlBlock`/`embed` renderer 覆盖 core（`sanitizeHtmlFragment` 去掉 class/id/data-*/style；`isolated` 直接忽略，不交给 core 的 srcdoc iframe，因为它能在点击时导航顶层页面）；③ 构建后 `check-public-css`：公开页面加载的 CSS 里不能有 `fixed`、`inset-*`、`z-*`、`*-screen`、视口单位这类 utility（emdash 后台的样式表只在 `/_emdash/admin` 加载，按来源排除）<br>• `data-*` 必须去掉：Astro 的 scoped CSS 选择器是 `[data-astro-cid-*]`，`class` + `data-astro-cid-*` 能复用公开 CSS 里任何组件规则（例如 `.emdash-cover__background{position:absolute;inset:0}`）
+```
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add packages/web9-blocks/ .agents/skills/web9-blocks/SKILL.md docs/superpowers/specs/2026-10-15-emdash-migration-design.md
+git commit -m "feat(blocks): PT guard on save for docs/posts/pages, search_text for posts and pages, web9 htmlBlock and embed renderers
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
+```
+
+---
