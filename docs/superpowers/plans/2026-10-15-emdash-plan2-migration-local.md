@@ -87,9 +87,11 @@
 | `src/layouts/Base.astro` | 页头/页脚/主题切换改成 Tailwind；`WebMcpSearch`；菜单链接本地化 | 4 |
 | `packages/web9-site/lib/nav.mjs` + test | `localizeHref()` | 4 |
 | `scripts/lib/public-css.mjs` + test、`scripts/check-public-css.mjs` | 构建后扫描公开 CSS（`postbuild`） | 5 |
-| `scripts/lib/mdx-to-pt.mjs` + test、`scripts/lib/fixtures/` | converter：确定性 `_key`、frontmatter、标题、`lang`、四冒号提示块、链接改写、图片、YouTube、tools gallery、Tabs-in-details、blog 模式 | 6、7、10 |
+| `scripts/lib/mdx-to-pt.mjs` + test、`scripts/lib/fixtures/` | converter：确定性 `_key`、frontmatter、标题、`lang`、四冒号提示块、链接改写、图片、YouTube、tools gallery、Tabs-in-details | 6、7 |
+| `scripts/lib/posts.mjs` + test | blog → `posts`：excerpt、tag、git 日期 | 10 |
 | `scripts/lib/legacy-tree.mjs` + test | legacy 清单：section/category/`sort_order`、旧 URL、slug 去重、翻译配对、链接解析 | 8 |
 | `scripts/lib/sync.mjs` + test | 幂等写入一个条目（create / update + publish / 跳过） | 9 |
+| `scripts/lib/docs-payloads.mjs`、`scripts/lib/verify-pages.mjs` + test | docs 的 payload；迁移后的页面检查 | 9 |
 | `scripts/migrate.mjs` | runner CLI：`docs`、`menu`、`posts`、`redirects`、`home` | 9、10、11 |
 | `scripts/lib/redirects.mjs` + test | 旧 URL → 新 URL 的规则表和 REST 同步 | 10 |
 | `astro.config.mjs` | feed 重定向（带扩展名的路径不经过 EmDash 重定向中间件） | 10 |
@@ -4203,6 +4205,626 @@ Expected：两个 `check-page` 通过；`search` 的结果里有 `tools-summary`
 ```bash
 git add scripts/lib/sync.mjs scripts/lib/sync.test.mjs scripts/lib/docs-payloads.mjs scripts/lib/docs-payloads.test.mjs scripts/lib/verify-pages.mjs scripts/lib/verify-pages.test.mjs scripts/migrate.mjs docs/superpowers/specs/2026-10-15-emdash-migration-design.md
 git commit -m "feat(migrate): idempotent MCP runner for docs and the header menu, page verification
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
+```
+
+---
+
+### Task 10: runner：posts + redirects；feed 重定向；posts 正文加 `prose` 🚦
+
+**模型：** standard
+
+旧站的两篇 blog 进 `posts`，旧 URL 全部 301 到新 URL。调研（`p2-research-3-blog.md`）已经确认的事实：
+- `legacy/blog` 只有两篇：`20250307-ai-tiny-course`（`draft: true`，Docusaurus 生产构建里从来没上线）和 `20250518-ai-tools-adhoc`（只有一句话，链到 `/ai/usecase/ai-tools-adhoc`）。没有作者，没有 zh-CN 帖子。
+- 目录名里的日期没有分隔符，Docusaurus 3 不认，显示的是文件第一次 git 提交的时间：`2025-03-08T00:19:14Z`、`2025-04-11T03:57:01Z`（写计划时用 `git log --follow` 复核过）。CI 是 shallow clone，取不到这个时间，所以相关测试在 shallow 时跳过，`firstCommitDate` 在 shallow 时直接报错。
+- `content_create` 遇到不存在的 tag term 会整体失败；term 由 seed 提供（Task 1）。
+- 帖子页先在标题下打印 `excerpt`，再打印 `content`，所以 `<!-- truncate -->` 上面的文字做了 excerpt 就要从 content 里拿掉，否则显示两遍。
+- 没有 redirects 的 MCP 工具。REST `GET/POST /_emdash/api/redirects`、`PUT /_emdash/api/redirects/{id}` 需要 admin（`redirects:manage`）；dev-bypass 的 token 可以（写计划时实测 `GET` 返回 `{"success":true,"data":{"items":[]}}`，空 `POST` 返回 `VALIDATION_ERROR`，说明鉴权通过）。列表分页 `limit` 最大 100，`group` 过滤，返回 `nextCursor`。
+- EmDash 的重定向中间件（`order: "pre"`）先匹配精确规则，再匹配 `[param]` 模式；跳过 `/_emdash`、`/_image` 和**所有带扩展名的路径**。所以 `/blog/rss.xml` 这类 feed 放在 `astro.config.mjs` 的 `redirects` 里。
+- Astro 的 i18n fallback（`/zh-CN/...` 没有对应路由时 302 到 en）只在响应是 404 时触发（`astro/dist/core/i18n/handler.js`），中间件返回的 301 不会被它改写。Step 1 实测确认。
+
+写计划时对当前（还是模板 demo 数据的）库跑了只读的 `redirects --dry-run`：`created 73`，说明 `GET ?group=` 和分页按预期工作；`posts --dry-run` 报 `tag terms ai, course, workshop, tiny-course do not exist`，这是对的（demo 库没有这些 term，Task 1 重建后就有）。
+
+**Files:**
+- Create: `scripts/lib/posts.mjs`、`scripts/lib/posts.test.mjs`、`scripts/lib/redirects.mjs`、`scripts/lib/redirects.test.mjs`
+- Modify: `scripts/migrate.mjs`、`scripts/lib/mcp.mjs`（导出 `defaultToken`）、`astro.config.mjs`、`src/pages/posts/[slug].astro`、spec §7
+
+**Interfaces:**
+- Consumes: Task 6–7 的 `mdxToBlocks(src, { path, slug?, rewriteHref })`；Task 8 的 `readLegacyTree()`（`docs[].{locale, rel, file, category, sortOrder, oldUrl, newUrl}`、`categories`、`resolveLink(href, from)`、`unresolved`）；Task 9 的 `upsertEntry`、`canonical`、`STEPS`、`WRITE_STEPS`。
+- Produces:
+  - `convertPost(src, { path, rewriteHref, publishedAt }) → want`（`{ collection: "posts", slug, locale: "en", status, data: { title, excerpt?, content }, taxonomies: { tag: [...] }, publishedAt }`）、`firstCommitDate(file)`、`postPayloads(tree) → [{ file, want }]`、`BLOG_ROOT`（`scripts/lib/posts.mjs`）。
+  - `legacyRedirects(tree) → [{ source, destination, type: 301, groupName }]`、`syncRedirects(request, rules, { dryRun }) → [{ name, action, diff? }]`、`GROUP = "legacy-docusaurus"`（`scripts/lib/redirects.mjs`）。
+  - `defaultToken()`（`scripts/lib/mcp.mjs`）。
+  - runner 步骤 `posts`、`redirects`；`verify` 额外检查每条精确重定向和 5 个样例（模式规则、feed）。
+
+- [ ] **Step 1: 🚦 探针：中间件的 301 先于 Astro i18n fallback**
+
+dev 在运行，Task 9 的 docs 已经迁好。
+
+```bash
+cd /Users/john/git/web9ai
+TOKEN=$(cat .local/dev-token)
+curl -s -X POST http://localhost:4321/_emdash/api/redirects -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"source":"/zh-CN/ai/intro","destination":"/zh-CN/docs/intro","type":301,"groupName":"probe"}'
+curl -sI http://localhost:4321/zh-CN/ai/intro | command grep -iE '^(HTTP|location)'
+curl -sI http://localhost:4321/zh-CN/ai/no-such-page | command grep -iE '^(HTTP|location)'
+```
+
+Expected：第一个 `curl` 返回 `{"success":true,"data":{"id":"…",…}}`；`/zh-CN/ai/intro` 是 `301` + `location: /zh-CN/docs/intro`；`/zh-CN/ai/no-such-page`（没有规则）是 Astro fallback 的 `302` + `location: /ai/no-such-page`，或者 404。
+
+如果 `/zh-CN/ai/intro` 拿到的是 `302 /ai/intro`：**停下来报告**。那说明 i18n fallback 跑在重定向中间件前面，26 条 zh-CN 规则不会生效，需要 owner 决定是否加一个自己的中间件。
+
+删掉探针规则（用上面返回的 `id`）：
+
+```bash
+curl -s -X DELETE http://localhost:4321/_emdash/api/redirects/<id> -H "Authorization: Bearer $TOKEN"
+curl -s "http://localhost:4321/_emdash/api/redirects?group=probe" -H "Authorization: Bearer $TOKEN"
+```
+
+Expected：`{"success":true,"data":{"deleted":true}}`，然后 `items` 是 `[]`。
+
+- [ ] **Step 2: 写失败的测试**
+
+Create `scripts/lib/posts.test.mjs`：
+
+```js
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import { readLegacyTree } from "./legacy-tree.mjs";
+import { convertPost, postPayloads } from "./posts.mjs";
+
+const post = (body, fm = "slug: tiny\ntitle: Tiny | Course\ntags: [AI, tiny-course]\ndraft: true") => `---\n${fm}\n---\n\n${body}`;
+const options = { path: "legacy/blog/x/index.mdx", rewriteHref: (h) => (h === "/ai/intro" ? "/docs/intro" : h), publishedAt: "2025-03-08T00:19:14Z" };
+
+describe("convertPost", () => {
+	it("moves the text above <!-- truncate --> into the excerpt and keeps drafts drafts", () => {
+		const want = convertPost(post("# Tiny | Course\n\n*Cross the gap*\n\n<!-- truncate -->\n\nSee [intro](/ai/intro).\n\n:::info\nOnline\n:::\n"), options);
+		expect(want).toMatchObject({
+			collection: "posts",
+			slug: "tiny",
+			locale: "en",
+			status: "draft",
+			taxonomies: { tag: ["ai", "tiny-course"] },
+			publishedAt: "2025-03-08T00:19:14Z",
+			data: { title: "Tiny | Course", excerpt: "Cross the gap" },
+		});
+		expect(want.data.content.map((b) => b._type)).toEqual(["block", "callout"]);
+		expect(want.data.content[0].markDefs[0].href).toBe("/docs/intro");
+		expect(JSON.stringify(want.data.content)).not.toContain("Cross the gap");
+	});
+	it("has no excerpt when nothing but the title sits above the marker, and publishes non-drafts", () => {
+		const want = convertPost(post("# Title\n\n<!-- truncate -->\n\nBody.\n", "slug: t\ntitle: Title"), options);
+		expect(want.status).toBe("published");
+		expect(want.data).not.toHaveProperty("excerpt");
+		expect(want.data.content).toHaveLength(1);
+		expect(want.taxonomies).toEqual({ tag: [] });
+	});
+	it("refuses media above the marker", () => {
+		expect(() => convertPost(post("# T\n\n![poster](/img/p.svg)\n\n<!-- truncate -->\n\nBody.\n"), options)).toThrow(/only text may sit above/);
+	});
+});
+
+const fullHistory = (() => {
+	try {
+		return execFileSync("git", ["rev-parse", "--is-shallow-repository"], { encoding: "utf8" }).trim() === "false";
+	} catch {
+		return false;
+	}
+})();
+
+describe.skipIf(!existsSync("legacy/blog") || !fullHistory)("postPayloads on legacy/blog", () => {
+	const tree = readLegacyTree();
+	const payloads = postPayloads(tree);
+	const want = (slug) => payloads.find((p) => p.want.slug === slug).want;
+	it("converts both posts with the dates Docusaurus showed", () => {
+		expect(payloads.map((p) => p.want.slug)).toEqual(["ai-tiny-course", "ai-tools-adhoc"]);
+		expect(want("ai-tiny-course")).toMatchObject({ status: "draft", publishedAt: "2025-03-08T00:19:14Z", data: { excerpt: "跨越科技裂谷 | 成为穿越周期的AI达人" } });
+		expect(want("ai-tiny-course").data.content.map((b) => b._type)).toEqual(["image", "callout"]);
+		expect(want("ai-tools-adhoc")).toMatchObject({ status: "published", publishedAt: "2025-04-11T03:57:01Z", taxonomies: { tag: ["ai", "course", "workshop", "tools", "tiny-course"] } });
+		expect(want("ai-tools-adhoc").data.content[0].markDefs[0].href).toBe("/docs/ai-tools-adhoc");
+		expect(tree.unresolved).toEqual([]);
+	});
+});
+```
+
+Create `scripts/lib/redirects.test.mjs`：
+
+```js
+import { existsSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import { readLegacyTree } from "./legacy-tree.mjs";
+import { GROUP, legacyRedirects, syncRedirects } from "./redirects.mjs";
+
+const fakeTree = {
+	docs: [
+		{ locale: "en", rel: "ai/intro.md", file: "legacy/docs/ai/intro.md", category: "general", sortOrder: 1000, oldUrl: "/ai/intro", newUrl: "/docs/intro" },
+		{ locale: "en", rel: "ai/08-cloud/02-b.md", file: "b", category: "cloud", sortOrder: 2001, oldUrl: "/ai/cloud/b", newUrl: "/docs/b" },
+		{ locale: "en", rel: "ai/08-cloud/01-a.md", file: "a", category: "cloud", sortOrder: 2000, oldUrl: "/a", newUrl: "/docs/a" },
+		{ locale: "zh-CN", rel: "ai/intro.md", file: "zh/ai/intro.md", category: "general", sortOrder: 1000, oldUrl: "/zh-CN/ai/intro", newUrl: "/zh-CN/docs/intro" },
+	],
+	categories: { cloud: { label: "Cloud" }, usecase: { label: "Use Case" } },
+};
+
+describe("legacyRedirects", () => {
+	it("maps every en doc for both locales, the blog, category pages and /pages/home", () => {
+		const tree = { ...fakeTree, docs: [...fakeTree.docs, { ...fakeTree.docs[1], rel: "x", category: "usecase", oldUrl: "/ai/usecase/x", newUrl: "/docs/x" }] };
+		const map = Object.fromEntries(legacyRedirects(tree).map((r) => [r.source, r.destination]));
+		expect(map).toMatchObject({
+			"/ai/intro": "/docs/intro",
+			"/zh-CN/ai/intro": "/zh-CN/docs/intro",
+			"/zh-CN/a": "/zh-CN/docs/a",
+			"/blog": "/posts",
+			"/blog/archive": "/posts",
+			"/zh-CN/blog/tags": "/posts",
+			"/blog/[slug]": "/posts/[slug]",
+			"/blog/tags/[tag]": "/tag/[tag]",
+			"/category/cloud": "/docs/a",
+			"/category/cloud-1": "/docs/a",
+			"/category/use-case": "/docs/x",
+			"/pages/home": "/",
+		});
+		expect(legacyRedirects(tree).every((r) => r.type === 301 && r.groupName === GROUP)).toBe(true);
+	});
+	it("refuses a zh-CN doc whose old URL is not /zh-CN + the en one", () => {
+		const docs = fakeTree.docs.map((d) => (d.locale === "zh-CN" ? { ...d, oldUrl: "/zh-CN/other" } : d));
+		expect(() => legacyRedirects({ ...fakeTree, docs, categories: { cloud: { label: "Cloud" } } })).toThrow(/not \/zh-CN \+ the en URL/);
+	});
+});
+
+describe.skipIf(!existsSync("legacy/docs"))("legacyRedirects on legacy/", () => {
+	const rules = legacyRedirects(readLegacyTree());
+	const map = Object.fromEntries(rules.map((r) => [r.source, r.destination]));
+	it("has 52 doc rules, 10 blog rules, 10 category rules and /pages/home", () => {
+		expect(rules).toHaveLength(73);
+		expect(map).toMatchObject({
+			"/rundiffusion": "/docs/rundiffusion",
+			"/ai/model/01_3d": "/docs/3d",
+			"/zh-CN/ai/cloud/lambda": "/zh-CN/docs/lambda",
+			"/ai/usecase/ai-tools-adhoc": "/docs/ai-tools-adhoc",
+			"/dev/learn_ai_coding": "/docs/learn_ai_coding",
+			"/category/use-case": "/docs/guide",
+			"/category/prompt-engineering": "/docs/prompt-guides",
+			"/category/articles": "/docs/ai-product-ideas",
+			"/category/cloud": "/docs/rundiffusion",
+		});
+	});
+});
+
+/** Stand-in for the redirects REST API, two items per page. */
+function fakeApi(initial = []) {
+	const rows = initial.map((r, i) => ({ id: `r${i}`, enabled: true, ...r }));
+	const calls = [];
+	const request = async (method, path, body) => {
+		calls.push(`${method} ${path.split("?")[0]}`);
+		if (method === "GET") {
+			const start = Number(new URL(path, "http://x").searchParams.get("cursor") ?? 0);
+			const items = rows.filter((r) => r.groupName === GROUP).slice(start, start + 2);
+			return { items, ...(start + 2 < rows.length ? { nextCursor: String(start + 2) } : {}) };
+		}
+		if (method === "POST") rows.push({ id: `r${rows.length}`, enabled: true, ...body });
+		if (method === "PUT") Object.assign(rows.find((r) => path.endsWith(`/${r.id}`)), body);
+		return {};
+	};
+	return { rows, calls, request, writes: () => calls.filter((c) => !c.startsWith("GET")) };
+}
+
+describe("syncRedirects", () => {
+	const rule = (source, destination) => ({ source, destination, type: 301, groupName: GROUP });
+	it("creates, updates and leaves rules alone; reports extras without deleting them", async () => {
+		const api = fakeApi([rule("/a", "/docs/a"), rule("/b", "/docs/old"), rule("/gone", "/docs/x")]);
+		const res = await syncRedirects(api.request, [rule("/a", "/docs/a"), rule("/b", "/docs/b"), rule("/c", "/docs/c")]);
+		expect(res.map((r) => [r.name, r.action])).toEqual([
+			["/a", "unchanged"],
+			["/b", "updated"],
+			["/c", "created"],
+			["/gone", "extra"],
+		]);
+		expect(api.writes()).toEqual(["PUT /_emdash/api/redirects/r1", "POST /_emdash/api/redirects"]);
+		expect(api.rows.find((r) => r.source === "/gone")).toBeDefined();
+		const again = await syncRedirects(api.request, [rule("/a", "/docs/a"), rule("/b", "/docs/b"), rule("/c", "/docs/c")]);
+		expect(again.filter((r) => r.action !== "unchanged").map((r) => r.action)).toEqual(["extra"]);
+	});
+	it("re-enables a disabled rule and writes nothing in a dry run", async () => {
+		const api = fakeApi([{ ...rule("/a", "/docs/a"), enabled: false }]);
+		expect(await syncRedirects(api.request, [rule("/a", "/docs/a")], { dryRun: true })).toEqual([{ name: "/a", action: "updated", diff: "disabled, /docs/a -> /docs/a" }]);
+		expect(api.writes()).toEqual([]);
+	});
+});
+```
+
+- [ ] **Step 3: 跑测试，确认失败**
+
+Run: `npx vitest run scripts/lib/posts.test.mjs scripts/lib/redirects.test.mjs`
+Expected: FAIL：`posts.mjs`、`redirects.mjs` 不存在。
+
+- [ ] **Step 4: 实现**
+
+Create `scripts/lib/posts.mjs`：
+
+```js
+// Legacy Docusaurus blog -> EmDash `posts` (spec §7). Two posts, no authors, no zh-CN posts.
+import { execFileSync } from "node:child_process";
+import { readdirSync, readFileSync } from "node:fs";
+import { canonical } from "./sync.mjs";
+import { mdxToBlocks } from "./mdx-to-pt.mjs";
+
+export const BLOG_ROOT = "legacy/blog";
+const TRUNCATE = /^[ \t]*<!--\s*truncate\s*-->[ \t]*$/m;
+
+const plainText = (block) => (block.children ?? []).map((c) => c.text ?? "").join("");
+
+/**
+ * Upsert payload for one post. Docusaurus showed the text above `<!-- truncate -->` as the summary;
+ * it becomes `excerpt` and leaves `content`, because the post page prints the excerpt under the title
+ * and the content after it. `draft: true` posts were never built, so they stay drafts.
+ * `publishedAt` is the date Docusaurus displayed (see firstCommitDate).
+ */
+export function convertPost(src, { path, rewriteHref, publishedAt }) {
+	const full = mdxToBlocks(src, { path, rewriteHref });
+	const cut = TRUNCATE.exec(src);
+	let content = full.blocks;
+	let excerpt = "";
+	if (cut) {
+		const head = mdxToBlocks(src.slice(0, cut.index), { path, slug: full.slug, rewriteHref }).blocks;
+		if (canonical(full.blocks.slice(0, head.length)) !== canonical(head)) throw new Error(`${path}: the summary above <!-- truncate --> does not convert to the first blocks of the post`);
+		if (head.some((b) => b._type !== "block")) throw new Error(`${path}: only text may sit above <!-- truncate --> (it becomes the excerpt)`);
+		excerpt = head.map(plainText).join("\n").trim();
+		content = full.blocks.slice(head.length);
+	}
+	const tags = (Array.isArray(full.frontmatter.tags) ? full.frontmatter.tags : []).map((t) => String(t).toLowerCase());
+	return {
+		collection: "posts",
+		slug: full.slug,
+		locale: "en",
+		status: full.frontmatter.draft === true ? "draft" : "published",
+		data: { title: full.title, ...(excerpt ? { excerpt } : {}), content },
+		taxonomies: { tag: tags },
+		publishedAt,
+	};
+}
+
+/**
+ * When Docusaurus dated a post: the folder names (20250307-...) have no separators, so Docusaurus 3
+ * ignored them and used the file's first git commit. Needs the full history: a shallow clone (CI) has
+ * only the last commit, so this refuses to guess there.
+ */
+export function firstCommitDate(file) {
+	const shallow = execFileSync("git", ["rev-parse", "--is-shallow-repository"], { encoding: "utf8" }).trim();
+	if (shallow !== "false") throw new Error("shallow git clone: blog dates need the full history (git fetch --unshallow)");
+	const dates = execFileSync("git", ["log", "--follow", "--format=%aI", "--", file], { encoding: "utf8" }).trim().split("\n");
+	if (!dates[0]) throw new Error(`${file}: not in git history`);
+	return new Date(dates.at(-1)).toISOString().replace(/\.000Z$/, "Z");
+}
+
+/** [{ file, want }] for every legacy post, oldest folder first. Throws on unresolved internal links. */
+export function postPayloads(tree, { root = BLOG_ROOT, dateOf = firstCommitDate } = {}) {
+	const payloads = readdirSync(root, { withFileTypes: true })
+		.filter((d) => d.isDirectory())
+		.map((d) => `${root}/${d.name}/index.mdx`)
+		.sort()
+		.map((file) => {
+			const want = convertPost(readFileSync(file, "utf8"), {
+				path: file,
+				publishedAt: dateOf(file),
+				rewriteHref: (href) => tree.resolveLink(href, { rel: file, locale: "en" }),
+			});
+			return { file, want };
+		});
+	if (tree.unresolved.length) throw new Error(`unresolved internal links:\n  ${tree.unresolved.join("\n  ")}`);
+	return payloads;
+}
+```
+
+Create `scripts/lib/redirects.mjs`：
+
+```js
+// Old Docusaurus URLs -> new URLs (spec §7), kept in EmDash's redirect table. There is no MCP tool for
+// redirects; the REST API needs an admin token (redirects:manage), which the migration runner has.
+// The EmDash middleware matches exact sources first, then [param] patterns; it skips paths with a file
+// extension, so the feeds are redirected in astro.config.mjs instead.
+
+export const GROUP = "legacy-docusaurus";
+
+/** Docusaurus' generated-index slug for a category label ("Use Case" -> "use-case"). */
+const labelSlug = (label) => label.toLowerCase().trim().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "");
+
+/** Every rule as { source, destination, type: 301, groupName }. Throws on inconsistent input. */
+export function legacyRedirects(tree) {
+	const en = tree.docs.filter((d) => d.locale === "en");
+	const rules = [];
+	const add = (source, destination) => rules.push({ source, destination, type: 301, groupName: GROUP });
+	for (const doc of en) {
+		add(doc.oldUrl, doc.newUrl);
+		// Docusaurus served every en doc under /zh-CN too (translated or falling back to en); the new
+		// site does the same at /zh-CN/docs/<slug>.
+		add(`/zh-CN${doc.oldUrl}`, `/zh-CN${doc.newUrl}`);
+	}
+	for (const zh of tree.docs.filter((d) => d.locale === "zh-CN")) {
+		const original = en.find((d) => d.rel === zh.rel);
+		if (zh.oldUrl !== `/zh-CN${original?.oldUrl}`) throw new Error(`${zh.file}: zh-CN URL ${zh.oldUrl} is not /zh-CN + the en URL`);
+	}
+	for (const prefix of ["", "/zh-CN"]) {
+		for (const exact of ["/blog", "/blog/archive", "/blog/tags"]) add(`${prefix}${exact}`, "/posts");
+		add(`${prefix}/blog/tags/[tag]`, "/tag/[tag]");
+		add(`${prefix}/blog/[slug]`, "/posts/[slug]");
+	}
+	// Generated category index pages. The three sidebars share one slugger, so the aiSidebar copies
+	// probably got a -1 suffix; a rule for a URL that never existed costs nothing.
+	for (const [dir, { label }] of Object.entries(tree.categories)) {
+		const first = en.filter((d) => d.category === dir).sort((a, b) => a.sortOrder - b.sortOrder)[0];
+		if (!first) throw new Error(`category ${dir} has no en docs`);
+		for (const suffix of ["", "-1"]) add(`/category/${labelSlug(label)}${suffix}`, first.newUrl);
+	}
+	add("/pages/home", "/");
+
+	const seen = new Set();
+	for (const r of rules) {
+		if (seen.has(r.source)) throw new Error(`duplicate redirect source ${r.source}`);
+		if (r.source === r.destination) throw new Error(`redirect loop ${r.source}`);
+		seen.add(r.source);
+	}
+	return rules;
+}
+
+const same = (a, b) => a.destination === b.destination && a.type === b.type && a.enabled !== false;
+
+/**
+ * Make the group's rules match `rules`. `request(method, path, body?)` returns the JSON `data` of an
+ * EmDash API call and throws on errors. Rules in the group that are not wanted are reported, never
+ * deleted. Returns [{ name, action: "created" | "updated" | "unchanged" | "extra", diff? }].
+ */
+export async function syncRedirects(request, rules, { dryRun = false } = {}) {
+	const have = new Map();
+	let cursor;
+	do {
+		const page = await request("GET", `/_emdash/api/redirects?group=${GROUP}&limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+		for (const r of page.items) have.set(r.source, r);
+		cursor = page.nextCursor;
+	} while (cursor);
+
+	const results = [];
+	for (const rule of rules) {
+		const current = have.get(rule.source);
+		have.delete(rule.source);
+		if (current && same(current, rule)) {
+			results.push({ name: rule.source, action: "unchanged" });
+			continue;
+		}
+		if (!dryRun) {
+			if (current) await request("PUT", `/_emdash/api/redirects/${current.id}`, { destination: rule.destination, type: rule.type, enabled: true, groupName: GROUP });
+			else await request("POST", "/_emdash/api/redirects", rule);
+		}
+		results.push({ name: rule.source, action: current ? "updated" : "created", ...(current ? { diff: `${current.enabled === false ? "disabled, " : ""}${current.destination} -> ${rule.destination}` } : {}) });
+	}
+	for (const extra of have.values()) results.push({ name: extra.source, action: "extra", diff: `-> ${extra.destination}; not in the table, left in place` });
+	return results;
+}
+```
+
+`scripts/lib/mcp.mjs` 导出 token（runner 的 REST 调用要用）：
+
+```diff
+diff --git a/scripts/lib/mcp.mjs b/scripts/lib/mcp.mjs
+--- a/scripts/lib/mcp.mjs
++++ b/scripts/lib/mcp.mjs
+@@ -29,7 +29,7 @@ export function unwrapToolResult(name, res) {
+ 	}
+ }
+ 
+-function defaultToken() {
++export function defaultToken() {
+ 	if (process.env.EMDASH_TOKEN) return process.env.EMDASH_TOKEN;
+ 	return readFileSync(new URL("../../.local/dev-token", import.meta.url), "utf8").trim();
+ }
+```
+
+`scripts/migrate.mjs` 加 `posts`、`redirects` 两步，`verify` 加重定向检查：
+
+```diff
+diff --git a/scripts/migrate.mjs b/scripts/migrate.mjs
+--- a/scripts/migrate.mjs
++++ b/scripts/migrate.mjs
+@@ -3,13 +3,16 @@
+ // reports "unchanged" for everything already in place and writes nothing.
+ //
+ //   node scripts/migrate.mjs <step>... [--dry-run]
+-//   steps: docs, menu, verify (reads only), all (every write step, in order)
+-// Env: EMDASH_URL (default http://localhost:4321), EMDASH_TOKEN (default: .local/dev-token).
++//   steps: docs, menu, posts, redirects, verify (reads only), all (every write step, in order)
++// Env: EMDASH_URL (default http://localhost:4321), EMDASH_TOKEN (default: .local/dev-token). The
++// redirects step needs an admin token (the dev-bypass token is one).
+ import { parseArgs } from "node:util";
+ import { docPayloads } from "./lib/docs-payloads.mjs";
+ import { readLegacyTree } from "./lib/legacy-tree.mjs";
+ import { checkMarkers } from "./lib/markers.mjs";
+-import { callTool } from "./lib/mcp.mjs";
++import { callTool, defaultToken } from "./lib/mcp.mjs";
++import { postPayloads } from "./lib/posts.mjs";
++import { legacyRedirects, syncRedirects } from "./lib/redirects.mjs";
+ import { upsertEntry, upsertMenu } from "./lib/sync.mjs";
+ import { docPageChecks } from "./lib/verify-pages.mjs";
+ 
+@@ -25,6 +28,27 @@ const MENU = [
+ 	{ label: "GitHub", type: "custom", customUrl: "https://github.com/TouchMarsSolutions/web9ai", target: "_blank" },
+ ];
+ 
++/** Redirects that are not rows of the table: pattern rules (sample URLs) and the feeds in astro.config.mjs. */
++const REDIRECT_SAMPLES = [
++	["/blog/ai-tools-adhoc", "/posts/ai-tools-adhoc"],
++	["/zh-CN/blog/ai-tools-adhoc", "/posts/ai-tools-adhoc"],
++	["/blog/tags/ai", "/tag/ai"],
++	["/blog/rss.xml", "/rss.xml"],
++	["/blog/atom.xml", "/rss.xml"],
++];
++
++/** JSON `data` of an EmDash REST call made with the runner's token. */
++async function request(method, path, body) {
++	const res = await fetch(new URL(path, site), {
++		method,
++		headers: { Authorization: `Bearer ${defaultToken()}`, ...(body ? { "Content-Type": "application/json" } : {}) },
++		body: body ? JSON.stringify(body) : undefined,
++	});
++	const json = await res.json().catch(() => ({}));
++	if (!res.ok || json.success === false) throw new Error(`${method} ${path}: HTTP ${res.status} ${JSON.stringify(json.error ?? json).slice(0, 300)}`);
++	return json.data;
++}
++
+ const STEPS = {
+ 	async docs() {
+ 		const en = new Map();
+@@ -43,21 +67,44 @@ const STEPS = {
+ 	async menu() {
+ 		return [{ name: "primary", ...(await upsertMenu(callTool, "primary", MENU, { dryRun })) }];
+ 	},
++	async posts() {
++		// Tag terms come from the seed (plan 2 Task 1); content_create fails on an unknown term.
++		const terms = new Set((await callTool("taxonomy_list_terms", { taxonomy: "tag" })).items.map((t) => t.slug));
++		const results = [];
++		for (const { want } of postPayloads(readLegacyTree())) {
++			const missing = want.taxonomies.tag.filter((t) => !terms.has(t));
++			if (missing.length) throw new Error(`posts/${want.slug}: tag terms ${missing.join(", ")} do not exist; they come from the seed`);
++			results.push({ name: `en ${want.slug}`, ...(await upsertEntry(callTool, want, { dryRun })) });
++		}
++		return results;
++	},
++	async redirects() {
++		return syncRedirects(request, legacyRedirects(readLegacyTree()), { dryRun });
++	},
+ 	async verify() {
+-		const checks = docPageChecks(docPayloads(readLegacyTree()));
++		const tree = readLegacyTree();
++		const checks = docPageChecks(docPayloads(tree));
+ 		const failures = [];
+ 		for (const check of checks) {
+ 			const res = await fetch(new URL(check.url, site));
+ 			const { missing, unexpected } = checkMarkers(await res.text(), check);
+ 			if (res.status !== 200 || missing.length || unexpected.length) failures.push({ url: check.url, status: res.status, missing, unexpected });
+ 		}
++		const pageFailures = failures.length;
++		const hops = [...legacyRedirects(tree).filter((r) => !r.source.includes("[")).map((r) => [r.source, r.destination]), ...REDIRECT_SAMPLES];
++		for (const [from, to] of hops) {
++			const res = await fetch(new URL(from, site), { redirect: "manual" });
++			const location = res.headers.get("location") && new URL(res.headers.get("location"), site).pathname;
++			if (res.status !== 301 || location !== to) failures.push({ url: from, status: res.status, location, wanted: to });
++		}
+ 		for (const f of failures) console.error(`verify: ${JSON.stringify(f)}`);
+-		console.log(`verify: ${checks.length - failures.length}/${checks.length} pages ok`);
++		console.log(`verify: ${checks.length - pageFailures}/${checks.length} pages ok`);
++		console.log(`verify: ${hops.length - (failures.length - pageFailures)}/${hops.length} redirects ok`);
+ 		if (failures.length) process.exitCode = 1;
+ 		return [];
+ 	},
+ };
+-const WRITE_STEPS = ["docs", "menu"];
++const WRITE_STEPS = ["docs", "menu", "posts", "redirects"];
+ 
+ const steps = positionals.includes("all") ? WRITE_STEPS : positionals;
+ if (!steps.length || steps.some((s) => !STEPS[s])) {
+```
+
+`astro.config.mjs`：feed 重定向（只做 en 两个；zh-CN 的 feed URL 没有任何外链价值）：
+
+```diff
+diff --git a/astro.config.mjs b/astro.config.mjs
+--- a/astro.config.mjs
++++ b/astro.config.mjs
+@@ -10,6 +10,12 @@ export default defineConfig({
+ 	// Canonical origin for absolute URLs (RSS, OG, SEO). Never derive it from the request Host header.
+ 	site: "https://www.web9.ai",
+ 	output: "server",
++	// Old Docusaurus feeds. EmDash's redirect table cannot hold these: its middleware skips any path with
++	// a file extension (plan 2 Task 10).
++	redirects: {
++		"/blog/rss.xml": { status: 301, destination: "/rss.xml" },
++		"/blog/atom.xml": { status: 301, destination: "/rss.xml" },
++	},
+ 	i18n: {
+ 		defaultLocale: "en",
+ 		locales: ["en", "zh-CN"],
+```
+
+`src/pages/posts/[slug].astro`：正文容器加 `prose`，块的 Markdown 正文（列表、代码、链接）才有样式（spec §11）。保留 `article-content`，页面脚本用它找正文：
+
+```diff
+diff --git a/src/pages/posts/[slug].astro b/src/pages/posts/[slug].astro
+--- a/src/pages/posts/[slug].astro
++++ b/src/pages/posts/[slug].astro
+@@ -228,7 +228,7 @@ const publishDate =
+ 					}
+ 				</header>
+ 
+-				<div class="article-content">
++				<div class="article-content prose max-w-none">
+ 					<PortableText value={post.data.content} />
+ 				</div>
+ 
+```
+
+每个 diff 用 `git apply` 应用（写计划时在 Task 9 的文件上验证过可以干净应用）。
+
+- [ ] **Step 5: 跑测试，确认通过**
+
+Run: `npm test`
+Expected: PASS。`posts.test.mjs` 里读 `legacy/blog` 的那组在本机运行（完整 git 历史），CI 里因为 shallow clone 跳过。
+
+- [ ] **Step 6: 🚦 本地迁移 posts 和 redirects**
+
+`astro.config.mjs` 改了，先重启 dev：
+
+```bash
+cd /Users/john/git/web9ai
+npx astro dev stop
+npm run dev -- --port 4321
+node scripts/migrate.mjs posts redirects --dry-run
+```
+
+Expected：`posts (dry run): created 2`、`redirects (dry run): created 73`。
+
+```bash
+node scripts/migrate.mjs posts redirects
+node scripts/migrate.mjs all
+```
+
+Expected：第一条 `posts: created 2`、`redirects: created 73`；第二条（`all` = docs、menu、posts、redirects）全部 `unchanged`：`docs: unchanged 35`、`menu: unchanged 1`、`posts: unchanged 2`、`redirects: unchanged 73`，没有 `extra`。如果 posts 有 "updated"，按 Task 9 Step 5 的办法看 diff 路径（例如 EmDash 把空字段存成 `null`）。
+
+```bash
+node scripts/migrate.mjs verify
+```
+
+Expected：`verify: 52/52 pages ok` 和 `verify: 74/74 redirects ok`（69 条精确规则 + 5 个样例）。如果刚写完规则就有个别 302/404，等几秒再跑一次（中间件的规则缓存在后台刷新）；还不行就停下来报告。
+
+帖子页面：
+
+```bash
+node scripts/check-page.mjs http://localhost:4321/posts/ai-tools-adhoc '最常用AI工具串烧' 'href="/docs/ai-tools-adhoc"' 'article-content prose' --absent '/ai/usecase/'
+node scripts/check-page.mjs http://localhost:4321/posts 'ai-tools-adhoc' --absent 'ai-tiny-course'
+node scripts/check-page.mjs http://localhost:4321/tag/ai 'ai-tools-adhoc'
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:4321/posts/ai-tiny-course
+node scripts/mcp.mjs content_get '{"collection":"posts","id":"ai-tiny-course"}'
+```
+
+Expected：三个 `check-page` 通过；草稿帖子 `/posts/ai-tiny-course` 是 `404`；`content_get` 显示 `status: "draft"`、`excerpt` 是 "跨越科技裂谷 | 成为穿越周期的AI达人"、`content` 第一个块是 `image`（`/img/event/20250314_poster6.svg`）。记下 `publishedAt`：如果是 `2025-03-08T00:19:14.000Z`，以后在后台发布会保留这个日期；如果是 `null`，在 spec §7 的 blog 那条里写上"以后发布 `ai-tiny-course` 时传 `publishedAt: 2025-03-08T00:19:14Z`"。
+
+最后用 CDP（page 8）打开 `/posts/ai-tools-adhoc` 截图，确认正文有 `prose` 的排版（链接有下划线），页面没有多出一段重复的 excerpt。
+
+- [ ] **Step 7: 更新 spec**
+
+§7 的 "Blog：……" 那条换成：
+
+"Blog（计划 2 Task 10）：`scripts/lib/posts.mjs` 用同一个 converter 写入 `posts`；`<!-- truncate -->` 上面的文字成为 `excerpt` 并从 `content` 里去掉；tag 用 seed 里的 term；日期 `publishedAt` 用 Docusaurus 显示的日期（文件第一次 git 提交，目录名里的日期 Docusaurus 不认）；`draft: true` 的文章保持草稿状态。"
+
+在它后面加一条：
+
+"旧 URL（计划 2 Task 10）：`scripts/lib/redirects.mjs` 生成 73 条 301（组 `legacy-docusaurus`）：26 篇 doc 的旧 URL 在 en 和 `/zh-CN` 下各一条；`/blog`、`/blog/archive`、`/blog/tags` → `/posts`，`/blog/[slug]` → `/posts/[slug]`，`/blog/tags/[tag]` → `/tag/[tag]`（en、zh-CN 各一套）；Docusaurus 自动生成的 `/category/<label>`（和可能存在的 `-1` 副本）→ 该分类的第一篇 doc；`/pages/home` → `/`。runner 用 admin token 通过 REST 同步（没有 MCP 工具），只增改不删除。带扩展名的路径不经过 EmDash 的重定向中间件，所以 `/blog/rss.xml`、`/blog/atom.xml` → `/rss.xml` 写在 `astro.config.mjs` 的 `redirects` 里。doc 的 `/tags/*` 页面和其他没覆盖的旧 URL 会 404，切换后看 `/_emdash/api/redirects/404s` 再补。"
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add scripts/lib/posts.mjs scripts/lib/posts.test.mjs scripts/lib/redirects.mjs scripts/lib/redirects.test.mjs scripts/migrate.mjs scripts/lib/mcp.mjs astro.config.mjs 'src/pages/posts/[slug].astro' docs/superpowers/specs/2026-10-15-emdash-migration-design.md
+git commit -m "feat(migrate): blog posts and legacy URL redirects; feed redirects; prose on posts
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
