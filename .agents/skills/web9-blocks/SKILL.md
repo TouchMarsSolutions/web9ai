@@ -39,7 +39,7 @@ Insert a block with its own line, JSON on one line:
 
 Block line rules: start at column 0, valid one-line JSON, end exactly with ` -->` (no trailing space or CR). A line that breaks any rule silently becomes a literal paragraph.
 
-Always include a unique `_key` in every ec:block JSON, unique within the doc: keyless blocks are stored without one, and Tabs derives its DOM ids from `_key` (`w9t-<_key>`), so a missing or duplicate key makes two tabs blocks on one page collide.
+Always include a unique `_key` in every ec:block JSON, unique within the doc: keyless blocks are stored without one, and Tabs derives its DOM ids from `_key` (`w9t-<_key>`), so a missing or duplicate key makes two tabs blocks on one page collide. (The admin editor adds a key to a keyless block the first time someone saves it there, but MCP-only content keeps none, so always write one.)
 
 ## Block reference
 

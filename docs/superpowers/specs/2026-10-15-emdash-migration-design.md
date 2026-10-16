@@ -54,7 +54,7 @@
 - 一句话：**用组件写内容**在后台或 MCP 里完成；**新增一种组件**需要改代码并部署。
 - **已定的折中**：Block Kit 没有富文本类型的字段，repeater 里也不能放 `portableText`。所以 callout、tabs、details 的正文和工具介绍都存成 Markdown 字符串，由 `lib/markdown.mjs` 在服务端渲染（`marked`，支持 GFM、`:::tone title` 提示块、mermaid 代码块），再经过 `sanitize-html` 白名单过滤。代价是后台弹窗里看到的是 Markdown 原文，不是所见即所得。
 - Docusaurus 里的 logo 表格统一转成 `tool_grid`：一组 `{name, tagline, logo, url, featured}`。core 的表格单元格只能放文字、强调和链接，放不了图片；而且结构化的数据更方便 AI 维护（"往声控必备里加一个工具"）。纯文字的表格转成 core `table`。
-- **待验证**：repeater 里的多行 `text_input` 在后台弹窗中能正常编辑。
+- **已验证（计划 1 Task 11）**：repeater 里的多行 `text_input` 在后台弹窗中能正常编辑。在 `ai-tools-adhoc` 里打开第一个 `tool_grid` 的弹窗，展开第一个工具，tagline 是多行文本框，已有的换行原样显示；按 Enter 是换行，不会提交表单；改成 `第一行` + Enter + `第二行`，弹窗 Save 后自动存成草稿，MCP 读到 `"第一行\n第二行"`，发布后页面上渲染成 `第一行<br />第二行`。没有 `_key` 的块（Task 10 的 `ai-e2e`）在后台也能正常打开、编辑、保存，保存时编辑器会自动补上 `_key`。后台把 `search_text` 显示成一个可编辑的文本框，但每次带正文保存都会被 hook 覆盖。
 - **已验证（计划 1 Task 7）**：`ai-tools-adhoc` 的 51 个块（9 callout、8 tool_grid、5 details、1 tabs、1 table、1 mermaid、2 investment_warning）在 workerd dev 里全部渲染出来；tab 顺序正确；图片走站内的 `/img/`。
 
 ## 4. 搜索
