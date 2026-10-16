@@ -54,10 +54,19 @@ marked.use({
 
 // Content is published by AI agents without review, so inline CSS is limited to cosmetic
 // properties (no positioning) and every value goes through isSafeCssValue (css-value.mjs).
-const STYLE_PROPS = [
-	"color", "background", "background-color", "text-align", "font-size", "font-weight", "font-style",
-	"padding", "margin", "border", "border-radius", "box-shadow", "line-height", "width", "max-width",
+// Box properties are block-only: on an inline box, vertical padding, border and shadows paint outside
+// the line box without pushing content, so only block tags may set them.
+const TEXT_STYLE_PROPS = [
+	"color", "background", "background-color", "text-align", "font-size", "font-weight", "font-style", "border-radius",
 ];
+const BOX_STYLE_PROPS = ["padding", "margin", "border", "box-shadow", "line-height", "width", "max-width"];
+const BLOCK_TAGS = [
+	"address", "article", "aside", "footer", "header", "h1", "h2", "h3", "h4", "h5", "h6", "hgroup", "main", "nav", "section",
+	"blockquote", "dd", "div", "dl", "dt", "figcaption", "figure", "li", "ol", "p", "pre", "ul",
+	"details", "summary", "table", "caption", "td", "th",
+];
+const styleRules = (props) => Object.fromEntries(props.map((p) => [p, [safeValueFor(p)]]));
+const BLOCK_STYLE_RULES = styleRules([...TEXT_STYLE_PROPS, ...BOX_STYLE_PROPS]);
 
 /** Tags renderMarkdown keeps; html.mjs reuses the same set. */
 export const ALLOWED_TAGS = sanitizeHtml.defaults.allowedTags.concat(["img", "details", "summary", "del", "s", "h1", "h2"]);
@@ -88,7 +97,10 @@ const SANITIZE = {
 		aside: ["callout", /^callout--(note|tip|info|warning|danger|caution)$/],
 		p: ["callout__title"],
 	},
-	allowedStyles: { "*": Object.fromEntries(STYLE_PROPS.map((p) => [p, [safeValueFor(p)]])) },
+	allowedStyles: {
+		"*": styleRules(TEXT_STYLE_PROPS),
+		...Object.fromEntries(BLOCK_TAGS.map((tag) => [tag, BLOCK_STYLE_RULES])),
+	},
 	allowedSchemes: ["http", "https", "mailto"],
 	transformTags: { a: transformLink },
 };

@@ -23,6 +23,9 @@ describe("isSafeCssValue", () => {
 		["margin", "3em auto"],
 		["padding", "3em"],
 		["box-shadow", "0 1px 0 rgba(0,0,0,.1), 0 2px 4px #0003"],
+		["line-height", "normal"],
+		["line-height", "1"],
+		["line-height", "4"],
 	])("accepts %s: %s", (prop, value) => expect(isSafeCssValue(prop, value)).toBe(true));
 	it.each([
 		["background", "red\nurl(//evil.example/t.gif)"],
@@ -81,5 +84,17 @@ describe("isSafeCssValue", () => {
 		["margin", "0 0 0-2em"],
 		["margin", "0%-1px"],
 		["margin", "1em -1em"],
+		["line-height", "0"],
+		["line-height", "0px"],
+		["line-height", "0.5"],
+		["line-height", "24px"],
+		["line-height", "150%"],
+		["line-height", "1.5em"],
+		["line-height", "5"],
+		["margin", "inherit"],
+		["color", "unset"],
+		["padding", "initial"],
+		["font-size", "REVERT"],
+		["width", "revert-layer"],
 	])("rejects %s: %j", (prop, value) => expect(isSafeCssValue(prop, value)).toBe(false));
 });

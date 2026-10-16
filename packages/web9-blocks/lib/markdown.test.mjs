@@ -70,6 +70,20 @@ describe("renderMarkdown sanitizer", () => {
 	it("drops relative font sizes, em shadows and negative margins together", () => {
 		expect(renderMarkdown('<div style="font-size:larger;box-shadow:0 0 0 .5em red;margin:0-256px">x</div>')).toBe("<div>x</div>");
 	});
+	it("keeps box properties on block tags only: inline padding, border and shadow paint outside the line box", () => {
+		expect(renderMarkdown('Later <span style="padding:256% 0;background:#fff">x</span>')).toBe('<p>Later <span style="background:#fff">x</span></p>\n');
+		expect(renderInlineMarkdown('<a href="/x" style="padding:256% 0;background:#fff">x</a>')).toBe('<a href="/x" style="background:#fff">x</a>');
+		expect(renderMarkdown('<span style="font-size:128px;padding:16em 0;border:2em solid #fff">x</span>')).toBe('<p><span style="font-size:128px">x</span></p>\n');
+	});
+	it("keeps text and box properties together on block tags", () => {
+		expect(renderMarkdown('<div style="color:red;padding:1em;border:1px solid #ccc">x</div>')).toBe(
+			'<div style="color:red;padding:1em;border:1px solid #ccc">x</div>',
+		);
+	});
+	it("drops line-height outside normal or 1 to 4", () => {
+		expect(renderMarkdown('<p style="line-height:0">x</p>')).toBe("<p>x</p>");
+		expect(renderMarkdown('<p style="line-height:1.6">x</p>')).toBe('<p style="line-height:1.6">x</p>');
+	});
 	it("drops full-page box-shadow spreads and viewport units", () => {
 		expect(renderMarkdown('<div style="box-shadow: 0 0 0 9999px red">x</div>')).toBe("<div>x</div>");
 		expect(renderMarkdown('<div style="box-shadow: 0 0 0 100vmax #000">x</div>')).toBe("<div>x</div>");
