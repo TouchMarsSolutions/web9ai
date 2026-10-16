@@ -25,6 +25,12 @@ describe("sanitizeHtmlFragment", () => {
 		expect(sanitizeHtmlFragment("<p>2*3*4 and a_b_c</p>")).toBe("<p>2*3*4 and a_b_c</p>");
 		expect(sanitizeHtmlFragment("<div>\n\n    <span>x</span>\n\n</div>")).toBe("<div>\n\n    <span>x</span>\n\n</div>");
 	});
+	it("drops ruby tags (they inlinify block children) and keeps their text", () => {
+		const out = sanitizeHtmlFragment("<ruby>a<rt>b</rt></ruby>");
+		expect(out).not.toContain("<ruby");
+		expect(out).not.toContain("<rt");
+		expect(out).toBe("ab");
+	});
 	it("returns an empty string for non-strings", () => {
 		expect(sanitizeHtmlFragment(undefined)).toBe("");
 		expect(sanitizeHtmlFragment(null)).toBe("");

@@ -96,6 +96,21 @@ describe("renderMarkdown sanitizer", () => {
 		expect(renderMarkdown('<div style="padding: 99999px; font-size: 9999px">x</div>')).toBe("<div>x</div>");
 		expect(renderMarkdown('<div style="margin: 0 auto; padding: 100px 20px">x</div>')).toBe('<div style="margin:0 auto;padding:100px 20px">x</div>');
 	});
+	it("drops ruby tags: CSS Ruby inlinifies block children, which would carry block-only box styles into inline boxes", () => {
+		expect(renderMarkdown('<div><ruby><li style="padding:256% 0;background:#fff">x</li></ruby></div>')).toBe(
+			'<div><li style="padding:256% 0;background:#fff">x</li></div>',
+		);
+		expect(renderMarkdown('<div><ruby>a<rt><summary style="padding:256% 0;background:#fff">x</summary></rt></ruby></div>')).toBe(
+			'<div>a<summary style="padding:256% 0;background:#fff">x</summary></div>',
+		);
+		expect(renderInlineMarkdown('<div><ruby><li style="padding:256% 0;background:#fff">x</li></ruby></div>')).toBe(
+			'<div><li style="padding:256% 0;background:#fff">x</li></div>',
+		);
+	});
+	it("keeps the text of ruby annotations and drops ruby, rb, rt, rtc and rp", () => {
+		expect(renderMarkdown("<ruby>漢<rt>kan</rt></ruby>")).toBe("<p>漢kan</p>\n");
+		expect(renderMarkdown("<ruby>a<rb>b</rb><rt>c</rt><rtc>d</rtc><rp>(</rp></ruby>")).toBe("<p>abcd(</p>\n");
+	});
 	it("drops upper-case property names (the whitelist is case-sensitive, so they fail closed)", () => {
 		expect(renderMarkdown('<div style="POSITION: fixed; Background-Color: red; color: red">x</div>')).toBe('<div style="color:red">x</div>');
 	});

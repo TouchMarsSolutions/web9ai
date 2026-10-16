@@ -68,8 +68,13 @@ const BLOCK_TAGS = [
 const styleRules = (props) => Object.fromEntries(props.map((p) => [p, [safeValueFor(p)]]));
 const BLOCK_STYLE_RULES = styleRules([...TEXT_STYLE_PROPS, ...BOX_STYLE_PROPS]);
 
+// Ruby inlinifies its block children, which would carry block-only box styles into inline boxes.
+const RUBY_TAGS = new Set(["ruby", "rb", "rt", "rtc", "rp"]);
+
 /** Tags renderMarkdown keeps; html.mjs reuses the same set. */
-export const ALLOWED_TAGS = sanitizeHtml.defaults.allowedTags.concat(["img", "details", "summary", "del", "s", "h1", "h2"]);
+export const ALLOWED_TAGS = sanitizeHtml.defaults.allowedTags
+	.filter((tag) => !RUBY_TAGS.has(tag))
+	.concat(["img", "details", "summary", "del", "s", "h1", "h2"]);
 
 /** Absolute (http(s)://), protocol-relative (//) and mailto: links leave the site; everything else stays on it. */
 const isExternalHref = (href = "") => /^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(href) || /^mailto:/i.test(href);
