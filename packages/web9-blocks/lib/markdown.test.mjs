@@ -67,6 +67,9 @@ describe("renderMarkdown sanitizer", () => {
 	it("drops exponent lengths and calc() that would paint past the page", () => {
 		expect(renderMarkdown('<div style="box-shadow:0 0 0 1e4px red;margin:calc(0px - 1e4px)">x</div>')).toBe("<div>x</div>");
 	});
+	it("drops relative font sizes, em shadows and negative margins together", () => {
+		expect(renderMarkdown('<div style="font-size:larger;box-shadow:0 0 0 .5em red;margin:0-256px">x</div>')).toBe("<div>x</div>");
+	});
 	it("drops full-page box-shadow spreads and viewport units", () => {
 		expect(renderMarkdown('<div style="box-shadow: 0 0 0 9999px red">x</div>')).toBe("<div>x</div>");
 		expect(renderMarkdown('<div style="box-shadow: 0 0 0 100vmax #000">x</div>')).toBe("<div>x</div>");
