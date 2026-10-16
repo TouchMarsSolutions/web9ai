@@ -93,7 +93,7 @@
   2. 先写 en 条目，再写 zh-CN 条目，用 `translationOf` 关联；
   3. 发布。
 
-  幂等：按 slug 查找已有条目，存在就用 `_rev` 调 `content_update`，不存在就 `content_create`。
+  幂等（计划 2 Task 9 实现：`scripts/migrate.mjs`）：按 slug + locale 用 `content_get` 查找；不存在就 `content_create`（直接 `status: "published"`，zh-CN 带 en 条目的 ULID 作为 `translationOf`）；存在就只比较 payload 里的字段，有差异才 `content_update`（它总是写草稿）再 `content_publish`；一样就不写。遇到 `ENTRY_LOCKED` 停下，不覆盖锁。第二次运行必须是全部 unchanged；`node scripts/migrate.mjs verify` 检查 52 个 doc URL。
 - Blog：用同一个转换脚本写入 `posts`，`draft: true` 的文章保持草稿状态。
 - 首页：块类型 `hero`、`feature_grid` 和 `pages.layout` 由 seed 定义（**已定**，计划 2 Task 1）；内容由 runner 写入 `pages/home`（en + zh-CN），来自旧首页的 hero 和 3 个 features。
 
