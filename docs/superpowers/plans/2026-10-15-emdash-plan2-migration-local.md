@@ -2167,3 +2167,453 @@ Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
 ```
 
 ---
+
+### Task 6: converter I：确定性 key、frontmatter、标题、`lang`、4 冒号 admonition、链接改写
+
+**模型：** standard
+
+调研 `p2-research-5-legacy.md` §1c、§5c、§7、§8 找到的问题里，和"整篇文档的元数据和结构"有关的部分在这里修；和具体 JSX 组件有关的（图片、YouTube、tools-gallery、details 里的 Tabs）在 Task 7。
+
+现在的问题：
+- `key()` 用 `Math.random()`：同一个文件两次转换，35/35 个文件输出都不一样，runner 没法判断"内容没变、跳过"。
+- frontmatter 只认单行 `key: value`：`tags: [a, b]` 是字符串，`draft: true` 是字符串 `"true"`（Task 10 的 posts 要用）。
+- 标题取第一个 H1，Docusaurus 是 frontmatter `title` 优先（9 个文件不一样，例如 `05-lambda`：fm "Lambda Labs"，H1 "Lambda Labs GPU Cloud"）。裁决：`title = fm.title ?? H1`，第一个 H1 总是从正文删掉（语料里每篇最多一个 H1，而且都是重复的标题，已逐个检查）。
+- `lang` 默认 `"zh"`：en 文档里的 `<InvestmentWarning />` 全变成中文。应由 import 决定：`InvestmentWarning.cn.mdx` → zh，`InvestmentWarning.mdx` → en（en 的 `01_ai_hot_tools` 确实导入 `.cn.mdx`，保持 zh）。
+- 4 冒号 admonition（`::::warning Problem:` 包着 `:::info`，en+zh 的 `run_diffusion`、`replicate`、`qblock` 共 6 个文件）不识别：外层变成两段字面文字 `::::warning Problem:` / `::::`，列表散落在外面。callout 正文是 Markdown，不能嵌套 callout，所以拆成两个相邻的 callout。
+- `collectUntil` 不认代码块：callout 正文的代码块里如果有一行 `:::`，callout 会提前结束。
+- 文档里的相对链接（`./qblock`、`../16-prompt/01-popular-prompt-guide.mdx`）和旧站 URL（`/ai/usecase/ai-tools-adhoc`）原样保留，会 404。这里只加一个 `rewriteHref` 钩子，映射表在 Task 8 由 legacy inventory 生成。
+
+实测（在副本上跑全部 35 个文件）：改完后两次转换逐字节相同，每篇 key 不重复；和改之前相比，只有 6 个 4 冒号文件的块数变化（例如 en `qblock` 25 → 14：13 个散落的段落合进了 "Problem" callout）和 9 个文件的标题变化，其余只是 key 不同。
+
+**Files:**
+- Create: `scripts/lib/frontmatter.mjs`、`scripts/lib/frontmatter.test.mjs`、`scripts/lib/fixtures/01_ai_hot_tools.mdx`（复制）
+- Modify: `scripts/lib/mdx-to-pt.mjs`、`scripts/lib/mdx-to-pt.test.mjs`、`scripts/convert-mdx.mjs`
+
+**Interfaces:**
+- Produces:
+  - `parseFrontmatter(src) → { data, body }`（`scripts/lib/frontmatter.mjs`）：`data` 里列表是数组，`true`/`false` 是布尔，整数是 number。
+  - `fnv1a(str) → number`、`deriveSlug(frontmatter, path) → string`（`mdx-to-pt.mjs`）。
+  - `mdxToBlocks(src, { path, slug?, lang = "en", site = "", rewriteHref = (h) => h }) → { frontmatter, slug, title, blocks }`：docs 和 posts 共用。`slug` 选项覆盖推导出的 slug；`lang` 只在文件没有导入 InvestmentWarning 时使用；`rewriteHref` 对 Markdown 链接 `](href)` 和 `href="…"` 生效（正文段落的 link markDef 和 callout/details/tabs 的 Markdown 正文都会经过它），不认识的 href 必须原样返回。
+  - `convertMdx(src, { section = "ai", category = "general", order = 0, ...mdxToBlocks 的选项 }) → { collection: "docs", slug, data: { title, description, section, category, sort_order, body } }`。
+  - key 格式：`k<序号 base36><fnv1a(slug:序号) base36 的后 4 位>`，同一个 slug、同样的源文件，key 永远相同。
+
+- [ ] **Step 1: 写失败的测试**
+
+把 golden test 用的文件复制一份（`legacy/` 在 cutover 后会删）：
+
+```bash
+mkdir -p scripts/lib/fixtures
+cp legacy/docs/ai/88-usecase/01_ai_hot_tools.mdx scripts/lib/fixtures/01_ai_hot_tools.mdx
+```
+
+Create `scripts/lib/frontmatter.test.mjs`：
+
+```js
+import { describe, expect, it } from "vitest";
+import { parseFrontmatter } from "./frontmatter.mjs";
+
+describe("parseFrontmatter", () => {
+	it("parses the YAML subset the legacy files use", () => {
+		const src = [
+			"---",
+			"title: AI学习之旅 | 一场AI工具与技能的晚宴",
+			"slug: /rundiffusion",
+			"description: 'Quoted: with a colon'",
+			"sidebar_position: 1",
+			"draft: true",
+			"tags: [AI, course, 'tiny-course']",
+			"keywords:",
+			"  - cloud",
+			"    - GPU Cloud",
+			"image: /cover/01.svg",
+			"---",
+			"# Body",
+		].join("\n");
+		const { data, body } = parseFrontmatter(src);
+		expect(data).toEqual({
+			title: "AI学习之旅 | 一场AI工具与技能的晚宴",
+			slug: "/rundiffusion",
+			description: "Quoted: with a colon",
+			sidebar_position: 1,
+			draft: true,
+			tags: ["AI", "course", "tiny-course"],
+			keywords: ["cloud", "GPU Cloud"],
+			image: "/cover/01.svg",
+		});
+		expect(body).toBe("# Body");
+	});
+	it("returns the whole source when there is no frontmatter", () => {
+		expect(parseFrontmatter("# T\n")).toEqual({ data: {}, body: "# T\n" });
+	});
+});
+```
+
+`scripts/lib/mdx-to-pt.test.mjs`：应用下面的 diff（保存成文件后 `git apply`）。golden test 改读 fixture，加上标题、`lang`、确定性的断言；新增 4 冒号、代码块里的 `:::`、链接改写、key 的测试：
+
+```diff
+--- a/scripts/lib/mdx-to-pt.test.mjs
++++ b/scripts/lib/mdx-to-pt.test.mjs
+@@ -1,6 +1,6 @@
+ import { readFileSync } from "node:fs";
+ import { describe, expect, it } from "vitest";
+-import { convertMdx, cssObjectToString, parseTabs } from "./mdx-to-pt.mjs";
++import { convertMdx, cssObjectToString, mdxToBlocks, parseTabs } from "./mdx-to-pt.mjs";
+ 
+ describe("cssObjectToString", () => {
+ 	it("keeps commas inside CSS functions", () => {
+@@ -64,10 +64,15 @@
+ 		expect(convertMdx("# T\n\nhello\n", { path: "a/b/01_hello_world.mdx" }).slug).toBe("hello_world");
+ 	});
+ 	it("converts the hot-tools page into the known block mix, tabs in values order", () => {
++		// Copy of legacy/docs/ai/88-usecase/01_ai_hot_tools.mdx, kept so the test survives removing legacy/
++		const src = readFileSync(new URL("./fixtures/01_ai_hot_tools.mdx", import.meta.url), "utf8");
+ 		const path = "legacy/docs/ai/88-usecase/01_ai_hot_tools.mdx";
+-		const { slug, data } = convertMdx(readFileSync(path, "utf8"), { path, section: "ai", category: "usecase", order: 1 });
++		const { slug, data } = convertMdx(src, { path, section: "ai", category: "usecase", order: 2002 });
+ 		const count = (type) => data.body.filter((b) => b._type === type).length;
+ 		expect(slug).toBe("ai-tools-adhoc");
++		expect(data.title).toBe("Adhoc GenAI Tools");
++		expect(data.body.filter((b) => b._type === "investment_warning").map((b) => b.lang)).toEqual(["zh", "zh"]);
++		expect(JSON.stringify(convertMdx(src, { path }))).toBe(JSON.stringify(convertMdx(src, { path })));
+ 		expect(data.body).toHaveLength(51);
+ 		expect({
+ 			callout: count("callout"), tool_grid: count("tool_grid"), details: count("details"), tabs: count("tabs"),
+@@ -78,4 +83,44 @@
+ 		expect(tabs.default_tab).toBe(3);
+ 		expect(JSON.stringify(data.body)).not.toContain("https://www.web9.ai/img/");
+ 	});
++	it("takes the title from frontmatter first and always drops the first H1", () => {
++		const out = convertMdx("---\ntitle: Lambda Labs\n---\n# Lambda Labs GPU Cloud\n\nhello\n", { path: "a/05-lambda.mdx" });
++		expect(out.data.title).toBe("Lambda Labs");
++		expect(out.data.body.map((b) => b.style)).toEqual(["normal"]);
++		expect(convertMdx("# Only H1\n\nx\n", { path: "a/b.mdx" }).data.title).toBe("Only H1");
++	});
++	it("takes the InvestmentWarning language from its import", () => {
++		const warn = (file) => `import InvestmentWarning from '@site/src/components/invest/${file}';\n\n<InvestmentWarning />\n`;
++		const lang = (src) => convertMdx(src, { path: "a/b.mdx" }).data.body[0].lang;
++		expect(lang(warn("InvestmentWarning.mdx"))).toBe("en");
++		expect(lang(warn("InvestmentWarning.cn.mdx"))).toBe("zh");
++	});
++	it("splits a 4-colon admonition and the callout nested in it into two callouts", () => {
++		const src = "::::warning Problem:\n1. a\n2. b\n\n:::info Solution:\nx\n:::\n::::\n\nafter\n";
++		const body = convertMdx(src, { path: "a/b.mdx" }).data.body;
++		expect(body.map((b) => b._type)).toEqual(["callout", "callout", "block"]);
++		expect(body[0]).toMatchObject({ tone: "warning", title: "Problem:", body: "1. a\n2. b" });
++		expect(body[1]).toMatchObject({ tone: "info", title: "Solution:", body: "x" });
++	});
++	it("does not end a callout at a ::: line inside a code fence", () => {
++		const src = ":::tip T\n```md\n:::\n```\nend\n:::\n";
++		const body = convertMdx(src, { path: "a/b.mdx" }).data.body;
++		expect(body).toHaveLength(1);
++		expect(body[0].body).toBe("```md\n:::\n```\nend");
++	});
++	it("rewrites links in prose and in block bodies", () => {
++		const rewriteHref = (href) => (href === "./qblock" ? "/docs/qblock" : href);
++		const src = "See [q](./qblock) and [x](https://x.example).\n\n:::tip T\nAlso [q](./qblock).\n:::\n";
++		const body = convertMdx(src, { path: "a/b.mdx", rewriteHref }).data.body;
++		expect(body[0].markDefs.map((d) => d.href)).toEqual(["/docs/qblock", "https://x.example"]);
++		expect(body[1].body).toBe("Also [q](/docs/qblock).");
++	});
++	it("gives every block, span and markDef a deterministic key unique within the doc", () => {
++		const src = "# T\n\nA [l](/x) **b**\n\n| a | b |\n|---|---|\n| 1 | 2 |\n";
++		const keys = (v) => JSON.stringify(v).match(/"_key":"[^"]+"/g);
++		const first = keys(mdxToBlocks(src, { path: "a/b.mdx" }).blocks);
++		expect(keys(mdxToBlocks(src, { path: "a/b.mdx" }).blocks)).toEqual(first);
++		expect(new Set(first).size).toBe(first.length);
++		expect(keys(mdxToBlocks(src, { path: "a/other.mdx" }).blocks)).not.toEqual(first);
++	});
+ });
+```
+
+- [ ] **Step 2: 跑测试，确认失败**
+
+Run: `npx vitest run scripts/lib/`
+Expected: FAIL：`frontmatter.mjs` 不存在、`mdxToBlocks` 没有导出（整个 `mdx-to-pt.test.mjs` 文件导入失败）。
+
+- [ ] **Step 3: 实现**
+
+Create `scripts/lib/frontmatter.mjs`：
+
+```js
+// Frontmatter of the legacy Docusaurus files: the small YAML subset they use
+// (`key: value`, quoted strings, `[a, b]` lists, `- item` block lists, booleans, integers).
+const unquote = (v) => v.replace(/^(['"])([\s\S]*)\1$/, "$2");
+
+function scalar(raw) {
+	const v = raw.trim();
+	if (v === "true" || v === "false") return v === "true";
+	if (/^-?\d+$/.test(v)) return Number(v);
+	if (/^\[.*\]$/.test(v))
+		return v
+			.slice(1, -1)
+			.split(",")
+			.map((x) => unquote(x.trim()))
+			.filter(Boolean);
+	return unquote(v);
+}
+
+/** `{ data, body }`: the parsed frontmatter and the source after it. Unknown syntax stays a string. */
+export function parseFrontmatter(src) {
+	const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(src);
+	if (!m) return { data: {}, body: src };
+	const data = {};
+	let listKey = null;
+	for (const line of m[1].split(/\r?\n/)) {
+		const item = /^\s*-\s+(.*)$/.exec(line);
+		if (item && listKey) {
+			data[listKey].push(scalar(item[1]));
+			continue;
+		}
+		const kv = /^([\w-]+):\s*(.*)$/.exec(line);
+		if (!kv) continue;
+		const [, key, value] = kv;
+		listKey = value.trim() === "" ? key : null;
+		data[key] = listKey ? [] : scalar(value);
+	}
+	return { data, body: src.slice(m[0].length) };
+}
+```
+
+`scripts/lib/mdx-to-pt.mjs`：应用下面的 diff（`git apply`）。改动点：文件头注释；新增 `fnv1a`、`deriveSlug`、`rewriteLinks`；`convertMdx` 的主体改名为 `mdxToBlocks`（先算 slug 再生成 key；`lang` 从 import 推导；`mdxToMarkdown` 最后过一遍 `rewriteLinks`）；`collectUntil` 认代码块；扫描器加 4 冒号分支；结尾的标题规则；新的 `convertMdx` 包一层：
+
+```diff
+--- a/scripts/lib/mdx-to-pt.mjs
++++ b/scripts/lib/mdx-to-pt.mjs
+@@ -9,9 +9,29 @@
+ //   <InvestmentWarning />           -> investment_warning
+ //   tables with logos/images        -> tool_grid; text-only tables -> core `table`
+ //   everything else (prose)         -> standard Portable Text via the marked lexer
++//
++// Output is deterministic: block keys come from the slug and the traversal order (fnv1a), so the
++// same source always gives the same JSON and the migration runner can skip unchanged entries.
+ 
+ import { marked } from "marked";
++import { parseFrontmatter } from "./frontmatter.mjs";
+ 
++/** 32-bit FNV-1a; no dependencies, same result in Node and workerd. */
++export function fnv1a(str) {
++	let h = 0x811c9dc5;
++	for (let i = 0; i < str.length; i++) {
++		h ^= str.charCodeAt(i);
++		h = Math.imul(h, 0x01000193) >>> 0;
++	}
++	return h >>> 0;
++}
++
++/** Entry slug: frontmatter `slug` (leading "/" dropped, other "/" -> "-"), else the file name without its number prefix. */
++export function deriveSlug(frontmatter, path) {
++	const raw = frontmatter.slug ?? path.split("/").pop().replace(/\.mdx?$/, "").replace(/^\d+[-_]/, "");
++	return String(raw).replace(/^\//, "").replace(/\//g, "-");
++}
++
+ /** Split on `sep` at the top level only: separators inside (...) or quotes don't count. */
+ export function splitTopLevel(text, sep = ",") {
+ 	const out = [];
+@@ -70,20 +90,37 @@
+ 	return { tabs, defaultIndex: Math.max(0, tabs.findIndex((t) => t.value === defaultValue)) };
+ }
+ 
++/** Markdown links and href attributes in `text`, passed through `rewriteHref`. */
++function rewriteLinks(text, rewriteHref) {
++	return text
++		.replace(/(\]\()([^)\s]+)((?:\s+"[^"]*")?\))/g, (_, open, href, close) => `${open}${rewriteHref(href)}${close}`)
++		.replace(/(\bhref=")([^"]+)(")/g, (_, open, href, close) => `${open}${rewriteHref(href)}${close}`);
++}
++
+ /**
+- * Convert one Docusaurus MDX doc into an EmDash `docs` payload.
+- * `site` prefixes /img/... URLs; the default "" keeps them site-relative (served from public/img).
++ * Parse one Docusaurus MDX file into Portable Text blocks. Shared by docs (convertMdx) and posts.
++ * - `slug` overrides the derived slug (the legacy inventory de-duplicates slugs).
++ * - `lang` is the InvestmentWarning language when the file does not import one (the import decides:
++ *   `InvestmentWarning.cn.mdx` -> "zh", `InvestmentWarning.mdx` -> "en").
++ * - `site` prefixes /img/... URLs; the default "" keeps them site-relative (served from public/img).
++ * - `rewriteHref(href)` maps legacy links to new URLs; it must return unknown hrefs unchanged.
++ * Returns { frontmatter, slug, title, blocks }. Title = frontmatter title, else the first H1;
++ * the first H1 is always removed from the body (Docusaurus pages repeat the title as an H1).
+  */
+-export function convertMdx(src, { path, section = "ai", category = "general", order = 0, lang = "zh", site = "" }) {
++export function mdxToBlocks(src, { path, slug: slugOption, lang = "en", site = "", rewriteHref = (href) => href }) {
++	const { data: frontmatter, body: afterFrontmatter } = parseFrontmatter(src);
++	const slug = slugOption ?? deriveSlug(frontmatter, path);
++	const warningImport = /^import\s+InvestmentWarning\s+from\s+['"]([^'"]+)['"]/m.exec(src)?.[1];
++	const warningLang = warningImport ? (/\.cn\.mdx$/.test(warningImport) ? "zh" : "en") : lang;
++
+ 	let keySeq = 0;
+-	const key = () => `k${(keySeq++).toString(36)}${Math.random().toString(36).slice(2, 6)}`;
++	const key = () => {
++		const n = keySeq++; // key() call order is the converter's deterministic traversal order
++		return `k${n.toString(36)}${fnv1a(`${slug}:${n}`).toString(36).padStart(7, "0").slice(-4)}`;
++	};
+ 
+ 	// ---------------------------------------------------------------- MDX -> Markdown helpers
+-	const fm = /^---\n([\s\S]*?)\n---\n/.exec(src);
+-	const frontmatter = Object.fromEntries(
+-		(fm?.[1] ?? "").split("\n").map((l) => l.match(/^(\w+):\s*(.*)$/)).filter(Boolean).map((m) => [m[1], m[2]]),
+-	);
+-	let body = fm ? src.slice(fm[0].length) : src;
++	let body = afterFrontmatter;
+ 
+ 	const images = {};
+ 	body = body.replace(/^import\s+(\w+)\s+from\s+['"]([^'"]+)['"];?\s*$/gm, (_, name, path) => {
+@@ -95,7 +132,7 @@
+ 
+ 	/** Rewrite MDX/JSX inline constructs into plain Markdown/HTML. */
+ 	function mdxToMarkdown(text) {
+-		return (
++		const markdown =
+ 			text
+ 				// <Image img={X} .../>  and  <XSvg width={w} height={h} />
+ 				.replace(/<Image\s+img=\{(\w+)\}[^>]*\/>/g, (_, n) => `![${n}](${img(n)})`)
+@@ -107,8 +144,8 @@
+ 				.replace(/style=\{\{([\s\S]*?)\}\}/g, (_, obj) => `style="${cssObjectToString(obj)}"`)
+ 				.replace(/img:\s*'(\/img\/[^']+)'/g, (_, p) => `img: '${site}${p}'`) // mermaid image nodes
+ 				.replace(/\s*\{#[\w-]+\}\s*$/gm, "") // Docusaurus heading ids
+-				.replace(/^\s*<!--.*?-->\s*$/gm, "")
+-		);
++				.replace(/^\s*<!--.*?-->\s*$/gm, "");
++		return rewriteLinks(markdown, rewriteHref);
+ 	}
+ 
+ 	function dedent(text) {
+@@ -286,9 +323,21 @@
+ 		if (prose.join("").trim()) blocks.push(...markdownToBlocks(mdxToMarkdown(prose.join("\n"))));
+ 		prose = [];
+ 	};
++	/** Lines from i up to the first line matching endRe; lines inside fenced code never end the run. */
+ 	const collectUntil = (i, endRe) => {
+ 		const out = [];
+-		while (i < lines.length && !endRe.test(lines[i])) out.push(lines[i++]);
++		let fence = null;
++		for (; i < lines.length; i++) {
++			const line = lines[i];
++			if (fence) {
++				if (new RegExp(`^\\s*${fence[0]}{${fence.length},}\\s*$`).test(line)) fence = null;
++			} else if (endRe.test(line)) {
++				break;
++			} else {
++				fence = /^\s*(`{3,}|~{3,})/.exec(line)?.[1] ?? null;
++			}
++			out.push(line);
++		}
+ 		return [out, i];
+ 	};
+ 
+@@ -298,7 +347,16 @@
+ 		if (/^\s*<!--.*-->\s*$/.test(line) || /^\s*<TOCInline/.test(line)) continue;
+ 		if (/^\s*<InvestmentWarning\s*\/>/.test(line)) {
+ 			flush();
+-			blocks.push({ _type: "investment_warning", _key: key(), lang });
++			blocks.push({ _type: "investment_warning", _key: key(), lang: warningLang });
++		} else if ((m = line.match(/^::::(\w+)[ \t]*(.*)$/))) {
++			// 4-colon admonition wrapping a 3-colon one: a callout body is Markdown and cannot nest a callout,
++			// so the outer one ends at the first nested `:::tone` line and the inner one follows as its own block.
++			flush();
++			const [inner, end] = collectUntil(i + 1, /^:{3,4}(?:\w+.*)?\s*$/);
++			i = /^::::\s*$/.test(lines[end] ?? "") ? end : end - 1;
++			blocks.push({ _type: "callout", _key: key(), tone: m[1], title: m[2].trim(), body: mdxToMarkdown(dedent(inner.join("\n"))) });
++		} else if (/^::::\s*$/.test(line)) {
++			// closing line of a 4-colon admonition whose nested callout was emitted separately
+ 		} else if ((m = line.match(/^:::(\w+)[ \t]*(.*)$/))) {
+ 			flush();
+ 			const [inner, end] = collectUntil(i + 1, /^:::\s*$/);
+@@ -352,20 +410,21 @@
+ 	}
+ 	flush();
+ 
+-	// The first H1 becomes the entry title (Docusaurus pages repeat the title as an H1)
+ 	const h1 = blocks.findIndex((b) => b.style === "h1");
+-	const title = h1 >= 0 ? blocks.splice(h1, 1)[0].children.map((c) => c.text).join("") : frontmatter.title;
++	const h1Text = h1 >= 0 ? blocks.splice(h1, 1)[0].children.map((c) => c.text).join("") : undefined;
++	const title = String(frontmatter.title ?? h1Text ?? slug);
++	return { frontmatter, slug, title, blocks };
++}
+ 
+-	const slug = (frontmatter.slug ?? path.split("/").pop().replace(/\.mdx?$/, "").replace(/^\d+[-_]/, ""))
+-		.replace(/^\//, "")
+-		.replace(/\//g, "-");
+-
++/** Convert one Docusaurus MDX doc into an EmDash `docs` payload (options as for mdxToBlocks, plus the doc fields). */
++export function convertMdx(src, { section = "ai", category = "general", order = 0, ...options }) {
++	const { frontmatter, slug, title, blocks } = mdxToBlocks(src, options);
+ 	return {
+ 		collection: "docs",
+ 		slug,
+ 		data: {
+ 			title,
+-			description: frontmatter.description ?? frontmatter.title ?? "",
++			description: String(frontmatter.description ?? frontmatter.title ?? ""),
+ 			section,
+ 			category,
+ 			sort_order: Number(order),
+```
+
+Replace `scripts/convert-mdx.mjs`（加 `--slug`，`--lang` 默认改成 `en`）：
+
+```js
+#!/usr/bin/env node
+// Convert one Docusaurus MDX doc into an EmDash `docs` payload (logic in ./lib/mdx-to-pt.mjs), for inspection.
+// The migration runner (scripts/migrate.mjs) derives section, category, order and slug from the legacy tree.
+// Usage: node scripts/convert-mdx.mjs <file.mdx> [--section ai] [--category usecase] [--order 2002] [--slug x] [--lang en] [--site ""] > payload.json
+import { readFileSync } from "node:fs";
+import { parseArgs } from "node:util";
+import { convertMdx } from "./lib/mdx-to-pt.mjs";
+
+const { values, positionals } = parseArgs({
+	allowPositionals: true,
+	options: {
+		section: { type: "string", default: "ai" },
+		category: { type: "string", default: "general" },
+		order: { type: "string", default: "0" },
+		slug: { type: "string" },
+		lang: { type: "string", default: "en" },
+		site: { type: "string", default: "" },
+	},
+});
+const [path] = positionals;
+if (!path) {
+	console.error("usage: convert-mdx.mjs <file.mdx> [--section] [--category] [--order] [--slug] [--lang] [--site]");
+	process.exit(2);
+}
+const payload = convertMdx(readFileSync(path, "utf8"), { path, ...values, order: Number(values.order) });
+process.stdout.write(`${JSON.stringify(payload, null, 1)}\n`);
+```
+
+- [ ] **Step 4: 跑测试，确认通过**
+
+Run: `npm test`
+Expected: PASS。
+
+- [ ] **Step 5: 在全部 legacy 文件上检查确定性**
+
+```bash
+node --input-type=module -e '
+import fs from "node:fs"; import path from "node:path";
+import { convertMdx } from "./scripts/lib/mdx-to-pt.mjs";
+const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(path.join(d, e.name)) : /\.mdx?$/.test(e.name) ? [path.join(d, e.name)] : []);
+const files = [...walk("legacy/docs"), ...walk("legacy/i18n/zh-CN/docusaurus-plugin-content-docs/current")];
+let nondet = 0, dup = 0;
+for (const f of files) {
+  const src = fs.readFileSync(f, "utf8");
+  const a = JSON.stringify(convertMdx(src, { path: f })), b = JSON.stringify(convertMdx(src, { path: f }));
+  const keys = a.match(/"_key":"[^"]+"/g) ?? [];
+  if (a !== b) nondet++;
+  if (new Set(keys).size !== keys.length) dup++;
+}
+console.log({ files: files.length, nondet, dup });
+'
+```
+
+Expected：`{ files: 35, nondet: 0, dup: 0 }`。
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add scripts/lib/frontmatter.mjs scripts/lib/frontmatter.test.mjs scripts/lib/fixtures/ scripts/lib/mdx-to-pt.mjs scripts/lib/mdx-to-pt.test.mjs scripts/convert-mdx.mjs
+git commit -m "feat(convert): deterministic keys, frontmatter parser, fm-first titles, warning lang from import, 4-colon admonitions, link rewrite hook
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
+```
+
+---
