@@ -6211,7 +6211,7 @@ Expected：两个 `check-page` 通过；循环只打印 `done`；`search` 结果
 | `/zh-CN/` | 魔法启动、中文 features；菜单的 AI/Dev 链接带 `/zh-CN` |
 | `/docs/intro`（浅色、深色） | 侧栏 AI、Use Case、Articles、Cloud、Prompt Engineering、Model、Dev；标题和正文排版 |
 | `/docs/tools-summary` | 8 组 tool 卡片，logo 大小一致 |
-| `/docs/learn_ai_coding` | details 展开后的 Tabs 文字和代码块；有序列表续号 |
+| `/docs/learn_ai_coding` | details 展开后，原来的 Tabs 展平成粗体标签 + 代码块；Mermaid 图；有序列表续号 |
 | `/docs/guide` | 嵌入的 YouTube（`youtube-nocookie.com`）；行内 code 没有反引号 |
 | 有 Mermaid 图的页面（`/docs/ai-tools-adhoc`） | 深色主题下图里的文字看得清 |
 | `/zh-CN/docs/lambda` | fallback 提示条 + en 内容 |
