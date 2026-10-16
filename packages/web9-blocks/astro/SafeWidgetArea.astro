@@ -16,7 +16,7 @@ const { name, class: className } = Astro.props;
 let safe = false;
 try {
 	safe = widgetAreaIsSafe(await getWidgetArea(name));
-	if (!safe) console.warn(`[web9-blocks] widget area "${name}" holds a widget the site does not render (a content widget, or an unknown type, component or prop); not rendered`);
+	if (!safe) console.warn(`[web9-blocks] widget area "${name}" fails the widget check (a content widget, an unknown type, component or prop, a string over its length cap, or more than 20 widgets); not rendered`);
 } catch (error) {
 	console.warn(`[web9-blocks] widget area "${name}" could not be checked; not rendered`, error);
 }

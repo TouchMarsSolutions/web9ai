@@ -8,7 +8,13 @@
 
 const TYPES = new Set(["menu", "component"]);
 
-const isString = (v) => typeof v === "string";
+// Every string a widget renders is bounded, and so is the number of widgets: core expands urlTemplate once per
+// post (count up to 100), so a 2 MB template becomes hundreds of MB of HTML on every page.
+const MAX_STRING = 200;
+const MAX_MENU_NAME = 100;
+const MAX_WIDGETS = 20;
+
+const isString = (v) => typeof v === "string" && v.length <= MAX_STRING;
 const isBoolean = (v) => typeof v === "boolean";
 // count/limit reach SQL LIMIT or slice(); a fraction or a huge value is not a count anyone set on purpose
 const isCount = (v) => Number.isInteger(v) && v >= 1 && v <= 100;
@@ -41,19 +47,24 @@ function componentIsSafe(widget) {
 
 function widgetIsSafe(widget) {
 	if (!widget || typeof widget !== "object" || !TYPES.has(widget.type)) return false;
+	if (widget.title !== undefined && widget.title !== null && !isString(widget.title)) return false;
 	if (widget.type === "component") return componentIsSafe(widget);
 	// A menu widget without a menuName renders nothing (the admin palette creates it that way)
-	return widget.menuName === undefined || widget.menuName === null || typeof widget.menuName === "string";
+	const { menuName } = widget;
+	return menuName === undefined || menuName === null || (typeof menuName === "string" && menuName.length <= MAX_MENU_NAME);
 }
 
 /**
  * @param {{ widgets?: Array<object> } | null | undefined} area
- * @returns {boolean} true only if every widget is a menu (menuName absent, null or a string) or one of the core
- *   components with only its declared componentProps, of the declared types; any content widget gives false
+ * @returns {boolean} true only if the area holds at most 20 widgets and every one is a menu (menuName absent,
+ *   null or a string of at most 100 characters) or one of the core components with only its declared
+ *   componentProps, of the declared types; strings (title, urlTemplate, placeholder) hold at most 200
+ *   characters; any content widget gives false
  */
 export function widgetAreaIsSafe(area) {
 	try {
-		return (area?.widgets ?? []).every(widgetIsSafe);
+		const widgets = area?.widgets ?? [];
+		return Array.isArray(widgets) && widgets.length <= MAX_WIDGETS && widgets.every(widgetIsSafe);
 	} catch {
 		return false;
 	}

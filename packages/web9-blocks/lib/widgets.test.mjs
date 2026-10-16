@@ -99,6 +99,29 @@ describe("widgetAreaIsSafe", () => {
 		expect(widgetAreaIsSafe(component(JSON.parse('{"__proto__":{"placeholder":"x"}}')))).toBe(false);
 		expect(widgetAreaIsSafe(component({ constructor: "x" }))).toBe(false);
 	});
+	it("caps declared string props at 200 characters (core expands urlTemplate once per post)", () => {
+		const component = (componentId, componentProps) => ({ widgets: [{ id: "c", type: "component", componentId, componentProps }] });
+		expect(widgetAreaIsSafe(component("core:recent-posts", { count: 100, urlTemplate: "/" + ":slug".repeat(399999) }))).toBe(false);
+		expect(widgetAreaIsSafe(component("core:recent-posts", { urlTemplate: "/" + "x".repeat(199) }))).toBe(true);
+		expect(widgetAreaIsSafe(component("core:recent-posts", { urlTemplate: "/" + "x".repeat(200) }))).toBe(false);
+		expect(widgetAreaIsSafe(component("core:search", { placeholder: "x".repeat(200) }))).toBe(true);
+		expect(widgetAreaIsSafe(component("core:search", { placeholder: "x".repeat(201) }))).toBe(false);
+	});
+	it("caps widget titles at 200 characters and menuName at 100, on any widget type", () => {
+		const titled = (type, title, extra = {}) => ({ widgets: [{ id: "w", type, title, ...extra }] });
+		expect(widgetAreaIsSafe(titled("component", "x".repeat(200), { componentId: "core:search" }))).toBe(true);
+		expect(widgetAreaIsSafe(titled("component", "x".repeat(201), { componentId: "core:search" }))).toBe(false);
+		expect(widgetAreaIsSafe(titled("menu", "x".repeat(201)))).toBe(false);
+		expect(widgetAreaIsSafe(titled("menu", 5))).toBe(false);
+		expect(widgetAreaIsSafe(titled("menu", null))).toBe(true);
+		expect(widgetAreaIsSafe({ widgets: [{ id: "m", type: "menu", menuName: "x".repeat(100) }] })).toBe(true);
+		expect(widgetAreaIsSafe({ widgets: [{ id: "m", type: "menu", menuName: "x".repeat(101) }] })).toBe(false);
+	});
+	it("fails an area with more than 20 widgets", () => {
+		const menus = (n) => ({ widgets: Array.from({ length: n }, (_, k) => ({ id: `m${k}`, type: "menu", menuName: "primary" })) });
+		expect(widgetAreaIsSafe(menus(20))).toBe(true);
+		expect(widgetAreaIsSafe(menus(21))).toBe(false);
+	});
 	it("passes absent, null and empty componentProps", () => {
 		const component = (componentProps) => ({ widgets: [{ id: "c", type: "component", componentId: "core:search", componentProps }] });
 		expect(widgetAreaIsSafe(component(undefined))).toBe(true);

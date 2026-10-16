@@ -14,7 +14,8 @@
 // astro-portabletext's own PortableText with only a `mark` map (cover/Columns/BlockquoteGroup.astro), whose
 // `type` map is empty: a non-block node there is hidden at best, a prototype key crashes. It may hold
 // blocks only, and each is checked like a top-level block (a fixed depth: container -> block -> span).
-// Table cells are normalized by core (normalizePortableTextTable): spans only, decorator or link marks.
+// Table cells are not walked: they are left to core's normalizePortableTextTable, which bounds their types
+// (spans only) and marks (decorators or a link) but not their sizes, so the caps below do not reach them.
 // Output is bounded: collecting stops after MAX_PROBLEMS (plain pushes, never spreads of a long list, which
 // throw RangeError past ~120k items) and ends with MORE, so a hostile value cannot make the guard throw.
 // sanitizeHref (emdash utils/url.ts) throws on a non-string, so every field a core or web9 renderer passes to
