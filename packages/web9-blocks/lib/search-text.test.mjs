@@ -26,8 +26,8 @@ describe("extractBlockText", () => {
 	it("skips code keys inside a walked block (core indexes them)", () => {
 		expect(extractBlockText([{ _type: "mermaid", _key: "m", code: "graph TD; A-->B" }], new Set(["mermaid"]))).toBe("");
 	});
-	it("passes Markdown bodies through (MCP accepts Markdown)", () => {
-		expect(extractBlockText("# Title\n\ntext", new Set(["callout"]))).toBe("# Title\n\ntext");
+	it("returns an empty string for a Markdown string body instead of copying ec:block JSON", () => {
+		expect(extractBlockText('# Title\n\n<!--ec:block {"_type":"callout","title":"x"} -->', new Set(["callout"]))).toBe("");
 	});
 	it("returns an empty string for missing bodies", () => {
 		expect(extractBlockText(undefined, new Set(["callout"]))).toBe("");

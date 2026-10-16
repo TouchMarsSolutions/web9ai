@@ -333,6 +333,14 @@ export function convertMdx(src, { path, section = "ai", category = "general", or
 			const [inner, end] = collectUntil(i + 1, /^```\s*$/);
 			i = end;
 			blocks.push({ _type: "mermaid", _key: key(), code: mdxToMarkdown(inner.join("\n")) });
+		} else if ((m = line.match(/^\s*(`{3,}|~{3,})/))) {
+			// A fenced code block is prose: `|`, `:::`, `<details>` or `<Tabs` lines inside it are code, not blocks
+			const close = new RegExp(`^\\s*${m[1][0]}{${m[1].length},}\\s*$`);
+			prose.push(line);
+			while (++i < lines.length) {
+				prose.push(lines[i]);
+				if (close.test(lines[i])) break;
+			}
 		} else if (/^\s*\|/.test(line)) {
 			flush();
 			const [inner, end] = collectUntil(i, /^(?!\s*\|)/);

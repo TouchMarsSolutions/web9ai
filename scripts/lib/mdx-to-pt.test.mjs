@@ -54,6 +54,12 @@ describe("convertMdx", () => {
 		const src = "import logo from '/img/logo.png';\n\n:::note Logo\n<Image img={logo} />\n:::\n";
 		expect(convertMdx(src, { path: "x/demo.mdx" }).data.body[0].body).toContain("![logo](/img/logo.png)");
 	});
+	it("keeps table, callout and tabs syntax inside a code fence as code", () => {
+		const src = "# T\n\n```md\n| a | b |\n:::tip x\n<Tabs>\n```\n\nafter\n";
+		const body = convertMdx(src, { path: "x/demo.mdx" }).data.body;
+		expect(body.map((b) => b._type)).toEqual(["code", "block"]);
+		expect(body[0].code).toBe("| a | b |\n:::tip x\n<Tabs>");
+	});
 	it("derives the slug from the file name without the numeric prefix", () => {
 		expect(convertMdx("# T\n\nhello\n", { path: "a/b/01_hello_world.mdx" }).slug).toBe("hello_world");
 	});

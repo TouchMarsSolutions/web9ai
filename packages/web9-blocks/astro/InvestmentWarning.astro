@@ -9,4 +9,4 @@ const TEXT = {
 };
 ---
 
-<aside class="callout callout--warning"><p>{TEXT[node?.lang ?? "zh"] ?? TEXT.zh}</p></aside>
+<aside class="callout callout--warning"><p>{Object.hasOwn(TEXT, node?.lang ?? "") ? TEXT[node.lang as keyof typeof TEXT] : TEXT.zh}</p></aside>
