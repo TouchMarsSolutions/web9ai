@@ -224,8 +224,9 @@ const linkRel = (target?: string | null) => (target === "_blank" ? "noopener nor
 				themeBtns.forEach((btn) => btn.setAttribute("aria-pressed", String(btn.dataset.themeBtn === theme)));
 			}
 
-			const stored = document.cookie.split("; ").find((item) => item.startsWith("theme="))?.slice(6) || "system";
-			setTheme(stored);
+			// Same whitelist as the head script: any other cookie value counts as "system" (and is cleared).
+			const stored = document.cookie.split("; ").find((item) => item.startsWith("theme="))?.slice(6);
+			setTheme(stored === "light" || stored === "dark" ? stored : "system");
 			themeBtns.forEach((btn) => btn.addEventListener("click", () => setTheme(btn.dataset.themeBtn || "system")));
 
 			// ⌘K / Ctrl+K focuses search
@@ -240,7 +241,7 @@ const linkRel = (target?: string | null) => (target === "_blank" ? "noopener nor
 		<style>
 			/*
 			 * Chrome that needs stacking or viewport units stays in scoped CSS: public utilities must never
-			 * include fixed, inset-*, z-*, *-screen or viewport units (spec §10, scripts/check-public-css.mjs).
+			 * position, stack or size anything against the viewport (spec §10, scripts/check-public-css.mjs).
 			 */
 			.site-header {
 				position: sticky;
