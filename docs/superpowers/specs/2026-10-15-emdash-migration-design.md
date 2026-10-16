@@ -146,8 +146,7 @@
 
 - **已定**：Tailwind CSS 4.3.3，通过 `@tailwindcss/vite` 接入；Markdown 和 Portable Text 正文用 `@tailwindcss/typography` 0.5.20 的 `prose`。入口文件是 `src/styles/global.css`，由 `Base.astro` 第一个 import。
 - **颜色沿用模板的 token**（`--color-bg`、`--color-text`、`--color-surface`、`--color-border`、`--color-brand` 等），名字不变，挪进 `@theme static`，生成 `bg-surface`、`text-muted`、`border-border` 这类 utility：
-  - token 用的是 `light-dark()`，模板自带的明暗切换（cookie 控制 `color-scheme`）可以直接生效；
-  - 注意：生产构建（Lightning CSS minify）会把 `light-dark()` 降级成 `prefers-color-scheme` 变量（`--lightningcss-light/-dark`），所以构建产物里模板的手动切换**不会**让 token 颜色翻转，dev 里正常；修法是计划 2 的事项（见计划 1 的「计划 2 路线图」）；
+  - **已定（owner，2026-10-15，方案 B）**：token 用显式值，浅色在 `@theme static`，深色在 `:root.dark` 和 `@media (prefers-color-scheme: dark) { :root:not(.light) }`（不分层，所以覆盖 Tailwind 的 `@layer theme`）。不用 `light-dark()`：生产构建的 Lightning CSS 会把它降级成 `--lightningcss-light/-dark`，手动切换失效（计划 1 实测）。验收：公开 CSS 里没有 `var(--lightningcss-light` / `var(--lightningcss-dark` 的使用（计划 2 Task 5 的检查脚本强制；Lightning CSS 会在每个 `color-scheme` 声明旁边自动加 `--lightningcss-light: ;` 这类定义，这些定义无害，不算）。
   - **不用 `dark:` variant**，因为它只认系统偏好，和模板的手动切换会不一致；
   - 用 `static` 是因为模板里不经过 Tailwind 的 CSS 也在读这些变量。Tailwind 默认只输出用到的变量，不加 `static` 它们会消失。
   - `prose` 的配色同样通过 `--tw-prose-*` 变量指向这些 token，因此也不需要 `prose-invert`。
@@ -155,4 +154,4 @@
 - `blocks.css` 里的规则放在 **`@layer utilities`**，不放 `components`。已实测：`@tailwindcss/typography` 把 `.prose` 放在 utilities layer，而 layer 的优先级高于选择器权重，放在 components layer 的规则会被 `prose` 的段落边距覆盖。
 - `blocks.css` 里用了 `@apply`，所以必须由 `global.css` 用 `@import "@web9/blocks/styles.css"` 引入，块组件里不再各自 import CSS。
 - 扫描范围：`@import "tailwindcss" source(none)`，再用 `@source` 只扫 `src/` 和 `packages/web9-blocks/astro`。测试文件、`docs/`、`legacy/`、`scripts/`、`seed/`、`public/` 和内容都不扫：否则它们里面的单词（包括 sanitizer 测试里的 `fixed inset-0 z-50 bg-black`）会生成真实的 utility（已实测，见 §10）。
-- 分期：计划 1 只把 docs 页面和 web9 块改成 Tailwind；`Base.astro`、blog 列表、文章页这些模板页面在计划 2 里整体重写。在此期间，Tailwind 的 preflight 可能让模板页面出现细微的样式变化，这在预期之内。
+- 分期（2026-10-15 修订）：计划 1 把 docs 页面和 web9 块改成 Tailwind；计划 2 只重写 `Base.astro`（页头、页脚、主题），`posts/[slug]` 只给正文容器加 `prose`；blog 列表和文章页的整体重写留给以后的样式计划，在此之前模板 blog 页面可能有 preflight 带来的细小样式差异。
