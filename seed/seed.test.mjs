@@ -22,4 +22,12 @@ describe("seed/seed.json", () => {
 		expect(f.body).toMatchObject({ type: "portableText", searchable: true });
 		expect(f.search_text).toMatchObject({ type: "text", searchable: true });
 	});
+	it("carries Web9.AI identity and no template demo content (applied once on first boot, spec §9)", () => {
+		expect(seed.settings).toEqual({ title: "Web9.AI", tagline: "square of web3 to the power of AI" });
+		expect(seed.content).toBeUndefined();
+		expect(seed.bylines).toBeUndefined();
+		expect(seed.sections).toBeUndefined();
+		expect(seed.taxonomies.flatMap((t) => t.terms ?? [])).toEqual([]);
+		expect(JSON.stringify(seed)).not.toMatch(/My Blog|\/pages\/about|stray thought/);
+	});
 });
