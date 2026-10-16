@@ -196,3 +196,103 @@ describe("convertMdx", () => {
 		expect(lang(`import InvestmentWarning from '@site/x/InvestmentWarning.mdx';\n\n${bare}`, { lang: "zh" })).toBe("en");
 	});
 });
+
+describe("convertMdx: legacy JSX (Task 7)", () => {
+	const body = (src) => convertMdx(src, { path: "a/b.mdx" }).data.body;
+	const shape = (blocks) => blocks.map((b) => (b._type === "block" ? `${b.listItem ?? b.style}:${b.children.map((c) => c.text).join("").trim()}` : b._type));
+	it("turns prose images into image blocks after their text block", () => {
+		const src = "import logo from '/img/logo.png';\nimport ASvg from '/img/a.svg';\n\nText ![x](/img/x.png) more\n\n<Image img={logo} />\n\n<ASvg width={100} />\n";
+		const blocks = body(src);
+		expect(shape(blocks)).toEqual(["normal:Text  more", "image", "image", "image"]);
+		expect(blocks.filter((b) => b._type === "image").map((b) => b.asset.url)).toEqual(["/img/x.png", "/img/logo.png", "/img/a.svg"]);
+		expect(blocks[1]).toMatchObject({ asset: { _ref: "", url: "/img/x.png" }, alt: "x" });
+	});
+	it("keeps the image out of a styled wrapper div", () => {
+		const src = "import PosterSvg from '/img/p.svg';\n\n<div style={{textAlign: 'center'}}>\n  <PosterSvg style={{maxWidth: '100%'}}/>\n</div>\n";
+		expect(body(src)).toMatchObject([{ _type: "image", asset: { url: "/img/p.svg" }, alt: "PosterSvg" }]);
+	});
+	it("turns YouTube into an embed in prose and a link inside a block body", () => {
+		const src = [
+			'<YouTube youTubeId="SKS-URw9a18" />',
+			"",
+			"- item one",
+			'      <YouTube youTubeId="LslC2nKEEGU" />',
+			"- item two",
+			"",
+			":::tip T",
+			'<YouTube youTubeId="trXPfpV5iRQ" />',
+			":::",
+		].join("\n");
+		const blocks = body(src);
+		expect(shape(blocks)).toEqual(["embed", "bullet:item one", "embed", "bullet:item two", "callout"]);
+		expect(blocks[0].url).toBe("https://www.youtube.com/watch?v=SKS-URw9a18");
+		expect(blocks[4].body).toBe("[YouTube](https://www.youtube.com/watch?v=trXPfpV5iRQ)");
+	});
+	it("moves an admonition inside a list item to a callout after the item, numbering continues", () => {
+		const blocks = body("1. Copilot\n   :::tip\n   Future\n   :::\n2. Cursor\n");
+		expect(shape(blocks)).toEqual(["number:Copilot", "callout", "number:Cursor"]);
+		expect(blocks[1]).toMatchObject({ tone: "tip", body: "Future" });
+		expect([blocks[0].listStart, blocks[2].listStart]).toEqual([1, 2]);
+		expect(blocks[0].listId).toBe(blocks[2].listId);
+	});
+	it("flattens Tabs inside details into bold labels and code fences", () => {
+		const src = [
+			"<details>",
+			"<summary>Code</summary>",
+			"  <Tabs>",
+			'    <TabItem value="java" label="Java">',
+			"    ```java",
+			"    class A {}",
+			"    ```",
+			"    </TabItem>",
+			'    <TabItem value="py" label="Python">',
+			"    ```python",
+			"    a = 1",
+			"    ```",
+			"    </TabItem>",
+			"  </Tabs>",
+			"</details>",
+		].join("\n");
+		const [details] = body(src);
+		expect(details).toMatchObject({ _type: "details", summary: "Code" });
+		expect(details.body).toBe("**Java**\n\n```java\nclass A {}\n```\n\n**Python**\n\n```python\na = 1\n```");
+	});
+	it("turns the tools gallery into one tool_grid per category and drops its style", () => {
+		const src = [
+			"import Zapier from '/img/zapier/zapier_apps.png';",
+			"",
+			'<div className="tools-gallery">',
+			'  <div className="tool-category">',
+			"    <h3>AI Agents</h3>",
+			'    <a href="https://zapier.com/" target="_blank" title="Workflow Automation">',
+			'      <Image img={Zapier} className="tool-image" />',
+			"      <span>Zapier</span>",
+			"    </a>",
+			"  </div>",
+			"</div>",
+			"",
+			"<style>",
+			"{`",
+			"  .tools-gallery { margin-top: 2rem; }",
+			"`}",
+			"</style>",
+		].join("\n");
+		expect(body(src)).toMatchObject([
+			{ _type: "tool_grid", title: "AI Agents", logo_size: 100, tools: [{ name: "Zapier", logo: "/img/zapier/zapier_apps.png", tagline: "Workflow Automation" }] },
+		]);
+	});
+	it("fails on raw HTML it has no rule for", () => {
+		expect(() => body('<iframe src="https://x.example"></iframe>\n')).toThrow(/unsupported HTML in prose/);
+	});
+	it("drops the line break left behind by an image, video or callout moved out of its block", () => {
+		// a trailing "\n" in a span renders as <br> (@portabletext/toolkit splits span text at newlines)
+		const src = "- Full Features\n  ![Full](/img/f.png)\n- Clip\n      <YouTube youTubeId=\"LslC2nKEEGU\" />\n\n1. Copilot \n   :::tip\n   Future\n   :::\n2. Cursor\n";
+		const blocks = body(src);
+		expect(blocks.map((b) => b._type)).toEqual(["block", "image", "block", "embed", "block", "callout", "block"]);
+		expect(blocks.filter((b) => b._type === "block").map((b) => b.children.map((c) => c.text).join(""))).toEqual(["Full Features", "Clip", "Copilot", "Cursor"]);
+	});
+	it("puts an image from a text-only table cell right after the table", () => {
+		expect(shape(body("| a | b |\n|---|---|\n| ![x](/img/x.png) | y |\n"))).toEqual(["table", "image"]);
+		expect(shape(body("| a | b |\n|---|---|\n| ![x](/img/x.png) | y |\n\nafter\n"))).toEqual(["table", "image", "normal:after"]);
+	});
+});

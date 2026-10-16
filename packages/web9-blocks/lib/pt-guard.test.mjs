@@ -236,6 +236,32 @@ describe("guardPortableText: prototype keys and allow-lists on blocks", () => {
 		for (const level of [0, -1, 1.5, "1", 21, Number.NaN]) expect(guardPortableText([para({ listItem: "bullet", level })])).toEqual([notAllowed("#0 block", "level", level)]);
 		for (const level of [1, 2, 20, undefined]) expect(guardPortableText([para({ listItem: "bullet", level })])).toEqual([]);
 	});
+	it("requires listStart to be an integer from 1 to 100000 when present (OrderedList.astro renders it as <ol start>)", () => {
+		const item = (listStart) => para({ listItem: "number", level: 1, listId: "doc:list-0", listStart });
+		for (const listStart of ["5", -1, 1.5, 0, 100001, Number.NaN, Number.POSITIVE_INFINITY, [1]]) {
+			expect(guardPortableText([item(listStart)])).toEqual([notAllowed("#0 block", "listStart", listStart)]);
+		}
+		for (const listStart of [1, 2, 100000, undefined, null]) expect(guardPortableText([item(listStart)])).toEqual([]);
+	});
+	it("requires listId to be a string of at most 200 characters when present", () => {
+		const item = (listId) => para({ listItem: "number", level: 1, listId, listStart: 1 });
+		for (const listId of [5, ["l"], { toString: 0 }, true]) expect(guardPortableText([item(listId)])).toEqual([notAllowed("#0 block", "listId", listId)]);
+		const long = "x".repeat(201);
+		expect(guardPortableText([item(long)])).toEqual([`#0 block listId: value ${JSON.stringify(long).slice(0, 60)} is not allowed`]);
+		for (const listId of ["doc:list-0", "x".repeat(200), "", undefined, null]) expect(guardPortableText([item(listId)])).toEqual([]);
+	});
+	it("accepts prototype names as listId: emdash keys lists by Map and JSON strings, never by a plain object", () => {
+		// portable-text-lists.ts (activeLists, bases, counts) and numbered-list.ts use Map/Set; OrderedList.astro renders only start
+		for (const listId of ["__proto__", "constructor", "toString", "hasOwnProperty"]) {
+			expect(guardPortableText([para({ listItem: "number", level: 1, listId, listStart: 1 })])).toEqual([]);
+		}
+	});
+	it("checks listId and listStart on blocks inside containers too", () => {
+		expect(guardPortableText([{ _type: "cover", _key: "c", content: [para({ listItem: "number", level: 1, listId: 7, listStart: "5" })] }])).toEqual([
+			notAllowed("#0 cover content[0] block", "listId", 7),
+			notAllowed("#0 cover content[0] block", "listStart", "5"),
+		]);
+	});
 	it("rejects span marks that are neither a decorator nor a markDef key of the same block", () => {
 		const withMarks = (marks, markDefs = []) => para({ markDefs, children: [span("a", marks)] });
 		for (const mark of ["constructor", "__proto__", "link", "bold", "k9"]) {

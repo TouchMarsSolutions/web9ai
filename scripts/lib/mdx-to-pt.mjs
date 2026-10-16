@@ -8,13 +8,20 @@
 //   ```mermaid                      -> mermaid
 //   <InvestmentWarning />           -> investment_warning
 //   tables with logos/images        -> tool_grid; text-only tables -> core `table`
+//   <div className="tools-gallery"> -> one tool_grid per category
+//   <YouTube youTubeId>             -> core `embed` (prose) or a Markdown link (inside a block body)
+//   images in prose                 -> core `image` blocks after the text block they were in
+//   <Tabs> inside <details>         -> bold tab labels + the tab bodies, in the details Markdown
+//   <MDXTemplate>, <AlignedText>, <TwitterFollowButton>, <style> -> dropped (children kept)
 //   everything else (prose)         -> standard Portable Text via the marked lexer
+// Any other raw HTML in prose is an error: the site rejects htmlBlock on save (spec §10).
 //
 // Output is deterministic: block keys come from the slug and the traversal order (fnv1a), so the
 // same source always gives the same JSON and the migration runner can skip unchanged entries.
 
 import { marked } from "marked";
 import { parseFrontmatter } from "./frontmatter.mjs";
+import { YOUTUBE_TOKEN, dropWrappers, imgAttributes, parseToolsGallery, youtubeToTokens, youtubeUrl } from "./mdx-jsx.mjs";
 
 /** 32-bit FNV-1a; no dependencies, same result in Node and workerd. */
 export function fnv1a(str) {
@@ -181,6 +188,9 @@ export function mdxToBlocks(src, { path, slug: slugOption, lang = "en", site = "
 	});
 	body = body.replace(/^import\s+.*$/gm, "");
 	const img = (name) => images[name] ?? "";
+	body = dropWrappers(body);
+	const { body: withTokens, videos } = youtubeToTokens(body);
+	body = withTokens;
 
 	/** Rewrite MDX/JSX inline constructs into plain Markdown/HTML; `links: false` leaves hrefs alone (mermaid source). */
 	function mdxToMarkdown(text, { links = true } = {}) {
@@ -200,6 +210,17 @@ export function mdxToBlocks(src, { path, slug: slugOption, lang = "en", site = "
 		return links ? rewriteLinks(markdown, rewriteHref) : markdown;
 	}
 
+	/** Markdown for a block body (callout, details, tabs): videos become links, there is no block to put them in. */
+	const bodyMarkdown = (text) => mdxToMarkdown(text).replace(YOUTUBE_TOKEN, (_, n) => `[YouTube](${youtubeUrl(videos[n])})`);
+
+	/** Docusaurus Tabs inside Markdown: each tab becomes `**label**` + its dedented content (no label for a single tab). */
+	function tabsToMarkdown(text) {
+		return text.replace(/^[ \t]*<Tabs\b[\s\S]*?^[ \t]*<\/Tabs>[ \t]*$/gm, (jsx) => {
+			const { tabs } = parseTabs(jsx);
+			return tabs.map((t) => `${tabs.length > 1 ? `**${t.label}**\n\n` : ""}${dedent(t.content)}`).join("\n\n");
+		});
+	}
+
 	function dedent(text) {
 		const lines = text.replace(/\t/g, "  ").split("\n");
 		const indents = lines.filter((l) => l.trim()).map((l) => l.match(/^ */)[0].length);
@@ -208,9 +229,29 @@ export function mdxToBlocks(src, { path, slug: slugOption, lang = "en", site = "
 	}
 
 	// ---------------------------------------------------------------- Markdown -> Portable Text
+	// Portable Text has no inline images or videos: inlineToSpans collects them here and they are emitted
+	// as blocks right after the text block (or list item) they were in.
+	// Indented admonitions inside list items (`  :::tip`) take the same route: callouts after the item.
+	const media = [];
+	const nestedCallouts = [];
+	const mediaBlocks = () =>
+		media.splice(0).map((m) => {
+			if (m.video) return { _type: "embed", _key: key(), url: youtubeUrl(m.video) };
+			if (m.callout) return { _type: "callout", _key: key(), ...m.callout };
+			return { _type: "image", _key: key(), asset: { _ref: "", url: m.src }, alt: m.alt };
+		});
+	const hasText = (block) => block.children.some((c) => c.text.trim());
+
 	function inlineToSpans(tokens = [], markDefs, marks = []) {
 		const spans = [];
 		const push = (text, m = marks) => text && spans.push({ _type: "span", _key: key(), text, marks: [...m] });
+		const pushText = (text) =>
+			text.split(/(%%(?:youtube|callout):\d+%%)/).forEach((part) => {
+				const token = /^%%(youtube|callout):(\d+)%%$/.exec(part);
+				if (token?.[1] === "youtube") media.push({ video: videos[token[2]] });
+				else if (token) media.push({ callout: nestedCallouts[token[2]] });
+				else push(part);
+			});
 		for (const t of tokens) {
 			switch (t.type) {
 				case "strong":
@@ -235,14 +276,16 @@ export function mdxToBlocks(src, { path, slug: slugOption, lang = "en", site = "
 					push("\n");
 					break;
 				case "html":
-					push(/^<br\s*\/?>$/i.test(t.raw.trim()) ? "\n" : t.raw);
+					if (/^<br\s*\/?>$/i.test(t.raw.trim())) push("\n");
+					else if (/^<img\s/i.test(t.raw.trim())) media.push(imgAttributes(t.raw));
+					else push(t.raw);
 					break;
 				case "image":
-					push(t.text || "image");
+					media.push({ src: t.href, alt: t.text ?? "" });
 					break;
 				case "text":
 					if (t.tokens?.length) spans.push(...inlineToSpans(t.tokens, markDefs, marks));
-					else push(t.text);
+					else pushText(t.text);
 					break;
 				default:
 					push(t.raw ?? "");
@@ -251,20 +294,42 @@ export function mdxToBlocks(src, { path, slug: slugOption, lang = "en", site = "
 		return spans;
 	}
 
+	/** Drops trailing whitespace from the last spans; a trailing "\n" would render as <br>. */
+	function trimEnd(spans) {
+		while (spans.length) {
+			const last = spans.at(-1);
+			last.text = last.text.trimEnd();
+			if (last.text) return;
+			spans.pop();
+		}
+	}
+
 	const textBlock = (tokens, extra = {}) => {
 		const markDefs = [];
+		const pulled = media.length;
 		const children = inlineToSpans(tokens, markDefs);
+		// the line break before an image, video or callout moved out of the block stays behind otherwise
+		if (media.length > pulled) trimEnd(children);
 		if (!children.length) children.push({ _type: "span", _key: key(), text: "", marks: [] });
 		return { _type: "block", _key: key(), style: "normal", markDefs, children, ...extra };
 	};
 
+	// Numbered items carry listId + listStart (their own number) so a list split by an image, video or
+	// callout keeps counting instead of restarting at 1 (emdash/src/content/portable-text-lists.ts).
+	let listSeq = 0;
 	function listToBlocks(list, level = 1) {
 		const out = [];
-		for (const item of list.items) {
+		const listId = list.ordered ? `${slug}:list-${listSeq++}` : undefined;
+		const start = Number(list.start) || 1;
+		for (const [n, item] of list.items.entries()) {
+			const extra = list.ordered ? { listItem: "number", level, listId, listStart: start + n } : { listItem: "bullet", level };
 			for (const t of item.tokens) {
 				if (t.type === "list") out.push(...listToBlocks(t, level + 1));
-				else if (t.type === "text" || t.type === "paragraph")
-					out.push(textBlock(t.tokens ?? [t], { listItem: list.ordered ? "number" : "bullet", level }));
+				else if (t.type === "text" || t.type === "paragraph") {
+					const block = textBlock(t.tokens ?? [t], extra);
+					if (hasText(block) || !media.length) out.push(block);
+					out.push(...mediaBlocks());
+				}
 			}
 		}
 		return out;
@@ -293,9 +358,11 @@ export function mdxToBlocks(src, { path, slug: slugOption, lang = "en", site = "
 				case "heading":
 					blocks.push(textBlock(t.tokens, { style: `h${t.depth}` }));
 					break;
-				case "paragraph":
-					blocks.push(textBlock(t.tokens));
+				case "paragraph": {
+					const block = textBlock(t.tokens);
+					if (hasText(block) || !media.length) blocks.push(block);
 					break;
+				}
 				case "list":
 					blocks.push(...listToBlocks(t));
 					break;
@@ -311,14 +378,21 @@ export function mdxToBlocks(src, { path, slug: slugOption, lang = "en", site = "
 				case "table":
 					blocks.push(tableToCoreTable(t));
 					break;
-				case "html":
-					if (t.raw.trim()) blocks.push({ _type: "htmlBlock", _key: key(), html: t.raw.trim() });
+				case "html": {
+					// Only images (possibly in a styled wrapper div) are allowed; anything else needs a converter rule.
+					const html = t.raw.trim();
+					const tags = html.match(/<img\s[^>]*>/gi) ?? [];
+					const rest = html.replace(/<img\s[^>]*>/gi, "").replace(/<\/?(?:div|p|center)\b[^>]*>/gi, "").replace(/<br\s*\/?>/gi, "");
+					if (rest.trim()) throw new Error(`${path}: unsupported HTML in prose: ${html.slice(0, 120)}`);
+					for (const tag of tags) media.push(imgAttributes(tag));
 					break;
+				}
 				case "space":
 					break;
 				default:
 					console.error(`[convert] unhandled markdown token: ${t.type}`);
 			}
+			blocks.push(...mediaBlocks());
 		}
 		return blocks;
 	}
@@ -406,14 +480,14 @@ export function mdxToBlocks(src, { path, slug: slugOption, lang = "en", site = "
 			flush();
 			const [inner, end] = collectUntil(i + 1, /^:{3,4}(?:\w+.*)?\s*$/);
 			i = /^::::\s*$/.test(lines[end] ?? "") ? end : end - 1;
-			blocks.push({ _type: "callout", _key: key(), tone: m[1], title: m[2].trim(), body: mdxToMarkdown(dedent(inner.join("\n"))) });
+			blocks.push({ _type: "callout", _key: key(), tone: m[1], title: m[2].trim(), body: bodyMarkdown(dedent(inner.join("\n"))) });
 		} else if (/^::::\s*$/.test(line)) {
 			// closing line of a 4-colon admonition whose nested callout was emitted separately
 		} else if ((m = line.match(/^:::(\w+)[ \t]*(.*)$/))) {
 			flush();
 			const [inner, end] = collectUntil(i + 1, /^:::\s*$/);
 			i = end;
-			blocks.push({ _type: "callout", _key: key(), tone: m[1], title: m[2].trim(), body: mdxToMarkdown(dedent(inner.join("\n"))) });
+			blocks.push({ _type: "callout", _key: key(), tone: m[1], title: m[2].trim(), body: bodyMarkdown(dedent(inner.join("\n"))) });
 		} else if (/^\s*<details>/.test(line)) {
 			flush();
 			const [inner, end] = collectUntil(i + 1, /^\s*<\/details>/);
@@ -421,7 +495,15 @@ export function mdxToBlocks(src, { path, slug: slugOption, lang = "en", site = "
 			const joined = inner.join("\n");
 			const summary = joined.match(/<summary>([\s\S]*?)<\/summary>/)?.[1].trim() ?? "Details";
 			const rest = joined.replace(/<summary>[\s\S]*?<\/summary>/, "").replace(/^\s*<\/?div>\s*$/gm, "");
-			blocks.push({ _type: "details", _key: key(), summary, body: mdxToMarkdown(dedent(rest)) });
+			// A details body is Markdown, so Tabs inside it become bold labels followed by each tab's content
+			blocks.push({ _type: "details", _key: key(), summary, body: bodyMarkdown(tabsToMarkdown(dedent(rest))) });
+		} else if (/^\s*<div className="tools-gallery">/.test(line)) {
+			flush();
+			const [inner, end] = collectUntil(i + 1, /^<\/div>\s*$/);
+			i = end;
+			for (const { title, tools } of parseToolsGallery(inner.join("\n"), img)) {
+				blocks.push({ _type: "tool_grid", _key: key(), title, tools, logo_size: 100 });
+			}
 		} else if (/^\s*<FullscreenWrapper>/.test(line)) {
 			fullscreen = true;
 		} else if (/^\s*<\/FullscreenWrapper>/.test(line)) {
@@ -434,7 +516,7 @@ export function mdxToBlocks(src, { path, slug: slugOption, lang = "en", site = "
 			blocks.push({
 				_type: "tabs",
 				_key: key(),
-				tabs: tabs.map((t) => ({ label: t.label, body: mdxToMarkdown(dedent(t.content)) })),
+				tabs: tabs.map((t) => ({ label: t.label, body: bodyMarkdown(dedent(t.content)) })),
 				default_tab: defaultIndex + 1,
 				fullscreen,
 			});
@@ -455,7 +537,13 @@ export function mdxToBlocks(src, { path, slug: slugOption, lang = "en", site = "
 			flush();
 			const [inner, end] = collectUntil(i, /^(?!\s*\|)/);
 			i = end - 1;
-			blocks.push(tableToBlock(inner));
+			blocks.push(tableToBlock(inner), ...mediaBlocks()); // images from text-only table cells follow the table
+		} else if ((m = line.match(/^(\s+):::(\w+)[ \t]*(.*)$/))) {
+			// Indented admonition (inside a list item): becomes a callout right after that item
+			const [inner, end] = collectUntil(i + 1, /^\s*:::\s*$/);
+			i = end;
+			nestedCallouts.push({ tone: m[2], title: m[3].trim(), body: bodyMarkdown(dedent(inner.join("\n"))) });
+			prose.push(`${m[1]}%%callout:${nestedCallouts.length - 1}%%`);
 		} else {
 			prose.push(line);
 		}

@@ -30,6 +30,10 @@
 // MAX_CHILDREN children. `_key` reaches template strings (`${_key}-group` in emdash
 // portable-text-blockquote-group.ts:60), which throw for an object without a callable toString, so a `_key`
 // must be a string when present on every node checked here.
+// Ordered-list continuity (emdash content/portable-text-lists.ts): `listId` is only ever a Map key or part of a
+// JSON string there (no plain-object lookup, so prototype names are harmless), and `listStart` becomes the
+// `<ol start>` of OrderedList.astro. Both are bounded when present: listId a string of at most MAX_LIST_ID
+// characters, listStart an integer from 1 to MAX_LIST_START.
 import { blurhashToImageCssString } from "@unpic/placeholder";
 
 const COLOR = /^(?:#[0-9a-f]{3,8}|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(?:,\s*(?:0|1|0?\.\d+)\s*)?\))$/i;
@@ -150,6 +154,8 @@ const LIST_ITEMS = new Set(["bullet", "number", "menu"]);
 // Decorators the editor emits (emdash content/converters/mark-safety.ts) and renders (components/marks.ts).
 const DECORATORS = new Set(["strong", "em", "underline", "strike-through", "subscript", "superscript", "code"]);
 const MAX_LIST_LEVEL = 20;
+const MAX_LIST_ID = 200;
+const MAX_LIST_START = 100000;
 const MAX_MARKS = 20;
 const MAX_CHILDREN = 1000;
 
@@ -164,6 +170,8 @@ function checkBlock(node, where, out) {
 	if (node.style != null && !BLOCK_STYLES.has(node.style)) out.add(notAllowed(where, "style", node.style));
 	if (node.listItem != null && !LIST_ITEMS.has(node.listItem)) out.add(notAllowed(where, "listItem", node.listItem));
 	if (node.level != null && !integerIn(1, MAX_LIST_LEVEL)(node.level)) out.add(notAllowed(where, "level", node.level));
+	if (node.listId != null && !(typeof node.listId === "string" && node.listId.length <= MAX_LIST_ID)) out.add(notAllowed(where, "listId", node.listId));
+	if (node.listStart != null && !integerIn(1, MAX_LIST_START)(node.listStart)) out.add(notAllowed(where, "listStart", node.listStart));
 
 	// The only annotation core renders is link. Keys are what span marks point at: no inherited names.
 	const keys = new Set();
