@@ -4,8 +4,17 @@
 // sanitizer keeps class/id/data-*, and MCP accepts any _type through a `<!--ec:block {json} -->` line.
 // Top-level nodes are checked by _type. Children of a `block` are rendered inline through the same merged
 // type map as top-level nodes (a cover or iframe in block.children renders as that core component), so a
-// block may hold spans only. Container content (columns, cover, table cells, blockquote groups) renders
-// with marks only, so a custom type nested there shows up as a hidden "unknown" div and is not checked.
+// block may hold spans only.
+// astro-portabletext looks components up as `map[name] || map` (components/PortableText.astro:120). The
+// maps are plain objects (or, for `block`, a function), so a style, listItem, mark or _type such as
+// "constructor" or "call" resolves to an inherited function and throws at render time, which takes the
+// whole page down. So every name that reaches a lookup is checked against an allow-list: block.style,
+// block.listItem, span marks and markDefs[]._type (checkBlock), and the _type of every top-level node.
+// Container content (cover.content, columns[].content, blockquoteGroup.blocks) is rendered by
+// astro-portabletext's own PortableText with only a `mark` map (cover/Columns/BlockquoteGroup.astro), whose
+// `type` map is empty: a non-block node there is hidden at best, a prototype key crashes. It may hold
+// blocks only, and each is checked like a top-level block (a fixed depth: container -> block -> span).
+// Table cells are normalized by core (normalizePortableTextTable): spans only, decorator or link marks.
 // Image values (an `image` field, `darkVariant`, PT image and gallery images) are checked for the colour and
 // blurhash fields that core renderers paste into style or decode: a blurhash that does not decode throws.
 import { blurhashToImageCssString } from "@unpic/placeholder";
@@ -100,16 +109,80 @@ function checkRules(node, rules, prefix = "") {
 	return problems;
 }
 
+const show = (v) => JSON.stringify(v)?.slice(0, 60) ?? String(v);
+const notAllowed = (where, field, v) => `${where} ${field}: value ${show(v)} is not allowed`;
+
+// Names core renders. Sets, so a lookup never reaches Object.prototype.
+// style: components/Block.astro and the default block map; listItem: astro-portabletext's default list maps.
+const BLOCK_STYLES = new Set(["normal", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote"]);
+const LIST_ITEMS = new Set(["bullet", "number", "menu"]);
+// Decorators the editor emits (emdash content/converters/mark-safety.ts) and renders (components/marks.ts).
+const DECORATORS = new Set(["strong", "em", "underline", "strike-through", "subscript", "superscript", "code"]);
+const MAX_LIST_LEVEL = 20;
+
 /** Block children are rendered as custom types, so anything but a plain span is a way past the type check. */
-function checkBlockChildren(node, i) {
-	if (node.children === undefined) return [];
-	if (!Array.isArray(node.children)) return [`#${i} block children: must be an array of spans`];
+function checkBlock(node, where) {
 	const problems = [];
+	if (node.style != null && !BLOCK_STYLES.has(node.style)) problems.push(notAllowed(where, "style", node.style));
+	if (node.listItem != null && !LIST_ITEMS.has(node.listItem)) problems.push(notAllowed(where, "listItem", node.listItem));
+	if (node.level != null && !integerIn(1, MAX_LIST_LEVEL)(node.level)) problems.push(notAllowed(where, "level", node.level));
+
+	// The only annotation core renders is link. Keys are what span marks point at: no inherited names.
+	const keys = new Set();
+	if (node.markDefs != null && !Array.isArray(node.markDefs)) problems.push(`${where} markDefs: must be an array`);
+	else {
+		(node.markDefs ?? []).forEach((def, k) => {
+			if (def?._type !== "link") problems.push(notAllowed(where, `markDefs[${k}]._type`, def?._type));
+			const key = def?._key;
+			if (typeof key !== "string" || !key || key in Object.prototype) problems.push(notAllowed(where, `markDefs[${k}]._key`, key));
+			else keys.add(key);
+		});
+	}
+
+	if (node.children === undefined) return problems;
+	if (!Array.isArray(node.children)) return [...problems, `${where} children: must be an array of spans`];
 	node.children.forEach((child, j) => {
 		const type = typeof child?._type === "string" ? child._type : "(no _type)";
-		if (type !== "span") problems.push(`#${i} block children[${j}] ${type}: only spans are allowed inside a block`);
-		else if (child.children !== undefined && child.children !== null) problems.push(`#${i} block children[${j}] span: a span must not have children`);
+		if (type !== "span") return problems.push(`${where} children[${j}] ${type}: only spans are allowed inside a block`);
+		if (child.children !== undefined && child.children !== null) problems.push(`${where} children[${j}] span: a span must not have children`);
+		if (child.marks == null) return;
+		if (!Array.isArray(child.marks)) return problems.push(`${where} children[${j}].marks: must be an array`);
+		for (const mark of child.marks) {
+			if (typeof mark !== "string" || !(DECORATORS.has(mark) || keys.has(mark))) problems.push(notAllowed(where, `children[${j}].marks`, mark));
+		}
 	});
+	return problems;
+}
+
+/** Portable Text arrays inside containers: [path, value] pairs, e.g. ["columns[1].content", [...]]. */
+function containerLists(node, type) {
+	if (type === "cover") return [["content", node.content]];
+	if (type === "blockquoteGroup") return [["blocks", node.blocks]];
+	if (type === "columns") return Array.isArray(node.columns) ? node.columns.map((column, k) => [`columns[${k}].content`, column?.content]) : [];
+	return [];
+}
+
+/** Columns.astro maps `columns` and reads column.width, so a non-array or a null column throws. */
+function checkColumns(node, i) {
+	if (node.columns == null) return [];
+	if (!Array.isArray(node.columns)) return [`#${i} columns columns: must be an array of columns`];
+	return node.columns.flatMap((column, k) => (column && typeof column === "object" && !Array.isArray(column) ? [] : [`#${i} columns columns[${k}]: must be an object`]));
+}
+
+function checkContainers(node, type, i) {
+	const problems = [];
+	for (const [path, list] of containerLists(node, type)) {
+		if (list == null) continue;
+		if (!Array.isArray(list)) {
+			problems.push(`#${i} ${type} ${path}: must be an array`);
+			continue;
+		}
+		list.forEach((child, k) => {
+			const childType = typeof child?._type === "string" ? child._type : "(no _type)";
+			if (childType !== "block") problems.push(`#${i} ${type} ${path}[${k}] ${childType}: only blocks are allowed in container content`);
+			else problems.push(...checkBlock(child, `#${i} ${type} ${path}[${k}] block`));
+		});
+	}
 	return problems;
 }
 
@@ -127,8 +200,10 @@ export function guardPortableText(value) {
 			return;
 		}
 		// astro-portabletext treats any node with a children array as a block and renders those children inline
-		if (type === "block") problems.push(...checkBlockChildren(node, i));
+		if (type === "block") problems.push(...checkBlock(node, `#${i} block`));
 		else if (node.children !== undefined && node.children !== null) problems.push(`#${i} ${type} children: only a block may have children`);
+		if (type === "columns") problems.push(...checkColumns(node, i));
+		problems.push(...checkContainers(node, type, i));
 		problems.push(...checkRules(node, RULES[type], `#${i} ${type} `));
 	});
 	return problems;

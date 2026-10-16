@@ -46,4 +46,25 @@ describe("widgetAreaIsSafe", () => {
 	it("fails the whole area when one content widget is unsafe", () => {
 		expect(widgetAreaIsSafe({ name: "x", widgets: [{ id: "a", type: "content", content: [paragraph] }, { id: "b", type: "content", content: [c1] }] })).toBe(false);
 	});
+	it("accepts the five core component ids and a menu with a name", () => {
+		for (const componentId of ["core:recent-posts", "core:categories", "core:tags", "core:search", "core:archives"]) {
+			expect(widgetAreaIsSafe({ widgets: [{ id: "c", type: "component", componentId }] })).toBe(true);
+		}
+		expect(widgetAreaIsSafe({ widgets: [{ id: "m", type: "menu", menuName: "primary" }] })).toBe(true);
+	});
+	it("rejects inherited property names and unknown ids as componentId (WidgetRenderer.astro:36 indexes a plain object)", () => {
+		for (const componentId of ["constructor", "toString", "__proto__", "hasOwnProperty", "core:unknown", "", 7, null, undefined]) {
+			expect(widgetAreaIsSafe({ widgets: [{ id: "c", type: "component", componentId }] })).toBe(false);
+		}
+	});
+	it("rejects an unknown or missing widget type", () => {
+		for (const type of ["html", "script", "constructor", "", undefined, null, 1]) expect(widgetAreaIsSafe({ widgets: [{ id: "x", type }] })).toBe(false);
+		expect(widgetAreaIsSafe({ widgets: [null] })).toBe(false);
+	});
+	it("rejects a menu widget whose menuName is not a string", () => {
+		for (const menuName of [undefined, null, 5, ["primary"], {}]) expect(widgetAreaIsSafe({ widgets: [{ id: "m", type: "menu", menuName }] })).toBe(false);
+	});
+	it("fails the whole area when one widget is bad among good ones", () => {
+		expect(widgetAreaIsSafe({ widgets: [...area("sidebar").widgets, { id: "x", type: "component", componentId: "constructor" }] })).toBe(false);
+	});
 });

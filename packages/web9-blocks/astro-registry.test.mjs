@@ -1,11 +1,12 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { BLOCKS } from "../index.mjs";
+import { BLOCKS } from "./index.mjs";
 
 // vitest has no Astro plugin, so check the module's source instead of importing the .astro files.
-const source = readFileSync(new URL("./index.mjs", import.meta.url), "utf8");
+// This file lives outside astro/ on purpose: Tailwind scans that folder (CLAUDE.md: never point @source at tests).
+const source = readFileSync(new URL("./astro/index.mjs", import.meta.url), "utf8");
 
-describe("astro/index.mjs", () => {
+describe("astro/index.mjs registry", () => {
 	it("maps htmlBlock and embed to the web9 components, not core's", () => {
 		expect(source).toMatch(/import HtmlBlock from "\.\/HtmlBlock\.astro";/);
 		expect(source).toMatch(/import Embed from "\.\/Embed\.astro";/);

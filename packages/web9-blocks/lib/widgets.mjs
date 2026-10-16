@@ -2,16 +2,26 @@
 // save-time guard never sees it (spec §10). SafeWidgetArea runs this check before rendering an area.
 import { guardPortableText } from "./pt-guard.mjs";
 
+const TYPES = new Set(["content", "menu", "component"]);
+// The keys of componentMap in emdash components/WidgetRenderer.astro (line 36 indexes that plain object with
+// widget.componentId, so "constructor" or "toString" resolves to an inherited function and throws at render).
+const CORE_COMPONENTS = new Set(["core:recent-posts", "core:categories", "core:tags", "core:search", "core:archives"]);
+
+function widgetIsSafe(widget) {
+	if (!widget || typeof widget !== "object" || !TYPES.has(widget.type)) return false;
+	if (widget.type === "component") return typeof widget.componentId === "string" && CORE_COMPONENTS.has(widget.componentId);
+	if (widget.type === "menu") return typeof widget.menuName === "string";
+	const { content } = widget;
+	if (content === undefined || content === null) return true;
+	return Array.isArray(content) && guardPortableText(content).length === 0;
+}
+
 /**
- * @param {{ widgets?: Array<{ type?: string, content?: unknown }> } | null | undefined} area
- * @returns {boolean} true only if every `content` widget holds Portable Text that passes guardPortableText
+ * @param {{ widgets?: Array<object> } | null | undefined} area
+ * @returns {boolean} true only if every widget has a known type and passes its check:
+ *   content: Portable Text that passes guardPortableText; component: one of the core component ids;
+ *   menu: a string menuName
  */
 export function widgetAreaIsSafe(area) {
-	for (const widget of area?.widgets ?? []) {
-		if (widget?.type !== "content") continue;
-		const { content } = widget;
-		if (content === undefined || content === null) continue;
-		if (!Array.isArray(content) || guardPortableText(content).length > 0) return false;
-	}
-	return true;
+	return (area?.widgets ?? []).every(widgetIsSafe);
 }

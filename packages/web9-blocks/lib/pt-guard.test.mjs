@@ -1,4 +1,6 @@
+import { markdownToPortableText } from "emdash/client";
 import { describe, expect, it } from "vitest";
+import { convertMdx } from "../../../scripts/lib/mdx-to-pt.mjs";
 import { guardImageValue, guardPortableText } from "./pt-guard.mjs";
 
 const p = (text) => ({ _type: "block", _key: "b", style: "normal", markDefs: [], children: [{ _type: "span", _key: "s", text, marks: [] }] });
@@ -212,5 +214,136 @@ describe("guardImageValue", () => {
 		expect(guardImageValue({ id: "x", meta: { blurhash: "not a blurhash at all" } })).toEqual(['meta.blurhash: value "not a blurhash at all" is not allowed']);
 		expect(guardImageValue({ id: "x", blurhash: 42 })).toEqual(["blurhash: value 42 is not allowed"]);
 		expect(guardImageValue({ id: "x", darkVariant: { id: "y", blurhash: "x" } })).toEqual(['darkVariant.blurhash: value "x" is not allowed']);
+	});
+});
+
+const para = (over = {}) => ({ _type: "block", _key: "q", style: "normal", markDefs: [], children: [span()], ...over });
+const notAllowed = (where, field, v) => `${where} ${field}: value ${JSON.stringify(v)} is not allowed`;
+const blocksOnly = "only blocks are allowed in container content";
+
+describe("guardPortableText: prototype keys and allow-lists on blocks", () => {
+	it("rejects block.style outside normal, h1-h6 and blockquote (inherited keys crash the renderer)", () => {
+		for (const style of ["constructor", "call", "__proto__", "toString", "h7", "lineBreak", 5]) {
+			expect(guardPortableText([para({ style })])).toEqual([notAllowed("#0 block", "style", style)]);
+		}
+		for (const style of ["normal", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", undefined, null]) expect(guardPortableText([para({ style })])).toEqual([]);
+	});
+	it("rejects listItem outside bullet, number and menu", () => {
+		for (const listItem of ["constructor", "toString", "roman"]) expect(guardPortableText([para({ listItem, level: 1 })])).toEqual([notAllowed("#0 block", "listItem", listItem)]);
+		for (const listItem of ["bullet", "number", "menu", undefined]) expect(guardPortableText([para({ listItem, level: 1 })])).toEqual([]);
+	});
+	it("requires level to be a positive integer up to 20", () => {
+		for (const level of [0, -1, 1.5, "1", 21, Number.NaN]) expect(guardPortableText([para({ listItem: "bullet", level })])).toEqual([notAllowed("#0 block", "level", level)]);
+		for (const level of [1, 2, 20, undefined]) expect(guardPortableText([para({ listItem: "bullet", level })])).toEqual([]);
+	});
+	it("rejects span marks that are neither a decorator nor a markDef key of the same block", () => {
+		const withMarks = (marks, markDefs = []) => para({ markDefs, children: [span("a", marks)] });
+		for (const mark of ["constructor", "__proto__", "link", "bold", "k9"]) {
+			expect(guardPortableText([withMarks([mark])])).toEqual([notAllowed("#0 block", "children[0].marks", mark)]);
+		}
+		expect(guardPortableText([withMarks(["strong", "em", "underline", "strike-through", "subscript", "superscript", "code"])])).toEqual([]);
+		expect(guardPortableText([withMarks(["strong", "k1"], [{ _type: "link", _key: "k1", href: "https://example.com" }])])).toEqual([]);
+		expect(guardPortableText([withMarks([5])])).toEqual([notAllowed("#0 block", "children[0].marks", 5)]);
+		expect(guardPortableText([para({ children: [{ ...span(), marks: "strong" }] })])).toEqual(["#0 block children[0].marks: must be an array"]);
+	});
+	it("rejects a mark that points at a markDef of another block", () => {
+		const defs = [{ _type: "link", _key: "k1", href: "https://example.com" }];
+		expect(guardPortableText([para({ markDefs: defs, children: [span("a", ["k1"])] }), para({ children: [span("b", ["k1"])] })])).toEqual([
+			notAllowed("#1 block", "children[0].marks", "k1"),
+		]);
+	});
+	it("rejects markDefs that are not links with a plain string key", () => {
+		const bad = (def) => guardPortableText([para({ markDefs: [def] })]);
+		expect(bad({ _type: "constructor", _key: "k1" })).toEqual([notAllowed("#0 block", "markDefs[0]._type", "constructor")]);
+		expect(bad({ _type: "annotation", _key: "k1" })).toEqual([notAllowed("#0 block", "markDefs[0]._type", "annotation")]);
+		expect(bad({ _key: "k1" })).toEqual(["#0 block markDefs[0]._type: value undefined is not allowed"]);
+		for (const key of ["__proto__", "constructor", "toString", "", 7, undefined]) {
+			expect(bad({ _type: "link", _key: key, href: "https://example.com" })).toEqual([`#0 block markDefs[0]._key: value ${key === undefined ? "undefined" : JSON.stringify(key)} is not allowed`]);
+		}
+		expect(guardPortableText([para({ markDefs: "x" })])).toEqual(["#0 block markDefs: must be an array"]);
+		expect(bad("x")).toEqual(['#0 block markDefs[0]._type: value undefined is not allowed', '#0 block markDefs[0]._key: value undefined is not allowed']);
+	});
+});
+
+describe("guardPortableText: container content", () => {
+	it("rejects non-block nodes in cover.content, columns[].content and blockquoteGroup.blocks", () => {
+		expect(guardPortableText([{ _type: "cover", _key: "c", content: [{ _type: "constructor", _key: "x" }] }])).toEqual([`#0 cover content[0] constructor: ${blocksOnly}`]);
+		expect(guardPortableText([{ _type: "columns", _key: "c", columns: [{ content: [para(), { _type: "constructor" }] }] }])).toEqual([
+			`#0 columns columns[0].content[1] constructor: ${blocksOnly}`,
+		]);
+		expect(guardPortableText([{ _type: "blockquoteGroup", _key: "c", blocks: [{ _type: "constructor" }] }])).toEqual([`#0 blockquoteGroup blocks[0] constructor: ${blocksOnly}`]);
+		expect(guardPortableText([{ _type: "cover", _key: "c", content: [{ _type: "htmlBlock", html: "<b>x</b>" }, "text", null] }])).toEqual([
+			`#0 cover content[0] htmlBlock: ${blocksOnly}`,
+			`#0 cover content[1] (no _type): ${blocksOnly}`,
+			`#0 cover content[2] (no _type): ${blocksOnly}`,
+		]);
+	});
+	it("applies the block rules to nested blocks", () => {
+		expect(guardPortableText([{ _type: "cover", _key: "c", content: [para({ style: "constructor" })] }])).toEqual([notAllowed("#0 cover content[0] block", "style", "constructor")]);
+		expect(guardPortableText([{ _type: "columns", _key: "c", columns: [{ content: [para({ listItem: "constructor", level: 1 })] }, { content: [para({ children: [span("a", ["constructor"])] })] }] }])).toEqual([
+			notAllowed("#0 columns columns[0].content[0] block", "listItem", "constructor"),
+			notAllowed("#0 columns columns[1].content[0] block", "children[0].marks", "constructor"),
+		]);
+		expect(guardPortableText([{ _type: "blockquoteGroup", _key: "c", blocks: [para({ markDefs: [{ _type: "constructor", _key: "k" }] })] }])).toEqual([
+			notAllowed("#0 blockquoteGroup blocks[0] block", "markDefs[0]._type", "constructor"),
+		]);
+		expect(guardPortableText([{ _type: "cover", _key: "c", content: [para({ children: [span(), { _type: "iframe", _key: "f", src: "https://evil.example" }] })] }])).toEqual([
+			`#0 cover content[0] block children[1] iframe: ${only}`,
+		]);
+	});
+	it("rejects container content that is not an array", () => {
+		expect(guardPortableText([{ _type: "cover", _key: "c", content: "text" }])).toEqual(["#0 cover content: must be an array"]);
+		expect(guardPortableText([{ _type: "columns", _key: "c", columns: [{ content: {} }] }])).toEqual(["#0 columns columns[0].content: must be an array"]);
+		expect(guardPortableText([{ _type: "blockquoteGroup", _key: "c", blocks: "x" }])).toEqual(["#0 blockquoteGroup blocks: must be an array"]);
+	});
+	it("rejects columns that are not an array of objects (Columns.astro maps them and reads column.width)", () => {
+		expect(guardPortableText([{ _type: "columns", _key: "o", columns: "abc" }])).toEqual(["#0 columns columns: must be an array of columns"]);
+		expect(guardPortableText([{ _type: "columns", _key: "o", columns: [null, "x", { content: [] }] }])).toEqual([
+			"#0 columns columns[0]: must be an object",
+			"#0 columns columns[1]: must be an object",
+		]);
+	});
+	it("passes container content made of ordinary blocks, and absent content", () => {
+		const quoted = para({ style: "blockquote", markDefs: [{ _type: "link", _key: "k1", href: "https://example.com" }], children: [span("a", ["strong", "k1"])] });
+		expect(
+			guardPortableText([
+				{ _type: "cover", _key: "c", content: [quoted, para({ listItem: "bullet", level: 1 })] },
+				{ _type: "columns", _key: "o", columns: [{ content: [quoted] }, { width: "50%" }, { content: [] }] },
+				{ _type: "blockquoteGroup", _key: "g", blocks: [quoted, quoted] },
+				{ _type: "cover", _key: "d" },
+				{ _type: "blockquoteGroup", _key: "e" },
+			]),
+		).toEqual([]);
+	});
+});
+
+describe("guardPortableText: converter output", () => {
+	const MARKDOWN = [
+		"# Title",
+		"## Sub heading",
+		"### Third",
+		"Paragraph with **bold**, _italic_, `code`, ~~strike~~ and a [link](https://example.com).",
+		"- bullet one",
+		"- bullet **two**",
+		"  - nested bullet",
+		"1. first",
+		"2. second",
+		"> quoted text",
+		"```js\nconst x = 1;\n```",
+	].join("\n\n");
+	it("passes core's Markdown to Portable Text output", () => {
+		const blocks = markdownToPortableText(MARKDOWN);
+		expect(blocks.map((b) => b.style ?? b._type)).toEqual(expect.arrayContaining(["h1", "h2", "h3", "normal", "blockquote", "code"]));
+		expect(blocks.some((b) => b.listItem === "bullet" && b.level === 2)).toBe(true);
+		expect(blocks.some((b) => b.listItem === "number")).toBe(true);
+		expect(blocks.flatMap((b) => b.children ?? []).flatMap((c) => c.marks ?? [])).toEqual(expect.arrayContaining(["strong", "em", "code", "strike-through"]));
+		expect(guardPortableText(blocks)).toEqual([]);
+	});
+	it("passes the migration converter output (scripts/lib/mdx-to-pt.mjs)", () => {
+		const mdx = `---\ntitle: T\n---\n\n## Heading\n\n${MARKDOWN}\n\nTail with <b>x</b>\n`;
+		const { data } = convertMdx(mdx, { path: "docs/a.mdx" });
+		const blocks = data.body.filter((b) => b._type !== "htmlBlock");
+		expect(blocks.some((b) => b.listItem === "bullet" && b.level === 2)).toBe(true);
+		expect(guardPortableText(blocks)).toEqual([]);
 	});
 });
