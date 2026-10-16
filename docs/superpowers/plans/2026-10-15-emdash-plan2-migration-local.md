@@ -1144,3 +1144,665 @@ Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
 ```
 
 ---
+
+### Task 4: 方案 B 主题 token + `Base.astro` 改 Tailwind + `WebMcpSearch` + 菜单链接本地化
+
+**模型：** standard
+
+计划 1 实测：生产构建（Lightning CSS minify）把 `light-dark()` 降级成 `prefers-color-scheme` 变量（`--lightningcss-light/-dark`），页脚的手动切换在构建产物里不起作用。owner 选了方案 B：显式 token，不再用 `light-dark()`。同时把 `Base.astro` 的页头、页脚改成 Tailwind（spec §11 的分期改为：计划 2 只重写 `Base.astro`）。
+
+**Files:**
+- Create: `packages/web9-site/lib/nav.mjs`、`nav.test.mjs`、`packages/web9-site/theme.test.mjs`
+- Modify: `src/styles/global.css`、`src/styles/tokens.css`、`src/styles/theme.css`、`src/layouts/Base.astro`（整个重写）、`CLAUDE.md`、`AGENTS.md`、spec §11
+
+**Interfaces:**
+- Produces:
+  - `localizeHref(href: string, locale: string) → string`：`locale` 不是 `en` 时，`/` → `/<locale>/`，`/docs/...` → `/<locale>/docs/...`；其他（`/posts`、外链、`#…`）原样返回。
+  - 主题：`<html>` 上的 `light` / `dark` class（cookie `theme` 决定，页脚按钮切换）；没有 class 时跟随系统。颜色 token 名不变。
+  - 页脚主题按钮：`button[data-theme-btn="light|dark|system"]`，当前项 `aria-pressed="true"`。
+  - 每个公开页面的 `<body>` 里有 `<emdash-webmcp-search>`。
+
+- [ ] **Step 1: 写失败的测试**
+
+Create `packages/web9-site/lib/nav.test.mjs`：
+
+```js
+import { describe, expect, it } from "vitest";
+import { localizeHref } from "./nav.mjs";
+
+describe("localizeHref", () => {
+	it("leaves every link alone on en pages", () => {
+		expect(localizeHref("/", "en")).toBe("/");
+		expect(localizeHref("/docs/intro", "en")).toBe("/docs/intro");
+	});
+	it("prefixes the routes that exist in zh-CN", () => {
+		expect(localizeHref("/", "zh-CN")).toBe("/zh-CN/");
+		expect(localizeHref("/docs/intro", "zh-CN")).toBe("/zh-CN/docs/intro");
+	});
+	it("keeps links without a zh-CN route", () => {
+		for (const href of ["/posts", "/tag/ai", "/search", "https://github.com/TouchMarsSolutions/web9ai", "#top", "/docsx"]) {
+			expect(localizeHref(href, "zh-CN")).toBe(href);
+		}
+	});
+});
+```
+
+Create `packages/web9-site/theme.test.mjs`：
+
+```js
+// Theme B (spec §11): light values in @theme static, dark values in :root.dark and in
+// @media (prefers-color-scheme: dark) :root:not(.light). Production minify lowers light-dark(), so it
+// must not come back.
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+
+const read = (p) => readFileSync(new URL(`../../${p}`, import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+const css = read("src/styles/global.css");
+const decls = (block) => Object.fromEntries([...block.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)].map(([, k, v]) => [k, v.trim()]));
+function body(re) {
+	const m = re.exec(css);
+	if (!m) throw new Error(`block not found: ${re}`);
+	return m[1];
+}
+
+describe("theme B tokens", () => {
+	const light = decls(body(/@theme static \{([^}]*)\}/));
+	const dark = decls(body(/:root\.dark \{([^}]*)\}/));
+	const media = decls(body(/@media \(prefers-color-scheme: dark\) \{\s*:root:not\(\.light\) \{([^}]*)\}/));
+	it("uses the same dark palette for the toggle and for the OS preference", () => {
+		expect(media).toEqual(dark);
+	});
+	it("gives every light colour a dark value, except the ones derived from others", () => {
+		const own = Object.keys(light).filter((k) => !["--color-on-brand", "--color-brand-ring"].includes(k));
+		expect(Object.keys(dark).sort()).toEqual(own.sort());
+		expect(light["--color-bg"]).toBe("#ffffff");
+		expect(dark["--color-bg"]).toBe("#0d0d0d");
+	});
+	it("uses no light-dark() in site CSS", () => {
+		for (const p of ["src/styles/global.css", "src/styles/tokens.css", "src/styles/theme.css", "src/layouts/Base.astro", "packages/web9-blocks/astro/blocks.css"]) {
+			expect(read(p), p).not.toContain("light-dark(");
+		}
+	});
+});
+```
+
+- [ ] **Step 2: 跑测试，确认失败**
+
+Run: `npx vitest run packages/web9-site/`
+Expected: FAIL：`nav.mjs` 不存在；`:root.dark` 块找不到；`light-dark(` 还在。
+
+- [ ] **Step 3: `localizeHref`**
+
+Create `packages/web9-site/lib/nav.mjs`：
+
+```js
+// Site-relative links that have a zh-CN route get the locale prefix on zh-CN pages (spec §5).
+// Only the home page and docs exist in zh-CN; posts, tags, search and external links stay as they are.
+export function localizeHref(href, locale) {
+	if (typeof href !== "string" || !locale || locale === "en") return href;
+	if (href === "/") return `/${locale}/`;
+	if (href.startsWith("/docs/")) return `/${locale}${href}`;
+	return href;
+}
+```
+
+- [ ] **Step 4: 主题 token**
+
+`src/styles/global.css`：把从 `/*\n * Template color tokens` 开始、到 `@theme static { … }` 结束的这一段（注释 + `@theme static` 块）换成：
+
+```css
+/*
+ * Template color tokens, names unchanged, exposed as utilities (bg-surface, text-muted, border-border...).
+ * Theme B (spec §11): light values here; dark values below. Never use the `dark:` variant: the footer
+ * switcher sets html.light / html.dark, which `dark:` would not see.
+ * `static` keeps every variable on :root because template CSS outside Tailwind reads them too.
+ */
+@theme static {
+	--color-bg: #ffffff;
+	--color-bg-subtle: #fafafa;
+	--color-text: #1a1a1a;
+	--color-text-secondary: #525252;
+	--color-muted: #8b8b8b;
+	--color-border: #e5e5e5;
+	--color-border-subtle: #f0f0f0;
+	--color-surface: #f7f7f7;
+	--color-brand: #0066cc;
+	--color-brand-hover: #0052a3;
+	--color-on-brand: white;
+	--color-brand-ring: color-mix(in srgb, var(--color-brand) 25%, transparent);
+}
+
+/*
+ * Dark palette. Tailwind puts @theme into @layer theme; these rules are unlayered, so they win.
+ * html.dark = explicit choice; no class = follow the OS; html.light = explicit light.
+ * Keep the two blocks identical (packages/web9-site/theme.test.mjs).
+ */
+:root {
+	color-scheme: light;
+}
+
+:root.dark {
+	color-scheme: dark;
+	--color-bg: #0d0d0d;
+	--color-bg-subtle: #141414;
+	--color-text: #ededed;
+	--color-text-secondary: #a0a0a0;
+	--color-muted: #6b6b6b;
+	--color-border: #2a2a2a;
+	--color-border-subtle: #1f1f1f;
+	--color-surface: #181818;
+	--color-brand: #4d9fff;
+	--color-brand-hover: #6eb0ff;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root:not(.light) {
+		color-scheme: dark;
+		--color-bg: #0d0d0d;
+		--color-bg-subtle: #141414;
+		--color-text: #ededed;
+		--color-text-secondary: #a0a0a0;
+		--color-muted: #6b6b6b;
+		--color-border: #2a2a2a;
+		--color-border-subtle: #1f1f1f;
+		--color-surface: #181818;
+		--color-brand: #4d9fff;
+		--color-brand-hover: #6eb0ff;
+	}
+}
+
+/* Page defaults that used to live in Base.astro's global style (Tailwind preflight covers the resets). */
+@layer base {
+	html {
+		scroll-behavior: smooth;
+	}
+	body {
+		font-family: var(--font-body);
+		font-size: var(--font-size-base);
+		line-height: var(--leading-relaxed);
+		color: var(--color-text);
+		background: var(--color-bg);
+		-webkit-font-smoothing: antialiased;
+		-moz-osx-font-smoothing: grayscale;
+		min-height: 100vh;
+	}
+	a:where(:not([class*="emdash"]):not([class*="ec-"])) {
+		color: var(--color-brand);
+		text-decoration: none;
+		transition: color var(--transition-fast);
+	}
+	a:where(:not([class*="emdash"]):not([class*="ec-"])):hover {
+		color: var(--color-brand-hover);
+	}
+	h1,
+	h2,
+	h3,
+	h4,
+	h5,
+	h6 {
+		font-family: var(--font-heading);
+		line-height: var(--leading-tight);
+		font-weight: var(--font-weight-heading);
+		letter-spacing: var(--tracking-snug);
+	}
+	h1 {
+		font-weight: var(--font-weight-display);
+		letter-spacing: var(--tracking-tight);
+	}
+	::selection {
+		background: var(--color-brand);
+		color: var(--color-on-brand);
+	}
+}
+```
+
+（`.prose` 那段 `@layer utilities` 保持不动，放在这些规则后面。）
+
+`src/styles/tokens.css`：
+- 删掉 `:root` 里的 `color-scheme: light dark;` 这一行；
+- 删掉文件末尾整个 `@supports not (color: light-dark(#000, #fff)) { … }` 块（连同它上面的注释）；
+- 文件头注释里 "Colors use light-dark(): …… keep them distinct." 这一段换成：
+
+```
+  Colors are not defined here: they live in src/styles/global.css
+  (light values in @theme static, dark values in :root.dark and in
+  @media (prefers-color-scheme: dark) :root:not(.light)).
+```
+
+`src/styles/theme.css`：头注释里 "Colors are defined with light-dark(). …… to set different values per mode." 换成：
+
+```
+  Colors: set the light value in :root here, and the dark value in
+  both :root.dark and @media (prefers-color-scheme: dark)
+  { :root:not(.light) { ... } } (see global.css).
+```
+
+示例里的 `--color-brand: light-dark(#0f766e, #2dd4bf);` 换成 `--color-brand: #0f766e;`。
+
+- [ ] **Step 5: 重写 `src/layouts/Base.astro`**
+
+整个文件替换成下面的内容。Props、标题拼接、`createPublicPageContext` 和主题脚本的行为都不变；样式改成 Tailwind utility；需要层级（`z-index`）或视口单位的部分留在 scoped `<style>`，因为公开 utility 里不能出现 `z-*`、`*-screen`、视口单位（Task 5 的检查）。
+
+```astro
+---
+import { getMenuWithCacheHint, getSiteSettingsWithCacheHint } from "emdash";
+import { WidgetArea, EmDashHead, EmDashBodyStart, EmDashBodyEnd } from "emdash/ui";
+import { createPublicPageContext } from "emdash/page";
+import LiveSearch from "emdash/ui/search";
+import WebMcpSearch from "emdash/ui/webmcp-search";
+import { Font } from "astro:assets";
+import { localizeHref } from "../../packages/web9-site/lib/nav.mjs";
+import { resolveBlogSiteIdentity } from "../utils/site-identity";
+import "../styles/global.css";
+import "../styles/tokens.css";
+import "../styles/theme.css";
+
+interface Props {
+	title: string;
+	pageTitle?: string | null;
+	description?: string | null;
+	image?: string | null;
+	canonical?: string | null;
+	robots?: string | null;
+	type?: "website" | "article";
+	publishedTime?: string | null;
+	modifiedTime?: string | null;
+	author?: string | null;
+	/** Pass content reference for plugin page contributions on content pages */
+	content?: { collection: string; id: string; slug?: string | null };
+}
+
+const { title, pageTitle, description, image, canonical, robots, type = "website", publishedTime, modifiedTime, author, content } =
+	Astro.props;
+const [settingsResult, menuResult] = await Promise.all([getSiteSettingsWithCacheHint(), getMenuWithCacheHint("primary")]);
+if (Astro.cache?.enabled) {
+	Astro.cache.set(settingsResult.cacheHint);
+	Astro.cache.set(menuResult.cacheHint);
+}
+
+const { siteTitle, siteTagline, siteLogo } = resolveBlogSiteIdentity(settingsResult.data);
+const titleIncludesSiteName = title === siteTitle || title.endsWith(` | ${siteTitle}`) || title.endsWith(` — ${siteTitle}`);
+const fullTitle = titleIncludesSiteName ? title : `${title} — ${siteTitle}`;
+
+const locale = Astro.currentLocale ?? "en";
+const localePrefix = locale === "en" ? "" : `/${locale}`;
+// One en menu; on zh-CN pages links that have a zh-CN route get the prefix (spec §5).
+const menuItems = (menuResult.data?.items ?? []).map((item) => ({ ...item, href: localizeHref(item.url, locale) }));
+const homeHref = localizeHref("/", locale);
+
+// Build public page context for plugin contributions; SEO data is rendered securely by EmDashHead
+const pageCtx = createPublicPageContext({
+	Astro,
+	kind: content ? "content" : "custom",
+	pageType: type,
+	title: fullTitle,
+	pageTitle: pageTitle ?? title,
+	description,
+	canonical,
+	image,
+	content,
+	seo: { ogImage: image, robots },
+	articleMeta: { publishedTime, modifiedTime, author },
+	siteName: siteTitle,
+	// Absolute URLs in head (hreflang alternates) use the canonical origin, never the request Host
+	siteUrl: Astro.site?.origin,
+});
+
+const isLoggedIn = !!Astro.locals.user;
+
+const THEME_BUTTONS = [
+	{ theme: "light", label: "Light mode" },
+	{ theme: "dark", label: "Dark mode" },
+	{ theme: "system", label: "System theme" },
+];
+const ICONS: Record<string, string> = {
+	light:
+		'<circle cx="12" cy="12" r="5"></circle><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"></path>',
+	dark: '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>',
+	system: '<rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><path d="M8 21h8M12 17v4"></path>',
+};
+const linkRel = (target?: string | null) => (target === "_blank" ? "noopener noreferrer" : undefined);
+---
+
+<!doctype html>
+<html lang={locale}>
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<Font cssVariable="--font-body" preload />
+		<Font cssVariable="--font-mono" />
+		<title>{fullTitle}</title>
+		<EmDashHead page={pageCtx} />
+		<script is:inline>
+			// Apply an explicit theme choice before first paint. With no cookie the OS preference decides
+			// (global.css: @media (prefers-color-scheme: dark) :root:not(.light)).
+			(function () {
+				var row = document.cookie.split("; ").find(function (item) {
+					return item.startsWith("theme=");
+				});
+				var theme = row ? row.slice(6) : null;
+				if (theme === "dark" || theme === "light") document.documentElement.classList.add(theme);
+			})();
+		</script>
+	</head>
+	<body>
+		<EmDashBodyStart page={pageCtx} />
+		<header class="site-header border-b border-border-subtle">
+			<nav class="mx-auto flex max-w-[1200px] flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:h-16 sm:flex-nowrap sm:px-6 sm:py-0">
+				<a href={homeHref} class="text-lg font-semibold tracking-tight text-text hover:text-brand">
+					{siteLogo ? <img src={siteLogo.url} alt={siteLogo.alt || siteTitle} class="-my-2 block h-12 w-auto" /> : siteTitle}
+				</a>
+				<div class="flex w-full flex-wrap items-center gap-x-5 gap-y-2 sm:ms-auto sm:w-auto sm:flex-nowrap sm:gap-x-6">
+					<LiveSearch
+						placeholder="Search..."
+						class="site-search"
+						inputClass="site-search-input"
+						resultsClass="site-search-results"
+						resultClass="site-search-result"
+						collections={["docs", "posts", "pages"]}
+						routeMap={{ docs: `${localePrefix}/docs/:slug` }}
+					/>
+					<div class="flex flex-wrap gap-x-5 gap-y-1 text-sm">
+						{
+							menuItems.map((item) => (
+								<a class="text-text hover:text-brand" href={item.href} target={item.target} rel={linkRel(item.target)}>
+									{item.label}
+								</a>
+							))
+						}
+					</div>
+					{isLoggedIn && <a href="/_emdash/admin" class="text-sm text-text-secondary hover:text-text">Admin</a>}
+				</div>
+			</nav>
+		</header>
+		<WebMcpSearch collections={["docs", "posts", "pages"]} routeMap={{ docs: `${localePrefix}/docs/:slug` }} />
+
+		<main class="site-main">
+			<slot />
+		</main>
+
+		<footer class="border-t border-border-subtle bg-bg-subtle">
+			<div class="mx-auto max-w-[1200px] px-6 pt-16 pb-8">
+				<div class="mb-12 grid grid-cols-1 gap-8 sm:grid-cols-2 sm:gap-12 lg:grid-cols-[2fr_1fr_1fr_1fr]">
+					<div class="max-w-[280px] sm:col-span-2 lg:col-span-1">
+						<a href={homeHref} class="text-lg font-semibold tracking-tight text-text">
+							{siteLogo ? <img src={siteLogo.url} alt={siteLogo.alt || siteTitle} class="h-6 w-auto" /> : siteTitle}
+						</a>
+						<p class="mt-3 text-sm text-muted">{siteTagline}</p>
+					</div>
+					<div>
+						<h2 class="mb-4 text-xs font-medium tracking-wider text-muted uppercase">Navigate</h2>
+						<ul class="space-y-2 text-sm">
+							{
+								menuItems.map((item) => (
+									<li>
+										<a class="text-text-secondary hover:text-text" href={item.href} target={item.target} rel={linkRel(item.target)}>
+											{item.label}
+										</a>
+									</li>
+								))
+							}
+						</ul>
+					</div>
+					<div>
+						<h2 class="mb-4 text-xs font-medium tracking-wider text-muted uppercase">Connect</h2>
+						<ul class="space-y-2 text-sm">
+							<li><a class="text-text-secondary hover:text-text" href="/rss.xml">RSS Feed</a></li>
+						</ul>
+					</div>
+					<div class="text-sm text-text-secondary">
+						<WidgetArea name="footer" />
+					</div>
+				</div>
+				<div class="flex flex-col items-center gap-4 border-t border-border pt-6 text-center sm:flex-row sm:justify-between sm:text-left">
+					<p class="text-sm text-muted">Powered by <a class="text-text-secondary" href="https://emdashcms.com">EmDash</a></p>
+					<div class="flex gap-1 rounded bg-surface p-1" role="group" aria-label="Theme">
+						{
+							THEME_BUTTONS.map((b) => (
+								<button
+									type="button"
+									data-theme-btn={b.theme}
+									aria-label={b.label}
+									aria-pressed="false"
+									class="flex h-7 w-8 cursor-pointer items-center justify-center rounded text-muted hover:text-text-secondary aria-pressed:bg-bg aria-pressed:text-text aria-pressed:shadow-sm"
+								>
+									<svg
+										width="16"
+										height="16"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										aria-hidden="true"
+										set:html={ICONS[b.theme]}
+									/>
+								</button>
+							))
+						}
+					</div>
+				</div>
+			</div>
+		</footer>
+
+		<script>
+			// Theme switcher: html.light / html.dark plus a `theme` cookie; "system" removes both.
+			const themeBtns = document.querySelectorAll<HTMLButtonElement>("[data-theme-btn]");
+			const root = document.documentElement;
+
+			function setCookie(name: string, value: string, maxAge: number = 31536000) {
+				const secure = location.protocol === "https:" ? "; Secure" : "";
+				document.cookie =
+					value === ""
+						? `${name}=; path=/; max-age=0; SameSite=Lax${secure}`
+						: `${name}=${value}; path=/; max-age=${maxAge}; SameSite=Lax${secure}`;
+			}
+
+			function setTheme(theme: string) {
+				root.classList.remove("light", "dark");
+				if (theme === "system") setCookie("theme", "");
+				else {
+					setCookie("theme", theme);
+					root.classList.add(theme);
+				}
+				themeBtns.forEach((btn) => btn.setAttribute("aria-pressed", String(btn.dataset.themeBtn === theme)));
+			}
+
+			const stored = document.cookie.split("; ").find((item) => item.startsWith("theme="))?.slice(6) || "system";
+			setTheme(stored);
+			themeBtns.forEach((btn) => btn.addEventListener("click", () => setTheme(btn.dataset.themeBtn || "system")));
+
+			// ⌘K / Ctrl+K focuses search
+			document.addEventListener("keydown", (e) => {
+				if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+					e.preventDefault();
+					document.querySelector<HTMLInputElement>(".site-search-input")?.focus();
+				}
+			});
+		</script>
+
+		<style>
+			/*
+			 * Chrome that needs stacking or viewport units stays in scoped CSS: public utilities must never
+			 * include fixed, inset-*, z-*, *-screen or viewport units (spec §10, scripts/check-public-css.mjs).
+			 */
+			.site-header {
+				position: sticky;
+				top: 0;
+				z-index: 100;
+				background: color-mix(in srgb, var(--color-bg) 65%, transparent);
+				backdrop-filter: blur(12px);
+				-webkit-backdrop-filter: blur(12px);
+			}
+			.site-main {
+				min-height: calc(100vh - 64px - 300px);
+			}
+			@media (max-width: 640px) {
+				.site-header {
+					position: relative;
+				}
+			}
+
+			/* LiveSearch renders its own markup; these class names are passed to it as props. */
+			.site-search {
+				position: relative;
+				width: 180px;
+				--emdash-search-border-focus: var(--color-brand);
+			}
+			:global(.site-search-input) {
+				width: 180px;
+				padding: 0.5rem 0.75rem;
+				font-family: var(--font-body);
+				font-size: 0.875rem;
+				border: 1px solid var(--color-border);
+				border-radius: 4px;
+				background: var(--color-bg);
+				color: var(--color-text);
+				transition:
+					border-color 120ms ease,
+					box-shadow 120ms ease;
+			}
+			:global(.site-search-input)::placeholder {
+				color: var(--color-muted);
+			}
+			:global(.site-search-input):focus,
+			:global(.site-search-input):focus-visible {
+				outline: none;
+				border-color: var(--color-brand) !important;
+				box-shadow: 0 0 0 3px var(--color-brand-ring);
+			}
+			:global(.site-search-results) {
+				position: absolute;
+				top: 100%;
+				left: 0;
+				right: 0;
+				margin-top: 0.5rem;
+				background: var(--color-bg);
+				border: 1px solid var(--color-border);
+				border-radius: 8px;
+				box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+				max-height: 400px;
+				overflow-y: auto;
+				z-index: 1000;
+			}
+			:global(.site-search-results .emdash-live-search-loading),
+			:global(.site-search-results .emdash-live-search-no-results) {
+				padding: 1rem;
+				text-align: center;
+				color: var(--color-muted);
+				font-size: 0.875rem;
+			}
+			:global(.site-search-result) {
+				display: block;
+				padding: 0.75rem 1rem;
+				color: var(--color-text);
+				border-bottom: 1px solid var(--color-border-subtle);
+				transition: background 120ms ease;
+			}
+			:global(.site-search-result):last-child {
+				border-bottom: none;
+			}
+			:global(.site-search-result):hover,
+			:global(.site-search-result):focus,
+			:global(.site-search-result.focused) {
+				background: var(--color-surface);
+				outline: none;
+			}
+			:global(.site-search-result .emdash-live-search-result-title) {
+				display: block;
+				font-weight: 500;
+				font-size: 0.875rem;
+			}
+			:global(.site-search-result .emdash-live-search-result-collection) {
+				display: block;
+				font-size: 0.8125rem;
+				color: var(--color-muted);
+				text-transform: uppercase;
+				letter-spacing: 0.06em;
+				margin-top: 2px;
+			}
+			:global(.site-search-result .emdash-live-search-result-snippet) {
+				display: block;
+				font-size: 0.875rem;
+				color: var(--color-muted);
+				margin-top: 0.25rem;
+				line-height: 1.3;
+			}
+			:global(.site-search-result .emdash-live-search-result-snippet mark) {
+				font-weight: 600;
+				color: var(--color-text);
+			}
+			@media (max-width: 640px) {
+				.site-search,
+				:global(.site-search-input) {
+					width: 100%;
+				}
+			}
+		</style>
+		<EmDashBodyEnd page={pageCtx} />
+	</body>
+</html>
+```
+
+`theme.css` 里的 `.nav-admin` 规则已经没有对应的元素了（Admin 链接用 utility），删掉那条规则和它的注释。
+
+- [ ] **Step 6: 跑测试**
+
+Run: `npm test`
+Expected: PASS。
+
+- [ ] **Step 7: 页面检查**
+
+本地库是空的（Task 1 重建），先看不依赖内容的页面：
+
+```bash
+node scripts/check-page.mjs http://localhost:4321/ "Web9.AI" "emdash-webmcp-search" 'data-theme-btn="dark"' "square of web3 to the power of AI" --absent "light-dark("
+node scripts/check-page.mjs http://localhost:4321/posts "emdash-webmcp-search" 'data-theme-btn="system"'
+node scripts/check-page.mjs http://localhost:4321/search "emdash-webmcp-search"
+```
+
+Expected：三个都 exit 0。
+
+再在浏览器里确认手动切换（CDP，page 8；dev 里没有 Lightning CSS 降级，这一步验证的是 class 和 token 的接线，构建产物在 Task 5 检查）：`navigate_page` 到 `http://localhost:4321/`，然后 `evaluate_script`：
+
+```js
+() => {
+	const html = document.documentElement;
+	const bg = () => getComputedStyle(document.body).backgroundColor;
+	html.classList.remove("light", "dark");
+	html.classList.add("dark");
+	const dark = bg();
+	html.classList.replace("dark", "light");
+	const light = bg();
+	html.classList.remove("light");
+	return { dark, light, webmcp: !!document.querySelector("emdash-webmcp-search") };
+}
+```
+
+Expected：`dark` 是 `rgb(13, 13, 13)`，`light` 是 `rgb(255, 255, 255)`，`webmcp` 是 `true`。再 `take_screenshot` 看一眼页头和页脚（窄屏可以用 `resize_page` 到 390 宽再截一次），确认没有明显错位。
+
+- [ ] **Step 8: 文档**
+
+- `CLAUDE.md` 的 Rules 里，"Styling is Tailwind 4 …" 那条换成：
+
+```markdown
+- Styling is Tailwind 4 (`src/styles/global.css`, spec §11). Colors are the template tokens (`bg-surface`, `text-muted`, `border-border`, `text-brand`): light values in `@theme static`, dark values in `:root.dark` and `@media (prefers-color-scheme: dark) { :root:not(.light) }`. Never use the `dark:` variant or `light-dark()` (production minify lowers it and breaks the theme toggle).
+```
+
+- `AGENTS.md` "Customisation" 一节里 "Colours are defined with `light-dark(<light>, <dark>)` …… There is no separate dark palette to maintain." 换成："Colours are plain values: light ones in `@theme static` in `src/styles/global.css`, dark ones in `:root.dark` and in `@media (prefers-color-scheme: dark) { :root:not(.light) }` right below it (keep the two dark blocks identical; a test checks it). Never use `light-dark()`: the production CSS minifier lowers it and the footer theme switcher stops working."
+- spec §11：
+  - "token 用的是 `light-dark()` ……" 和 "注意：生产构建 …… 修法是计划 2 的事项" 两个子条目换成一条："**已定（owner，2026-10-15，方案 B）**：token 用显式值，浅色在 `@theme static`，深色在 `:root.dark` 和 `@media (prefers-color-scheme: dark) { :root:not(.light) }`（不分层，所以覆盖 Tailwind 的 `@layer theme`）。不用 `light-dark()`：生产构建的 Lightning CSS 会把它降级成 `--lightningcss-light/-dark`，手动切换失效（计划 1 实测）。验收：公开 CSS 里 `--lightningcss-light` 为 0（计划 2 Task 5 的检查脚本强制）。"
+  - 最后一条"分期"换成："分期（2026-10-15 修订）：计划 1 把 docs 页面和 web9 块改成 Tailwind；计划 2 只重写 `Base.astro`（页头、页脚、主题），`posts/[slug]` 只给正文容器加 `prose`；blog 列表和文章页的整体重写留给以后的样式计划，在此之前模板 blog 页面可能有 preflight 带来的细小样式差异。"
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add packages/web9-site/ src/styles/ src/layouts/Base.astro CLAUDE.md AGENTS.md docs/superpowers/specs/2026-10-15-emdash-migration-design.md
+git commit -m "feat(theme): explicit light/dark tokens (theme B), Base layout in Tailwind, WebMcpSearch, zh-CN menu links
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
+```
+
+---
