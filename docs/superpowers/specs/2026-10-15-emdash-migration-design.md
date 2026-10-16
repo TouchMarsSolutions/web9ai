@@ -40,6 +40,7 @@
 
 - **已定的规则**：doc 正文一律用 `portableText` 字段加内联块，**不用 `blocks` 字段**。原因是 issue #3670 还没解决，`blocks` 字段不会进入全文搜索。`blocks` 只用于首页这类以排版为主的页面。
 - **建议**：URL 用 `/docs/{slug}` 和 `/zh-CN/docs/{slug}`。owner 已表示 URL 不重要。slug 全站唯一，转换脚本遇到重名时加前缀。
+- **已定（计划 2 Task 8）**：`category` 存目录名去掉数字前缀（`cloud`、`prompt`、`usecase`、`article`、`model`；直接在 `ai/`、`dev/` 下的文档存 `general`），显示名由站点代码映射（Cloud / Prompt Engineering / Use Case / Articles / Model；zh-CN 的 usecase 显示"神兵利器"）。存显示名的话，zh-CN 只翻译了部分文档时同一个分类会分成两组。`sort_order` = section 序号 × 1,000,000 + 根条目名次 × 1000 + 分类内名次，复现 Docusaurus 的侧边栏顺序。slug 重名时整组改成 `<category 或 section>-<slug>`（目前没有重名）。规则实现在 `scripts/lib/legacy-tree.mjs`。
 - 首页路由 `/` 读取 `pages` 里 slug 为 `home` 的条目，用 `<Blocks>` 渲染。
 
 ## 3. 组件契约（目标 1）
