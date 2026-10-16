@@ -85,6 +85,10 @@ export function classifySheets({ manifest, urlImports, clientCss }) {
 	return { sheets: [...sheets.values()], report, errors };
 }
 
+// Viewport units (`100vh`, `50DVW`, `100vmax`, `100dvmin`...). `(?![a-z])` instead of `\b`: Tailwind writes spaces
+// inside arbitrary values as `_`, and `_` is a word character, so `\b` never matched in `100vmax_black`.
+const VIEWPORT_UNIT = /\d[sld]?v(?:[hwib]|min|max)(?![a-z])/i;
+
 /** Class-name patterns that let content build a page overlay (spec §10). */
 export const CLASS_DENY = [
 	[/^fixed$/, "position:fixed utility"],
@@ -92,21 +96,61 @@ export const CLASS_DENY = [
 	[/^-?z-/, "z-index utility"],
 	[/-screen$/, "*-screen size utility"],
 	[/-[sld]?v[hw]$/, "viewport-unit size utility"],
-	[/\[[^\]]*\d(?:[sld]?v[hwib]|vmin|vmax)\b/, "arbitrary viewport-unit value"],
+	[new RegExp(String.raw`\[[^\]]*${VIEWPORT_UNIT.source}`, "i"), "arbitrary viewport-unit value"],
 ];
 
-/** Class names in a selector, unescaped, without variant prefixes (`.md\:fixed` → "fixed"). */
-export function classTokens(selector) {
-	return [...selector.matchAll(/\.((?:\\.|[\w-])+)/g)].map((m) => m[1].replace(/\\(.)/g, "$1").split(":").pop());
+/** Arbitrary properties (`[z-index:50]`, `md:[inset:0]`) as a whole class name, important modifier already dropped. */
+const ARBITRARY_PROPERTY = /^\[([a-z-]+):(.*)\]$/i;
+const ARBITRARY_PROPERTY_DENY = [
+	[(prop, value) => prop === "position" && /^_*fixed(?![a-z])/i.test(value), "arbitrary position:fixed property"],
+	[(prop) => /^(?:inset(?:-.+)?|top|right|bottom|left)$/.test(prop), "arbitrary inset property"],
+	[(prop) => prop === "z-index", "arbitrary z-index property"],
+	[(_prop, value) => VIEWPORT_UNIT.test(value), "arbitrary property with a viewport-unit value"],
+];
+
+/** Why a class name (variants and `!` already dropped) can build an overlay; empty when it cannot. */
+export function denyReasons(cls) {
+	const arbitrary = ARBITRARY_PROPERTY.exec(cls);
+	if (arbitrary) {
+		const prop = arbitrary[1].toLowerCase();
+		return ARBITRARY_PROPERTY_DENY.filter(([test]) => test(prop, arbitrary[2])).map(([, why]) => why);
+	}
+	return CLASS_DENY.filter(([re]) => re.test(cls)).map(([, why]) => why);
 }
 
-/** Problems in one stylesheet: denied class names, position:fixed, and light-dark() lowered by the minifier. */
+/** The part of a class name after its last variant, ignoring colons inside `[...]` and `(...)`. */
+function utilityPart(cls) {
+	let depth = 0;
+	let start = 0;
+	for (let i = 0; i < cls.length; i++) {
+		const c = cls[i];
+		if (c === "[" || c === "(") depth++;
+		else if (c === "]" || c === ")") depth = Math.max(0, depth - 1);
+		else if (c === ":" && depth === 0) start = i + 1;
+	}
+	return cls.slice(start);
+}
+
+/**
+ * Class names in a selector, unescaped, without variant prefixes and without the important modifier
+ * (`.md\:fixed` → "fixed", `.h-screen\!` → "h-screen", `.md\:\[z-index\:9\]` → "[z-index:9]").
+ */
+export function classTokens(selector) {
+	return [...selector.matchAll(/\.((?:\\.|[\w-])+)/g)].map((m) => utilityPart(m[1].replace(/\\(.)/g, "$1")).replace(/^!|!$/g, ""));
+}
+
+/** Problems in one stylesheet: denied class names, position:fixed, `@import`, and light-dark() lowered by the minifier. */
 export function scanSheet({ label, css }) {
 	const problems = [];
-	postcss.parse(css).walkRules((rule) => {
+	const root = postcss.parse(css);
+	// An `@import` of the admin sheet would put its position:fixed rules on every public page.
+	root.walkAtRules(/^import$/i, (rule) => {
+		problems.push(`${label}: @${rule.name} ${rule.params.slice(0, 100)} (a public stylesheet must not import other CSS)`);
+	});
+	root.walkRules((rule) => {
 		for (const selector of rule.selectors ?? []) {
 			for (const cls of classTokens(selector)) {
-				for (const [re, why] of CLASS_DENY) if (re.test(cls)) problems.push(`${label}: ${selector.slice(0, 100)} (${why})`);
+				for (const why of denyReasons(cls)) problems.push(`${label}: ${selector.slice(0, 100)} (${why})`);
 			}
 		}
 		rule.walkDecls((d) => {

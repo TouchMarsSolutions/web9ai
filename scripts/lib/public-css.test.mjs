@@ -1,22 +1,81 @@
+import { compile } from "tailwindcss";
 import { describe, expect, it } from "vitest";
 import { classTokens, classifySheets, extractJsonObject, readServerBundle, scanSheet } from "./public-css.mjs";
 
 const sheet = (css) => scanSheet({ label: "t.css", css });
+const hit = (selector, why) => `t.css: ${selector} (${why})`;
+const IMPORT_WHY = "a public stylesheet must not import other CSS";
 
 describe("scanSheet", () => {
 	it.each([
-		[".fixed{position:fixed}", 2],
-		[".md\\:fixed{position:fixed}", 2],
-		[".inset-0{inset:0}", 1],
-		[".-inset-x-2{left:-.5rem}", 1],
-		[".z-50{z-index:50}", 1],
-		[".h-screen{height:100vh}", 1],
-		[".min-h-dvh{min-height:100dvh}", 1],
-		[".h-\\[80vh\\]{height:80vh}", 1],
-		[".emdash-modal{position:fixed;inset:0}", 1],
-		[".\\[position\\:fixed\\]{position:fixed}", 1],
-		[":root{--color-bg:var(--lightningcss-light,#fff)var(--lightningcss-dark,#000)}", 1],
-	])("flags %s", (css, n) => expect(sheet(css)).toHaveLength(n));
+		[String.raw`.fixed{position:fixed}`, [hit(".fixed", "position:fixed utility"), hit(".fixed", "position:fixed")]],
+		[String.raw`.md\:fixed{position:fixed}`, [hit(String.raw`.md\:fixed`, "position:fixed utility"), hit(String.raw`.md\:fixed`, "position:fixed")]],
+		[String.raw`.inset-0{inset:0}`, [hit(".inset-0", "inset utility")]],
+		[String.raw`.-inset-x-2{left:-.5rem}`, [hit(".-inset-x-2", "inset utility")]],
+		[String.raw`.z-50{z-index:50}`, [hit(".z-50", "z-index utility")]],
+		[String.raw`.h-screen{height:100vh}`, [hit(".h-screen", "*-screen size utility")]],
+		[String.raw`.min-h-dvh{min-height:100dvh}`, [hit(".min-h-dvh", "viewport-unit size utility")]],
+		[String.raw`.h-\[80vh\]{height:80vh}`, [hit(String.raw`.h-\[80vh\]`, "arbitrary viewport-unit value")]],
+		[String.raw`.emdash-modal{position:fixed;inset:0}`, [hit(".emdash-modal", "position:fixed")]],
+		[
+			String.raw`.\[position\:fixed\]{position:fixed}`,
+			[hit(String.raw`.\[position\:fixed\]`, "arbitrary position:fixed property"), hit(String.raw`.\[position\:fixed\]`, "position:fixed")],
+		],
+		[
+			":root{--color-bg:var(--lightningcss-light,#fff)var(--lightningcss-dark,#000)}",
+			["t.css: :root uses --color-bg from a lowered light-dark() (theme B, spec §11)"],
+		],
+	])("flags %s", (css, expected) => expect(sheet(css)).toEqual(expected));
+
+	// Tailwind 4 appends `!` for the important modifier (`h-screen!`), and the old `!h-screen` form still compiles.
+	it.each([
+		[String.raw`.h-screen\!{height:100vh!important}`, [hit(String.raw`.h-screen\!`, "*-screen size utility")]],
+		[String.raw`.w-screen\!{width:100vw!important}`, [hit(String.raw`.w-screen\!`, "*-screen size utility")]],
+		[String.raw`.min-h-dvh\!{min-height:100dvh!important}`, [hit(String.raw`.min-h-dvh\!`, "viewport-unit size utility")]],
+		[String.raw`@media (min-width:768px){.md\:h-screen\!{height:100vh!important}}`, [hit(String.raw`.md\:h-screen\!`, "*-screen size utility")]],
+		[String.raw`.z-50\!{z-index:50!important}`, [hit(String.raw`.z-50\!`, "z-index utility")]],
+		[String.raw`.inset-0\!{inset:0!important}`, [hit(String.raw`.inset-0\!`, "inset utility")]],
+		[
+			String.raw`.\!fixed{position:fixed!important}`,
+			[hit(String.raw`.\!fixed`, "position:fixed utility"), hit(String.raw`.\!fixed`, "position:fixed")],
+		],
+	])("flags the important modifier: %s", (css, expected) => expect(sheet(css)).toEqual(expected));
+
+	// `[prop:value]` utilities: the colon sits inside the brackets, so it is not a variant separator.
+	it.each([
+		[String.raw`.\[z-index\:50\]{z-index:50}`, [hit(String.raw`.\[z-index\:50\]`, "arbitrary z-index property")]],
+		[String.raw`.\[inset\:0\]{inset:0}`, [hit(String.raw`.\[inset\:0\]`, "arbitrary inset property")]],
+		[String.raw`.\[top\:0\]{top:0}`, [hit(String.raw`.\[top\:0\]`, "arbitrary inset property")]],
+		[String.raw`.\[inset-inline\:0\]{inset-inline:0}`, [hit(String.raw`.\[inset-inline\:0\]`, "arbitrary inset property")]],
+		[String.raw`.\[height\:100vh\]{height:100vh}`, [hit(String.raw`.\[height\:100vh\]`, "arbitrary property with a viewport-unit value")]],
+		[String.raw`.\[min-height\:100DVH\]{min-height:100dvh}`, [hit(String.raw`.\[min-height\:100DVH\]`, "arbitrary property with a viewport-unit value")]],
+		[
+			String.raw`@media (min-width:768px){.md\:\[z-index\:9999\]{z-index:9999}}`,
+			[hit(String.raw`.md\:\[z-index\:9999\]`, "arbitrary z-index property")],
+		],
+		[String.raw`.\[z-index\:50\]\!{z-index:50!important}`, [hit(String.raw`.\[z-index\:50\]\!`, "arbitrary z-index property")]],
+	])("flags the arbitrary property: %s", (css, expected) => expect(sheet(css)).toEqual(expected));
+
+	// `\b` fails before `_` (Tailwind's space), the unit is case-insensitive, and vmin/vmax/dvmin exist.
+	it.each([
+		[String.raw`.h-\[calc\(100vh_-_4rem\)\]{height:calc(100vh - 4rem)}`, String.raw`.h-\[calc\(100vh_-_4rem\)\]`],
+		[String.raw`.shadow-\[0_0_0_100vmax_black\]{box-shadow:0 0 0 100vmax black}`, String.raw`.shadow-\[0_0_0_100vmax_black\]`],
+		[String.raw`.h-\[100VH\]{height:100vh}`, String.raw`.h-\[100VH\]`],
+		[String.raw`.h-\[100dvmin\]{height:100dvmin}`, String.raw`.h-\[100dvmin\]`],
+		[String.raw`.w-\[50svw\]{width:50svw}`, String.raw`.w-\[50svw\]`],
+		[String.raw`.max-h-\[100lvh\]{max-height:100lvh}`, String.raw`.max-h-\[100lvh\]`],
+		[String.raw`.size-\[50vi\]{width:50vi}`, String.raw`.size-\[50vi\]`],
+		[String.raw`.h-\[1\.5vb\]{height:1.5vb}`, String.raw`.h-\[1\.5vb\]`],
+		[String.raw`.md\:h-\[calc\(100dvh-1px\)\]{height:calc(100dvh - 1px)}`, String.raw`.md\:h-\[calc\(100dvh-1px\)\]`],
+	])("flags the arbitrary value: %s", (css, selector) => expect(sheet(css)).toEqual([hit(selector, "arbitrary viewport-unit value")]));
+
+	it.each([
+		[String.raw`@import url(/_astro/styles.qJevY_AE.css);.a{color:red}`, [hit("@import url(/_astro/styles.qJevY_AE.css)", IMPORT_WHY)]],
+		[String.raw`@import "other.css" layer(base);`, [hit('@import "other.css" layer(base)', IMPORT_WHY)]],
+		[String.raw`@IMPORT url(x.css);`, [hit("@IMPORT url(x.css)", IMPORT_WHY)]],
+		[String.raw`@layer base{.a{color:red}}@import url(x.css);`, [hit("@import url(x.css)", IMPORT_WHY)]],
+	])("rejects @import: %s", (css, expected) => expect(sheet(css)).toEqual(expected));
+
 	it.each([
 		[".text-brand{color:var(--color-brand)}"],
 		[".site-header{position:sticky;top:0;z-index:100}"],
@@ -24,12 +83,64 @@ describe("scanSheet", () => {
 		[".size-full{width:100%;height:100%}"],
 		[".max-w-\\[1200px\\]{max-width:1200px}"],
 		[":root{--lightningcss-light:initial;--lightningcss-dark: ;color-scheme:light}"],
+		[String.raw`.md\:flex\!{display:flex!important}`],
+		[String.raw`.h-\[calc\(1px_\+_2rem\)\]{height:calc(1px + 2rem)}`],
+		[String.raw`.w-\[10\%\]{width:10%}`],
+		[String.raw`.\[color\:red\]{color:red}`],
+		[String.raw`.\[--gap\:1rem\]{--gap:1rem}`],
+		[String.raw`.\[position\:sticky\]{position:sticky}`],
+		[String.raw`.h-\[10vhx\]{height:1px}`],
+		[String.raw`.has-\[\:checked\]\:flex:has(:checked){display:flex}`],
+		["@font-face{font-family:x;src:url(/fonts/x.woff2)}"],
 	])("allows %s", (css) => expect(sheet(css)).toEqual([]));
+});
+
+// The selectors above are written by hand; this one asks the pinned Tailwind what it really emits for each class.
+describe("scanSheet on Tailwind's own output", () => {
+	const THEME = "@theme { --spacing: .25rem; --breakpoint-sm: 40rem; --breakpoint-md: 48rem; } @tailwind utilities;";
+	const emit = async (cls) => (await compile(THEME)).build([cls]);
+	const flaggedOf = async (classes) => {
+		const out = [];
+		for (const cls of classes) if (scanSheet({ label: "tw", css: await emit(cls) }).length) out.push(cls);
+		return out;
+	};
+	const OVERLAY = [
+		"fixed", "md:fixed", "sm:md:fixed", "data-[state=open]:fixed", "[&_p]:fixed", "[position:fixed]",
+		"inset-0", "-inset-x-2", "inset-y-px", "!inset-0", "max-md:inset-0", "peer-checked:inset-0",
+		"z-50", "-z-10", "z-[999]", "group-hover:z-50", "has-[:checked]:z-50",
+		"h-screen", "w-screen", "min-h-screen", "max-h-screen", "h-screen!", "w-screen!", "!h-screen", "md:h-screen!",
+		"w-dvw", "h-svh", "h-lvh", "min-h-dvh", "min-h-dvh!", "sm:h-dvh!",
+		"h-[80vh]", "h-[100VH]", "h-[100dvmin]", "h-[calc(100vh_-_4rem)]", "w-[calc(100%+100vw)]", "top-[100vh]", "md:top-[100vh]",
+		"shadow-[0_0_0_100vmax_black]",
+		"[z-index:50]", "md:[z-index:9999]", "[inset:0]", "[inset-inline:0]", "[top:0]", "[left:-5px]", "[height:100vh]", "hover:[inset:0]!",
+	];
+	const HARMLESS = ["flex", "md:flex!", "p-4", "h-full", "size-full", "sticky", "absolute", "h-[3rem]", "w-[10%]", "[color:red]", "[--gap:1rem]"];
+
+	it("flags every overlay class", async () => expect(await flaggedOf(OVERLAY)).toEqual(OVERLAY));
+	it("leaves harmless classes alone, and each of them does emit CSS", async () => {
+		expect(await flaggedOf(HARMLESS)).toEqual([]);
+		const silent = [];
+		for (const cls of HARMLESS) if (!(await emit(cls))) silent.push(cls);
+		expect(silent).toEqual([]);
+	});
 });
 
 describe("classTokens", () => {
 	it("unescapes and drops variants", () => {
 		expect(classTokens(".sm\\:h-16 .aria-pressed\\:bg-bg:hover")).toEqual(["h-16", "bg-bg"]);
+	});
+	it("drops the important modifier, trailing or leading", () => {
+		expect(classTokens(String.raw`.md\:h-screen\! .\!fixed .min-h-dvh\!`)).toEqual(["h-screen", "fixed", "min-h-dvh"]);
+	});
+	it("keeps an arbitrary property whole, with or without variants", () => {
+		expect(classTokens(String.raw`.\[z-index\:50\] .md\:\[z-index\:9999\] .hover\:\[inset\:0\]\!:hover`)).toEqual([
+			"[z-index:50]",
+			"[z-index:9999]",
+			"[inset:0]",
+		]);
+	});
+	it("ignores colons inside brackets when dropping variants", () => {
+		expect(classTokens(String.raw`.has-\[\:checked\]\:fixed .data-\[state\=open\]\:z-50`)).toEqual(["fixed", "z-50"]);
 	});
 });
 
@@ -85,6 +196,11 @@ describe("classifySheets", () => {
 			urlImports: [{ source: "node_modules/emdash/src/x.css", file: "_astro/x.css" }],
 			clientCss: new Map([["_astro/Base.css", ""], ["_astro/x.css", ".fixed{}"]]),
 		});
-		expect(out.sheets.map((s) => s.label)).toContain("_astro/x.css");
+		expect(out.errors).toEqual([]);
+		expect(out.report).toEqual([
+			["_astro/Base.css", "public (loaded by a public route)"],
+			["_astro/x.css", "public (?url import of node_modules/emdash/src/x.css)"],
+		]);
+		expect(out.sheets.map((s) => s.label)).toEqual(["_astro/Base.css", "inline style of /", "_astro/x.css"]);
 	});
 });
