@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.22.0"
+  },
   "emdash": {
     "label": "Web9.AI",
     "seed": "seed/seed.json"
