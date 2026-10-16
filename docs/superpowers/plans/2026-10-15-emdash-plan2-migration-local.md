@@ -21,7 +21,7 @@
 - Tailwind `4.3.3`、`@tailwindcss/vite 4.3.3`、`@tailwindcss/typography 0.5.20`，版本写死。
 - `astro.config.mjs` 里固定 `site: "https://www.web9.ai"`。绝对 URL 一律从 `Astro.site`（API route 里是 `site`）拼，不能用请求的 Host 或 `Astro.url`。
 - i18n：`en` 是默认语言、不加前缀；`zh-CN` 加前缀，fallback 到 `en`。
-- 不启用 sandboxed 插件（免费套餐）。
+- 不启用 sandboxed 插件。（spec §1 原来写"免费套餐即可"；写计划时量到 worker 压缩后约 4.9 MiB，超过免费套餐 3 MiB 的上限，见 Task 15 Step 1。选套餐是计划 3 的事，本计划不为体积改代码。）
 - doc 正文一律是 `portableText` 字段 + 内联块，**不用 `blocks` 字段**。`blocks` 字段只有 `pages.layout` 一个。
 - `packages/web9-blocks/lib/markdown.mjs` 的 class / style 白名单**不能放宽**（`SAFE_VALUE` 只能收紧）。新增的 `sanitizeHtmlFragment` 不保留任何 `class`、`id`、`data-*`、`style`。
 - 内容 HTML 不带 utility class。不用 `dark:` variant。Task 4 之后 `src/`、`packages/` 里不再出现 `light-dark(`；明暗切换靠 `:root.light` / `:root.dark` 显式 token（方案 B，owner 2026-10-15 定）。
@@ -42,7 +42,7 @@
   - `grep` 是 ugrep，复杂正则要用 `command grep`；glob 要加引号（`--include='*.mjs'`）；
   - `sed -i ''` 会报错，原地改文件用 node 或 python；
   - zsh 不会对变量做 word-split。
-- 浏览器只能通过 CDP（localhost:9222）操作**已经打开**的 Chrome 标签页：`list_pages` → `select_page` → `navigate_page`。不准开新标签页或新的 Chrome 实例，不准 `new_page`、`close_page`，不准从 Bash 启动 Chrome；没有合适的标签页就请用户去打开。用户的 localhost 标签页是 page 8。
+- 浏览器只能通过 CDP（localhost:9222）操作**已经打开**的 Chrome 标签页：`list_pages` → `select_page` → `navigate_page`。不准开新标签页或新的 Chrome 实例，不准 `new_page`、`close_page`，不准从 Bash 启动 Chrome；没有合适的标签页就请用户去打开。写计划时用户的 localhost 标签页是 page 8，但页码会变：执行时先 `list_pages`，用 URL 是 `localhost:4321` 的那个标签页（下文写的 "page 8" 都指它）。
 - 每个 commit message 末尾加两行：
   ```
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
@@ -6096,20 +6096,17 @@ Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
 
 - [ ] **Step 8: 模拟一次 CI（浅克隆 + Node 22）**
 
-CI 是 `actions/checkout` 的浅克隆（`posts.test.mjs` 读 git 历史的那组会跳过），Node 22，没有 `.wrangler/`、`.dev.vars`、`.local/`。在一个临时目录里重现：
+CI 是 `actions/checkout` 的浅克隆（`posts.test.mjs` 读 git 历史的那组会跳过），Node 22，没有 `.wrangler/`、`.dev.vars`、`.local/`。本机的 node 是 24，所以整个过程（包括 `npm ci`）都放在 node@22 下面跑：`npx -p node@22 -c` 把 Node 22 放在 PATH 最前面，和 `setup-node` 的效果一样（写计划时试过：`v22.23.3`，`npm` 也跑在它上面）。在一个临时目录里重现：
 
 ```bash
 CI_DIR=$(mktemp -d)
 git clone --depth 1 --branch "$(git branch --show-current)" "file://$PWD" "$CI_DIR/web9ai"
 cd "$CI_DIR/web9ai"
-npm ci
-npx -y -p node@22 node --version
-npx -y -p node@22 node node_modules/vitest/vitest.mjs run
-npx -y -p node@22 node node_modules/astro/bin/astro.mjs build && npx -y -p node@22 node scripts/check-public-css.mjs
+npx -y -p node@22 -c 'node --version && npm ci && npm test && npm run build'
 cd /Users/john/git/web9ai && rm -rf "$CI_DIR"
 ```
 
-Expected：`node --version` 是 `v22.x`；vitest PASS，并且 `postPayloads on legacy/blog` 那组显示为 skipped；构建和 CSS 检查都通过。如果 `npx -p node@22` 下载不了（离线），用本机的 node 跑同样三条命令，并在任务报告里写明没有在 Node 22 上验证。
+Expected：第一行是 `v22.x`；`npm test` PASS，并且 `postPayloads on legacy/blog` 那组显示为 skipped；`npm run build` 成功，`postbuild` 的 CSS 检查通过。如果 `npx -p node@22` 下载不了（离线），去掉 `npx -y -p node@22 -c` 用本机 node 跑引号里的命令，并在任务报告里写明没有在 Node 22 上验证。
 
 ---
 
@@ -6138,13 +6135,13 @@ npm run typecheck
 
 Expected：`npm test` PASS（其中 Task 4 的主题测试保证站点 CSS 里没有 `light-dark(`）；`npm run build` 成功并且 `check-public-css` PASS（遮罩类 utility、被降级的 `light-dark()`）；`npm run typecheck` 0 errors。
 
-worker 体积（只在本地量，不调用 wrangler，不联网）：
+worker 体积。`--dry-run` 只在本地打包、打印大小，不登录、不上传（写计划时试过）；输出放进被 ignore 的 `.local/`：
 
 ```bash
-node -e 'const fs=require("fs"),z=require("zlib"),p=require("path");let raw=0,gz=0;(function w(d){for(const f of fs.readdirSync(d)){const q=p.join(d,f);if(fs.statSync(q).isDirectory())w(q);else if(/\.(m?js|wasm)$/.test(f)){const b=fs.readFileSync(q);raw+=b.length;gz+=z.gzipSync(b).length}}})("dist/server");console.log({rawKiB:raw>>10,gzipKiB:gz>>10})'
+npx wrangler deploy --dry-run --outdir .local/worker-dry 2>&1 | command grep 'Total Upload'
 ```
 
-Expected：打印两个数，记进任务报告和 spec §9（计划 3 要用）。这个 gzip 是逐个文件压缩后相加，比 wrangler 打包后的单个 bundle 偏大。Workers 免费套餐的上限是压缩后 3 MiB：`gzipKiB` 超过 3072 时**停下来报告**，计划 3 需要先决定（拆分、换付费套餐）。
+Expected：一行 `Total Upload: … KiB / gzip: … KiB`，两个数记进任务报告和 spec（Step 6）。写计划时对计划 1 的构建量到的是 `Total Upload: 19126.34 KiB / gzip: 5022.42 KiB`（650 个 module）。Workers 压缩后的上限是免费套餐 3 MiB、付费套餐 10 MiB，所以**超过 3 MiB 是已知的**，不阻塞本计划（本地 dev 没有这个限制），由 owner 在计划 3 决定套餐。只有 gzip 超过 10240 KiB（付费套餐也放不下）才停下来报告。如果 wrangler 要求登录或联网失败，跳过这一步，在报告里写明。
 
 - [ ] **Step 2: ⏹ 🚦 从空库完整迁移**
 
@@ -6201,7 +6198,7 @@ node scripts/check-page.mjs http://localhost:4321/ 'emdash-webmcp-search'
 
 Expected：两个 `check-page` 通过；循环只打印 `done`；`search` 结果里有 `tools-summary`；首页有 `emdash-webmcp-search`。
 
-- [ ] **Step 5: 浏览器验收（CDP，page 8）**
+- [ ] **Step 5: 浏览器验收（CDP，localhost 标签页）**
 
 库重建过，先让 page 8 重新登录：`navigate_page` 到 `http://localhost:4321/_emdash/api/auth/dev-bypass?redirect=/`。然后逐页 `navigate_page` + `take_screenshot`，并用 `list_console_messages` 确认没有错误：
 
@@ -6227,7 +6224,8 @@ Expected：两个 `check-page` 通过；循环只打印 `done`；`search` 结果
 spec：
 - 开头的 "分支：`emdash`……" 换成 "分支：`main`（计划 1 的 PR #2 已合并；计划 2 在 `plan2` 分支）"，下面加一行 "进度：计划 1 完成（2026-10-15）；计划 2 完成（本地迁移和安全关口，YYYY-MM-DD）；计划 3（部署、生产迁移、切换）未开始"，日期填当天。
 - §1 "当前状态：`emdash` 分支在 Node 环境下……" 换成 "当前状态（计划 2 结束）：本地 workerd dev 里完整迁移可从空库重复（`node scripts/migrate.mjs all`，第二次 0 写入）；`npm test`、`npm run build`（含公开 CSS 检查）、`npm run typecheck` 通过；CI 跑测试和构建。"
-- §9 末尾加 "worker 体积（计划 2 Task 15，本地逐文件 gzip 相加）：raw … KiB，gzip … KiB"，填 Step 1 的数字。
+- §1 "不启用 sandboxed 插件，免费套餐即可。" 换成 "不启用 sandboxed 插件。**待定（owner，计划 3）**：worker 压缩后 … KiB（计划 2 Task 15，`wrangler deploy --dry-run`），超过 Workers 免费套餐 3 MiB 的上限：用付费套餐（上限 10 MiB），或者先查能不能裁剪。"，填 Step 1 的 gzip 数字。
+- §9 末尾加 "worker 体积（计划 2 Task 15，`wrangler deploy --dry-run`）：Total Upload … KiB，gzip … KiB"，填 Step 1 的数字。
 
 `CLAUDE.md` 的 Commands 里，`MCP from the shell` 那一行后面加：
 
@@ -6265,7 +6263,7 @@ Expected：`git status --short` 没有输出（`.local/`、`.wrangler/`、`dist/
 
 不在本计划内。按顺序：
 
-1. **部署配置**：`wrangler.jsonc` 里 D1 的 `database_id`（或确认 wrangler 自动创建）、R2 bucket、adapter 注入的 KV `SESSION` 和 `IMAGES` binding；对照 Task 15 量出来的 worker 体积和免费套餐上限；用 workerd 跑一次构建产物。
+1. **部署配置**：`wrangler.jsonc` 里 D1 的 `database_id`（或确认 wrangler 自动创建）、R2 bucket、adapter 注入的 KV `SESSION` 和 `IMAGES` binding；**先决定套餐**：worker 压缩后约 4.9 MiB（Task 15 的 `wrangler deploy --dry-run`），超过免费套餐 3 MiB，owner 选付费套餐（10 MiB）或者先查能不能裁剪；用 workerd 跑一次构建产物。
 2. **Workers Builds**：连接仓库，生产分支 `main`，构建命令 `npm run build`（`postbuild` 的 CSS 检查失败会挡住部署）。在第一次推 `main` 以外的分支之前，确认预览版本是否和生产共用 D1/R2（spec §9 待验证）。首次部署前备份 `EMDASH_ENCRYPTION_KEY`。在 `*.workers.dev` 上验证。
 3. **生产首次启动**：空 D1 上 EmDash 自动应用 seed（块类型、字段、tag terms、`settings.url`）。如果生产库不是从空库建的，先 `schema_create_field` 补 `search_text`，再上线带 hook 的插件（hook 的 `errorPolicy` 是 abort）。
 4. **生产迁移**：owner 建管理员账号（passkey），拿 admin token；`EMDASH_URL=https://<worker>.workers.dev EMDASH_TOKEN=<admin token> node scripts/migrate.mjs all`，再跑一次确认 0 写入，再 `verify`（`verify` 也读 `EMDASH_URL`）。
@@ -6285,3 +6283,6 @@ Expected：`git status --short` 没有输出（`.local/`、`.wrangler/`、`dist/
 - 模板 token `text-on-brand`（白）配深色的 `bg-brand`（`#4d9fff`）对比度约 2.9:1，首页按钮在深色主题下偏淡；改 token 是以后样式计划的事。
 - 草稿 `ai-tiny-course` 以后发布时，如果 `publishedAt` 是空的，要传 `2025-03-08T00:19:14Z`（Task 10 Step 6 记录实际情况）。
 - 搜索只搜当前语言（已写进 spec §4）。
+- worker 压缩后约 4.9 MiB，超过免费套餐上限（计划 3 第 1 步决定）。
+- `upsertEntry` 不比较 taxonomy（`content_get` 不返回它们）：只改了 post 的 tag，runner 会报 `unchanged`，不会更新。要改 tag 就在后台或用 MCP 直接改。
+- `/zh-CN/blog/rss.xml`、`/zh-CN/blog/atom.xml` 没有重定向（只有 en 的两条，在 `astro.config.mjs`）；切换后看 404 日志再决定。
