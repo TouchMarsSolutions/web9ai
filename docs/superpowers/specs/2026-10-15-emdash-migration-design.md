@@ -124,7 +124,7 @@
   3. 对生产环境跑迁移；
   4. 把 `emdash` 合并到 `main`，再把 Worker 的生产分支改成 `main`；
   5. 在 Worker 上绑定 `www.web9.ai` custom domain（DNS 已经在 Cloudflare），apex 重定向到 www；
-  6. GitHub Pages 保留作为回退：`gh-pages` 分支还在，可以随时把 DNS 切回去。确认稳定后再关闭。
+  6. GitHub Pages 保留作为回退：回退靠的是 `gh-pages` 分支上**已经构建好的产物**（Pages 设置：source `gh-pages`，custom domain `www.web9.ai`），可以随时把 DNS 切回去。确认稳定后再关闭。`legacy/` **不能**重新构建出线上站点（静态资源已经移到 `public/`），不要从它重新部署到 `gh-pages`。原来的 `static/CNAME` 和 `deploy.yml` 已放回 `legacy/static/` 和 `legacy/.github/workflows/`，只作记录，workflow 不会运行。
 - **待验证（切换后）**：Workers 的预览版本是否和生产共用 D1/R2 binding。如果共用，就加一个 staging environment，使用独立的 D1 和 R2，再开启分支预览。
 - **待验证**：D1 和 R2 是由 wrangler 在部署时自动创建，还是需要先手动创建。另外，adapter 还会注入 KV `SESSION` binding 和 `IMAGES` binding（`wrangler.jsonc` 里没有），`d1_databases` 里也还没有 `database_id`：首次部署前都要配置好或做出决定。
 - 备份：首次部署前备份 `EMDASH_ENCRYPTION_KEY`；定时导出 D1，再定期通过 MCP `site_export` 做整站导出。
