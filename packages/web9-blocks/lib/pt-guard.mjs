@@ -23,6 +23,12 @@
 // tool_grid tools[].url and tools[].logo (astro/ToolGrid.astro:29, :34).
 // Image values (an `image` field, `darkVariant`, PT image and gallery images) are checked for the colour and
 // blurhash fields that core renderers paste into style or decode: a blurhash that does not decode throws.
+// Size caps, because the renderers are not linear in them: @portabletext/toolkit's buildMarksTree nests one
+// component per mark (3000 marks on a span overflow the stack), and its sortMarksByOccurences is O(n²) in a
+// block's children (20k spans = 12 s of CPU). So a span has at most MAX_MARKS marks and a block at most
+// MAX_CHILDREN children. `_key` reaches template strings (`${_key}-group` in emdash
+// portable-text-blockquote-group.ts:60), which throw for an object without a callable toString, so a `_key`
+// must be a string when present on every node checked here.
 import { blurhashToImageCssString } from "@unpic/placeholder";
 
 const COLOR = /^(?:#[0-9a-f]{3,8}|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(?:,\s*(?:0|1|0?\.\d+)\s*)?\))$/i;
@@ -143,9 +149,17 @@ const LIST_ITEMS = new Set(["bullet", "number", "menu"]);
 // Decorators the editor emits (emdash content/converters/mark-safety.ts) and renders (components/marks.ts).
 const DECORATORS = new Set(["strong", "em", "underline", "strike-through", "subscript", "superscript", "code"]);
 const MAX_LIST_LEVEL = 20;
+const MAX_MARKS = 20;
+const MAX_CHILDREN = 1000;
+
+/** `_key` may be absent (undefined or null); when present it must be a string. */
+function checkKey(node, where, field, out) {
+	if (node._key != null && typeof node._key !== "string") out.add(notAllowed(where, field, node._key));
+}
 
 /** Block children are rendered as custom types, so anything but a plain span is a way past the type check. */
 function checkBlock(node, where, out) {
+	checkKey(node, where, "_key", out);
 	if (node.style != null && !BLOCK_STYLES.has(node.style)) out.add(notAllowed(where, "style", node.style));
 	if (node.listItem != null && !LIST_ITEMS.has(node.listItem)) out.add(notAllowed(where, "listItem", node.listItem));
 	if (node.level != null && !integerIn(1, MAX_LIST_LEVEL)(node.level)) out.add(notAllowed(where, "level", node.level));
@@ -167,6 +181,7 @@ function checkBlock(node, where, out) {
 
 	if (node.children === undefined) return;
 	if (!Array.isArray(node.children)) return out.add(`${where} children: must be an array of spans`);
+	if (node.children.length > MAX_CHILDREN) return out.add(`${where} children: at most ${MAX_CHILDREN} spans are allowed`);
 	for (let j = 0; j < node.children.length && !out.full; j++) {
 		const child = node.children[j];
 		const type = typeof child?._type === "string" ? child._type : "(no _type)";
@@ -174,10 +189,15 @@ function checkBlock(node, where, out) {
 			out.add(`${where} children[${j}] ${type}: only spans are allowed inside a block`);
 			continue;
 		}
+		checkKey(child, where, `children[${j}]._key`, out);
 		if (child.children !== undefined && child.children !== null) out.add(`${where} children[${j}] span: a span must not have children`);
 		if (child.marks == null) continue;
 		if (!Array.isArray(child.marks)) {
 			out.add(`${where} children[${j}].marks: must be an array`);
+			continue;
+		}
+		if (child.marks.length > MAX_MARKS) {
+			out.add(`${where} children[${j}].marks: at most ${MAX_MARKS} marks are allowed`);
 			continue;
 		}
 		for (let m = 0; m < child.marks.length && !out.full; m++) {
@@ -237,7 +257,10 @@ export function guardPortableText(value) {
 		}
 		// astro-portabletext treats any node with a children array as a block and renders those children inline
 		if (type === "block") checkBlock(node, `#${i} block`, out);
-		else if (node.children !== undefined && node.children !== null) out.add(`#${i} ${type} children: only a block may have children`);
+		else {
+			checkKey(node, `#${i} ${type}`, "_key", out);
+			if (node.children !== undefined && node.children !== null) out.add(`#${i} ${type} children: only a block may have children`);
+		}
 		if (type === "columns") checkColumns(node, i, out);
 		checkContainers(node, type, i, out);
 		checkRules(node, RULES[type], `#${i} ${type} `, out);

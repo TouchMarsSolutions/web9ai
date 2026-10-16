@@ -17,34 +17,29 @@ const c1 = {
 	],
 };
 const withContent = (content) => ({ name: "footer", widgets: [{ id: "w", type: "content", title: "x", content }] });
+// Seed widgets carry `props`; applySeed stores them as component_props, read back as componentProps
+const stored = (a) => ({ ...a, widgets: a.widgets.map(({ props, ...w }) => (props ? { ...w, componentProps: props } : w)) });
 
 describe("widgetAreaIsSafe", () => {
-	it("passes the seed's sidebar (component widgets) and the empty footer", () => {
+	it("passes the seed's sidebar (component widgets, as stored) and the empty footer", () => {
 		expect(area("sidebar").widgets.length).toBeGreaterThan(0);
-		expect(widgetAreaIsSafe(area("sidebar"))).toBe(true);
+		expect(stored(area("sidebar")).widgets.filter((w) => w.componentProps)).toHaveLength(2);
+		expect(widgetAreaIsSafe(stored(area("sidebar")))).toBe(true);
 		expect(area("footer").widgets).toEqual([]);
 		expect(widgetAreaIsSafe(area("footer"))).toBe(true);
 	});
-	it("passes a missing area and widgets without content", () => {
+	it("passes a missing area and a menu widget", () => {
 		expect(widgetAreaIsSafe(null)).toBe(true);
 		expect(widgetAreaIsSafe(undefined)).toBe(true);
 		expect(widgetAreaIsSafe({ name: "x", widgets: [{ id: "m", type: "menu", menuName: "primary" }] })).toBe(true);
-		expect(widgetAreaIsSafe(withContent(undefined))).toBe(true);
-		expect(widgetAreaIsSafe(withContent(null))).toBe(true);
 	});
-	it("passes a content widget holding a normal paragraph", () => {
-		expect(widgetAreaIsSafe(withContent([paragraph]))).toBe(true);
-	});
-	it("rejects a content widget holding the inline-object payload", () => {
+	it("never renders a content widget, whatever it holds (use a doc or page instead)", () => {
+		expect(widgetAreaIsSafe(withContent([paragraph]))).toBe(false);
+		expect(widgetAreaIsSafe(withContent([]))).toBe(false);
+		expect(widgetAreaIsSafe(withContent(undefined))).toBe(false);
+		expect(widgetAreaIsSafe(withContent(null))).toBe(false);
 		expect(widgetAreaIsSafe(withContent([c1]))).toBe(false);
-		expect(widgetAreaIsSafe(withContent([{ _type: "htmlBlock", _key: "h", html: "<b>x</b>" }]))).toBe(false);
-	});
-	it("rejects a content widget whose content is not an array", () => {
-		expect(widgetAreaIsSafe(withContent("<script>alert(1)</script>"))).toBe(false);
-		expect(widgetAreaIsSafe(withContent({ _type: "block", children: [] }))).toBe(false);
-	});
-	it("fails the whole area when one content widget is unsafe", () => {
-		expect(widgetAreaIsSafe({ name: "x", widgets: [{ id: "a", type: "content", content: [paragraph] }, { id: "b", type: "content", content: [c1] }] })).toBe(false);
+		expect(widgetAreaIsSafe({ widgets: [...stored(area("sidebar")).widgets, { id: "w", type: "content", content: [paragraph] }] })).toBe(false);
 	});
 	it("accepts the five core component ids and a menu with a name", () => {
 		for (const componentId of ["core:recent-posts", "core:categories", "core:tags", "core:search", "core:archives"]) {
@@ -65,32 +60,11 @@ describe("widgetAreaIsSafe", () => {
 		for (const menuName of [5, ["primary"], {}, true]) expect(widgetAreaIsSafe({ widgets: [{ id: "m", type: "menu", menuName }] })).toBe(false);
 	});
 	it("fails the whole area when one widget is bad among good ones", () => {
-		expect(widgetAreaIsSafe({ widgets: [...area("sidebar").widgets, { id: "x", type: "component", componentId: "constructor" }] })).toBe(false);
+		expect(widgetAreaIsSafe({ widgets: [...stored(area("sidebar")).widgets, { id: "x", type: "component", componentId: "constructor" }] })).toBe(false);
 	});
 	it("allows a menu widget without a menuName (the admin palette creates it that way)", () => {
 		expect(widgetAreaIsSafe({ widgets: [{ id: "m", type: "menu" }] })).toBe(true);
 		expect(widgetAreaIsSafe({ widgets: [{ id: "m", type: "menu", menuName: null }] })).toBe(true);
-	});
-	it("allows only blocks in a content widget, each passing the block rules", () => {
-		const link = { _type: "block", _key: "l", style: "normal", markDefs: [{ _type: "link", _key: "k1", href: "https://example.com" }], children: [{ _type: "span", _key: "s", text: "a", marks: ["k1"] }] };
-		expect(widgetAreaIsSafe(withContent([paragraph, link]))).toBe(true);
-		for (const node of [
-			{ _type: "buttons", _key: "b", buttons: null },
-			{ _type: "tabs", _key: "t", tabs: [null] },
-			{ _type: "callout", _key: "c", tone: "tip", title: "t", body: "b" },
-			{ _type: "tool_grid", _key: "g", tools: [] },
-			{ _type: "image", _key: "i", asset: { _ref: "x" } },
-			{ _type: "code", _key: "k", language: "js", code: "x" },
-			{ _type: "table", _key: "t", rows: [] },
-			{ _type: "break", _key: "b" },
-			{ _type: "constructor", markDefs: [null] },
-			{ _key: "x", markDefs: [null] },
-			null,
-			"text",
-		]) {
-			expect(widgetAreaIsSafe(withContent([paragraph, node]))).toBe(false);
-		}
-		expect(widgetAreaIsSafe(withContent([{ ...paragraph, style: "constructor" }]))).toBe(false);
 	});
 	it("checks componentProps against the props each core component declares", () => {
 		const component = (componentId, componentProps) => ({ widgets: [{ id: "c", type: "component", componentId, componentProps }] });
@@ -115,20 +89,31 @@ describe("widgetAreaIsSafe", () => {
 		expect(widgetAreaIsSafe(component("core:archives", { type: "constructor" }))).toBe(false);
 		expect(widgetAreaIsSafe(component("core:archives", { type: "yearly", limit: 6 }))).toBe(true);
 	});
-	it("ignores unknown props and absent componentProps", () => {
+	it("rejects componentProps keys the component does not declare (Astro reads some keys before the component runs)", () => {
+		const component = (componentProps) => ({ widgets: [{ id: "c", type: "component", componentId: "core:search", componentProps }] });
+		expect(widgetAreaIsSafe(component({ "server:component-directive": "defer" }))).toBe(false);
+		expect(widgetAreaIsSafe(component({ "client:load": true }))).toBe(false);
+		expect(widgetAreaIsSafe(component({ somethingElse: { nested: [1] } }))).toBe(false);
+		expect(widgetAreaIsSafe(component({ placeholder: "Find", extra: 1 }))).toBe(false);
+		expect(widgetAreaIsSafe(component({ count: 5 }))).toBe(false);
+		expect(widgetAreaIsSafe(component(JSON.parse('{"__proto__":{"placeholder":"x"}}')))).toBe(false);
+		expect(widgetAreaIsSafe(component({ constructor: "x" }))).toBe(false);
+	});
+	it("passes absent, null and empty componentProps", () => {
 		const component = (componentProps) => ({ widgets: [{ id: "c", type: "component", componentId: "core:search", componentProps }] });
 		expect(widgetAreaIsSafe(component(undefined))).toBe(true);
 		expect(widgetAreaIsSafe(component(null))).toBe(true);
 		expect(widgetAreaIsSafe(component({}))).toBe(true);
-		expect(widgetAreaIsSafe(component({ somethingElse: { nested: [1] } }))).toBe(true);
 	});
 	it("fails closed instead of throwing", () => {
-		const marks = Array(125000).fill(0);
-		const huge = { _type: "block", _key: "p", style: "normal", markDefs: [], children: [{ _type: "span", _key: "s", text: "a", marks }] };
+		const boom = () => {
+			throw new Error("boom");
+		};
 		let result;
-		expect(() => (result = widgetAreaIsSafe(withContent([huge])))).not.toThrow();
+		expect(() => (result = widgetAreaIsSafe({ get widgets() { return boom(); } }))).not.toThrow();
 		expect(result).toBe(false);
-		expect(widgetAreaIsSafe({ get widgets() { throw new Error("boom"); } })).toBe(false);
+		expect(widgetAreaIsSafe({ widgets: [{ id: "x", get type() { return boom(); } }] })).toBe(false);
+		expect(widgetAreaIsSafe({ widgets: [{ id: "c", type: "component", componentId: "core:search", componentProps: { get placeholder() { return boom(); } } }] })).toBe(false);
 		expect(widgetAreaIsSafe({ widgets: "not an array" })).toBe(false);
 	});
 });

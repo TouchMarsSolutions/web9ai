@@ -350,20 +350,27 @@ describe("guardPortableText: converter output", () => {
 
 describe("guardPortableText: bounded output", () => {
 	const MORE = "…and more";
-	it("does not throw on a span with 125k bad marks and returns at most 50 problems plus a final entry", () => {
+	it("does not throw on a span with 125k bad marks and reports the marks cap only", () => {
 		const blocks = [para({ children: [span("a", Array(125000).fill(0))] })];
 		let problems;
 		expect(() => (problems = guardPortableText(blocks))).not.toThrow();
-		expect(problems).toHaveLength(51);
-		expect(problems[0]).toBe(notAllowed("#0 block", "children[0].marks", 0));
-		expect(problems[50]).toBe(MORE);
+		expect(problems).toEqual(["#0 block children[0].marks: at most 20 marks are allowed"]);
 	});
-	it("does not throw on 200k bad children", () => {
+	it("does not throw on 200k bad children and reports the children cap only", () => {
 		const blocks = [para({ children: Array.from({ length: 200000 }, () => ({ _type: "cover", _key: "c" })) })];
 		let problems;
 		expect(() => (problems = guardPortableText(blocks))).not.toThrow();
-		expect(problems.length).toBeLessThanOrEqual(51);
-		expect(problems.at(-1)).toBe(MORE);
+		expect(problems).toEqual(["#0 block children: at most 1000 spans are allowed"]);
+	});
+	it("returns at most 50 problems plus a final entry for bad marks and children within the caps", () => {
+		const marks = [para({ children: Array.from({ length: 1000 }, () => span("a", Array(20).fill(0))) })];
+		const children = [para({ children: Array.from({ length: 1000 }, () => ({ _type: "cover", _key: "c" })) })];
+		for (const blocks of [marks, children]) {
+			const problems = guardPortableText(blocks);
+			expect(problems).toHaveLength(51);
+			expect(problems[50]).toBe(MORE);
+		}
+		expect(guardPortableText(marks)[0]).toBe(notAllowed("#0 block", "children[0].marks", 0));
 	});
 	it("does not throw on 200k bad top-level nodes, markDefs, container blocks or gallery images", () => {
 		const bad = (n, make) => Array.from({ length: n }, make);
@@ -416,5 +423,40 @@ describe("guardPortableText: string urls (sanitizeHref throws on non-strings)", 
 			"#0 tool_grid tools[].url: value 5 is not allowed",
 			"#0 tool_grid tools[].logo: value {} is not allowed",
 		]);
+	});
+});
+
+describe("guardPortableText: size caps and _key (core renderers throw or stall past them)", () => {
+	const spans = (n, marks = ["strong"]) => Array.from({ length: n }, (_, k) => ({ _type: "span", _key: `s${k}`, text: "a", marks }));
+	it("allows at most 20 marks per span (astro-portabletext nests one component per mark)", () => {
+		expect(guardPortableText([para({ children: [span("a", Array(3000).fill("strong"))] })])).toEqual(["#0 block children[0].marks: at most 20 marks are allowed"]);
+		expect(guardPortableText([para({ children: [span("a"), span("b", Array(21).fill("em"))] })])).toEqual(["#0 block children[1].marks: at most 20 marks are allowed"]);
+		const defs = Array.from({ length: 20 }, (_, k) => ({ _type: "link", _key: `k${k}`, href: "https://example.com" }));
+		expect(guardPortableText([para({ markDefs: defs, children: [span("a", defs.map((d) => d._key))] })])).toEqual([]);
+	});
+	it("allows at most 1000 children per block (core sorts marks in O(n²) over a block's children)", () => {
+		expect(guardPortableText([para({ children: spans(1001) })])).toEqual(["#0 block children: at most 1000 spans are allowed"]);
+		expect(guardPortableText([para({ children: spans(1000) })])).toEqual([]);
+		expect(guardPortableText([{ _type: "cover", _key: "c", content: [para({ children: spans(1001) })] }])).toEqual([
+			"#0 cover content[0] block children: at most 1000 spans are allowed",
+		]);
+	});
+	it("requires _key to be a string when present on a block (groupBlockquoteRuns builds `${_key}-group`)", () => {
+		const bad = { toString: 0 };
+		expect(guardPortableText([para({ _key: bad, style: "blockquote" }), para({ _key: "q2", style: "blockquote" })])).toEqual(['#0 block _key: value {"toString":0} is not allowed']);
+		for (const key of [5, ["k"], true]) expect(guardPortableText([para({ _key: key })])).toEqual([notAllowed("#0 block", "_key", key)]);
+		for (const key of ["k", "", undefined, null]) expect(guardPortableText([para({ _key: key })])).toEqual([]);
+	});
+	it("requires _key to be a string when present on spans, markDefs, container blocks and other top-level nodes", () => {
+		expect(guardPortableText([para({ children: [span(), { ...span(), _key: 5 }] })])).toEqual([notAllowed("#0 block", "children[1]._key", 5)]);
+		expect(guardPortableText([para({ children: [{ ...span(), _key: null }, { _type: "span", text: "a" }] })])).toEqual([]);
+		expect(guardPortableText([para({ markDefs: [{ _type: "link", _key: { toString: 0 }, href: "/a" }] })])).toEqual([notAllowed("#0 block", "markDefs[0]._key", { toString: 0 })]);
+		expect(guardPortableText([{ _type: "blockquoteGroup", _key: "g", blocks: [para({ _key: { toString: 0 } })] }])).toEqual([
+			notAllowed("#0 blockquoteGroup blocks[0] block", "_key", { toString: 0 }),
+		]);
+		expect(guardPortableText([{ _type: "columns", _key: "o", columns: [{ content: [para({ _key: 7 })] }] }])).toEqual([notAllowed("#0 columns columns[0].content[0] block", "_key", 7)]);
+		expect(guardPortableText([p("a"), { _type: "callout", _key: 5, tone: "tip", body: "x" }])).toEqual([notAllowed("#1 callout", "_key", 5)]);
+		expect(guardPortableText([{ _type: "cover", _key: { toString: 0 } }])).toEqual([notAllowed("#0 cover", "_key", { toString: 0 })]);
+		expect(guardPortableText([{ _type: "callout", tone: "tip", body: "x" }, { _type: "break", _key: null }])).toEqual([]);
 	});
 });

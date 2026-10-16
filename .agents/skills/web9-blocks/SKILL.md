@@ -50,6 +50,7 @@ The site rejects some blocks on save (`SAVE_REJECTED`, the message lists each pr
 - `htmlBlock`, `iframe` and any `_type` outside this allow list: `block` (paragraphs, headings, list items), `blockquoteGroup`, `break`, `table`, `file`, `pullquote`, `video`, `image`, `gallery`, `columns`, `cover`, `button`, `buttons`, `code`, `embed`, `callout`, `tabs`, `details`, `mermaid`, `tool_grid`, `investment_warning`;
 - a `block` whose `children` hold anything but `span` (no blocks, covers, images or iframes inside a paragraph), a `span` with its own `children`, and any other node with `children`;
 - a `block` with a `style` other than normal, h1–h6, blockquote, a `listItem` other than bullet, number, menu, a `level` outside 1–20, `marks` that are not a decorator (strong, em, underline, strike-through, subscript, superscript, code) or the `_key` of one of that block's `markDefs`, or a `markDefs` entry that is not a `link` with a string `href` (the same rules apply to blocks inside `cover.content`, `columns[].content` and `blockquoteGroup.blocks`, which may hold blocks only);
+- a span with more than 20 `marks`, a block with more than 1000 `children`, or a `_key` that is not a string;
 - a `url` or `logo` that is not a string on `button`, `buttons[]`, `file`, `embed` and `tool_grid` tools;
 - an `embed` with `html` (an `embed` takes only `url`; YouTube and Vimeo render as a player, anything else as a link);
 - core block fields outside their allowed values: `image.alignment` (left, center, right, wide, full), colours that are not `#hex`/`rgb()`, `cover.minHeight` other than a plain length, `code.language` with spaces, `tool_grid.logo_size` outside 16–300;
@@ -68,6 +69,10 @@ Fix the block and send the save again; never try to get around the check.
 
 - Table cells hold text spans only (marks: `strong`, `em`, `code`, `strike-through`, or a `link` markDef key). Put logos in a `tool_grid`, not a table.
 - Images: site images are `/img/...` paths; new uploads go through `media_upload` and are referenced by the returned URL.
+
+## Widgets
+
+Content widgets (rich text in a widget area) are not rendered: an area that holds one is hidden whole, the footer on every page included. Put that text in a doc or page instead. Component widgets take only the props their component declares; any other key hides the area too.
 
 ## Checks after publishing
 

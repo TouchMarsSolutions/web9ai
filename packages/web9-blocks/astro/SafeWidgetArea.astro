@@ -1,7 +1,8 @@
 ---
-// Replaces core's WidgetArea in Base.astro and posts/[slug].astro (spec §10). Widget content reaches the
-// database through REST without passing content:beforeSave, so check it here and render nothing if it holds
-// a block the save guard would reject.
+// Replaces core's WidgetArea in Base.astro and posts/[slug].astro (spec §10). Widgets reach the database
+// through REST without passing content:beforeSave, so check the area here and render nothing if it holds a
+// widget the site does not render: any content widget (use a doc or page instead), an unknown component or
+// an undeclared prop. A throw inside core's WidgetArea cannot be caught here, so the check must come first.
 import { getWidgetArea } from "emdash";
 import { WidgetArea } from "emdash/ui";
 import { widgetAreaIsSafe } from "../lib/widgets.mjs";
@@ -15,7 +16,7 @@ const { name, class: className } = Astro.props;
 let safe = false;
 try {
 	safe = widgetAreaIsSafe(await getWidgetArea(name));
-	if (!safe) console.warn(`[web9-blocks] widget area "${name}" holds content the save guard would reject; not rendered`);
+	if (!safe) console.warn(`[web9-blocks] widget area "${name}" holds a widget the site does not render (a content widget, or an unknown type, component or prop); not rendered`);
 } catch (error) {
 	console.warn(`[web9-blocks] widget area "${name}" could not be checked; not rendered`, error);
 }
