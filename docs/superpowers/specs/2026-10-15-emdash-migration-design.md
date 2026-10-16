@@ -109,7 +109,7 @@
   - 在 Markdown 里插入自定义块，用单独一行 `<!--ec:block {json} -->`，已从源码确认解析器支持；
   - skill 里列出每种块的 JSON 示例；
   - **发布**：MCP 的 `content_create` 默认创建草稿（已实测）。要直接上线，传 `status: "published"`，或者之后再调用 `content_publish`。
-- **已验证（计划 1 Task 10）**：agent 只通过 MCP（一次 `content_create`，`status: "published"`，`body` 是 Markdown 字符串，块用单独一行 `<!--ec:block {json} -->`）从头写了一篇带 callout ×2、tabs、表格的 doc（slug `ai-e2e`）。workerd 上页面返回 200，所有块都渲染了，页面里没有残留的 `ec:block` 文本。(a) 没写 `_key` 的块存下来**也没有** `_key`：原样存储，runtime 不会补，页面渲染不受影响；写了 `_key` 的块原样保留。所以 skill 要求每个块都带唯一 `_key`（后台编辑器是否依赖 `_key`，由 Task 11 检查）。(b) 表格**可以**通过 `ec:block` 写入：core 的 `table` 块 JSON 原样存下，页面渲染成 `<table>`，不需要退回 Portable Text JSON 数组。同一次创建里，`content:beforeSave` 钩子还写入了 `search_text`（含 callout 和 tabs 的文字，不含表格），`search` 能找到这篇。cookbook 在 `.agents/skills/web9-blocks/SKILL.md`。
+- **已验证（计划 1 Task 10）**：agent 只通过 MCP（一次 `content_create`，`status: "published"`，`body` 是 Markdown 字符串，块用单独一行 `<!--ec:block {json} -->`）从头写了一篇带 callout ×2、tabs、表格的 doc（slug `ai-e2e`）。workerd 上页面返回 200，所有块都渲染了，页面里没有残留的 `ec:block` 文本。(a) 没写 `_key` 的块存下来**也没有** `_key`：原样存储，runtime 不会补，页面渲染不受影响；写了 `_key` 的块原样保留。所以 skill 要求每个块都带唯一 `_key`（后台编辑器的表现见 §3 的 Task 11 结果：没有 `_key` 的块能正常编辑，保存时编辑器会补上 key；只走 MCP 的内容仍然没有 key）。(b) 表格**可以**通过 `ec:block` 写入：core 的 `table` 块 JSON 原样存下，页面渲染成 `<table>`，不需要退回 Portable Text JSON 数组。同一次创建里，`content:beforeSave` 钩子还写入了 `search_text`（含 callout 和 tabs 的文字，不含表格），`search` 能找到这篇。cookbook 在 `.agents/skills/web9-blocks/SKILL.md`。
 - 让 AI 读站点：`/llms.txt` 路由，从 `docs` 集合生成；可以再加 `/docs/{slug}.md`，用 `emdash/client` 的 `portableTextToMarkdown` 输出。
 
 ## 9. 部署与运维
