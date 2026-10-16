@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { IMAGE_FIELDS, PT_FIELDS, beforeSave } from "./index.mjs";
+import { BLOCK_IMAGE_FIELDS, IMAGE_FIELDS, PT_FIELDS, beforeSave } from "./index.mjs";
 
 const seed = JSON.parse(readFileSync(new URL("../../seed/seed.json", import.meta.url), "utf8"));
 const callout = { _type: "callout", _key: "c1", tone: "tip", title: "T", body: "probe-word" };
@@ -38,6 +38,71 @@ describe("content:beforeSave", () => {
 		);
 		expect(IMAGE_FIELDS).toEqual(fromSeed);
 		expect(IMAGE_FIELDS).toEqual({ posts: ["featured_image"] });
+	});
+	it("pins BLOCK_IMAGE_FIELDS to the image values inside the seed's block types", () => {
+		const types = new Map(seed.blockTypes.map((t) => [t.slug, t]));
+		const paths = (type) => {
+			const current = type.versions.find((v) => v.version === type.currentVersion);
+			return current.fields.flatMap((f) => {
+				if (f.type === "image") return [f.slug];
+				if (f.type === "repeater") return (f.validation?.subFields ?? []).filter((sub) => sub.type === "image").map((sub) => `${f.slug}[].${sub.slug}`);
+				return [];
+			});
+		};
+		const fromSeed = Object.fromEntries(
+			seed.collections
+				.map((c) => [
+					c.slug,
+					Object.fromEntries(
+						c.fields
+							.filter((f) => f.type === "blocks")
+							.map((f) => [f.slug, Object.fromEntries(f.validation.allowedTypes.map((t) => [t, paths(types.get(t))]).filter(([, list]) => list.length))]),
+					),
+				])
+				.filter(([, fields]) => Object.keys(fields).length),
+		);
+		expect(BLOCK_IMAGE_FIELDS).toEqual(fromSeed);
+		expect(BLOCK_IMAGE_FIELDS).toEqual({ pages: { layout: { hero: ["image"], feature_grid: ["features[].image"] } } });
+	});
+	const img = (over = {}) => ({ id: "", provider: "external", src: "/img/ai.svg", mimeType: "image/svg+xml", alt: "AI", ...over });
+	const layout = (heroImage, ...featureImages) => [
+		{ _type: "hero", _version: 1, _key: "home-hero", title: "Web9.AI", image: heroImage },
+		{ _type: "feature_grid", _version: 1, _key: "home-features", features: featureImages.map((image, k) => ({ title: `F${k}`, image })) },
+	];
+	it("rejects a pages.layout image whose dominantColor is pasted into style", async () => {
+		const evil = "red;position:fixed;inset:0;z-index:99999";
+		const save = (content) => beforeSave({ collection: "pages", content });
+		await expect(save({ title: "Home", layout: layout(img({ dominantColor: evil }), img()) })).rejects.toMatchObject({
+			name: "ContentSaveRejectedError",
+			message: `Save rejected (spec §10): layout: #0 hero image.dominantColor: value "${evil}" is not allowed`,
+		});
+		await expect(save({ layout: layout(img(), img(), img({ darkVariant: img({ dominantColor: evil }) })) })).rejects.toMatchObject({
+			message: `Save rejected (spec §10): layout: #1 feature_grid features[1].image.darkVariant.dominantColor: value "${evil}" is not allowed`,
+		});
+		await expect(save({ layout: layout(img({ blurhash: "x" })) })).rejects.toMatchObject({
+			message: expect.stringContaining('layout: #0 hero image.blurhash: value "x" is not allowed'),
+		});
+		await expect(save({ layout: layout(img({ meta: { storageKey: { toString: 1 } } })) })).rejects.toMatchObject({
+			message: expect.stringContaining('layout: #0 hero image.meta.storageKey: value {"toString":1} is not allowed'),
+		});
+	});
+	it("accepts the home page layout and saves without a layout, and guards layout and body together", async () => {
+		const clean = { title: "Web9.AI", layout: layout(img(), img(), img(), img()) };
+		expect(await beforeSave({ collection: "pages", content: clean })).toEqual(clean);
+		const noLayout = { title: "x" };
+		expect(await beforeSave({ collection: "pages", content: noLayout })).toBe(noLayout);
+		await expect(
+			beforeSave({ collection: "pages", content: { layout: layout(img({ blurhash: "x" })), content: [{ _type: "htmlBlock", _key: "h" }] } }),
+		).rejects.toMatchObject({ message: expect.stringMatching(/content: #0 htmlBlock.*layout: #0 hero image\.blurhash/) });
+		// docs and posts have no blocks field: a layout key there is not looked at
+		const other = { title: "x", layout: layout(img({ dominantColor: "a b" })) };
+		expect(await beforeSave({ collection: "docs", content: other })).toEqual(other);
+	});
+	it("does not throw on a layout core's normalizeBlocksData would reject afterwards", async () => {
+		for (const bad of [null, "x", 5, {}, [null], [5], [{}], [{ _type: "constructor" }], [{ _type: "__proto__", image: img({ dominantColor: "a b" }) }]]) {
+			const content = { title: "x", layout: bad };
+			expect(await beforeSave({ collection: "pages", content })).toEqual(content);
+		}
 	});
 	it("rejects an image field whose dominantColor is pasted into style", async () => {
 		const featured_image = { id: "x", provider: "external", src: "https://example.com/a.png", dominantColor: "red;position:fixed;inset:0;z-index:99999" };

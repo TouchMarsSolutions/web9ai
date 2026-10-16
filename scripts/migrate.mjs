@@ -3,7 +3,7 @@
 // reports "unchanged" for everything already in place and writes nothing.
 //
 //   node scripts/migrate.mjs <step>... [--dry-run] [--overwrite]
-//   steps: docs, menu, terms, posts, redirects, verify (reads only), all (every write step, in order)
+//   steps: docs, menu, terms, posts, redirects, home, verify (reads only), all (every write step, in order)
 // Fail closed: an entry or menu that exists and differs from the migration stops the run ([WOULD_OVERWRITE])
 // unless --overwrite is given; a dry run lists the differences. A pending draft that differs always stops it
 // ([PENDING_DRAFT]). Redirect rules of the legacy-docusaurus group follow the same rule. See scripts/lib/sync.mjs
@@ -13,6 +13,7 @@
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { docPayloads } from "./lib/docs-payloads.mjs";
+import { homePayload } from "./lib/home-content.mjs";
 import { readLegacyTree } from "./lib/legacy-tree.mjs";
 import { checkMarkers } from "./lib/markers.mjs";
 import { callTool, defaultToken } from "./lib/mcp.mjs";
@@ -47,6 +48,12 @@ const REDIRECT_SAMPLES = [
 	["/blog/atom.xml", "/rss.xml"],
 	["/zh-CN/blog/rss.xml", "/rss.xml"],
 	["/zh-CN/blog/atom.xml", "/rss.xml"],
+];
+
+/** The home pages (Task 11): blocks rendered, buttons localized, no missing-renderer placeholder. */
+const HOME_CHECKS = [
+	{ url: "/", present: [">Magic Starts</a>", 'href="/docs/intro"', 'src="/img/energy_free.svg"', "Energy free is"], absent: ["data-emdash-missing-block", "Energe"] },
+	{ url: "/zh-CN/", present: [">魔法启动</a>", 'href="/zh-CN/docs/intro"', "能源自由"], absent: ["data-emdash-missing-block"] },
 ];
 
 const STEPS = {
@@ -84,9 +91,18 @@ const STEPS = {
 	async redirects() {
 		return syncRedirects(restRequest(site, defaultToken()), legacyRedirects(readLegacyTree()), { dryRun, overwrite });
 	},
+	async home() {
+		const en = await upsertEntry(callTool, homePayload("en"), { dryRun, overwrite });
+		const zh = homePayload("zh-CN");
+		if (en.id) Object.assign(zh, { translationOf: en.id, translationGroup: en.translationGroup });
+		return [
+			{ name: "en home", ...en },
+			{ name: "zh-CN home", ...(await upsertEntry(callTool, zh, { dryRun, overwrite })) },
+		];
+	},
 	async verify() {
 		const tree = readLegacyTree();
-		const checks = docPageChecks(docPayloads(tree));
+		const checks = [...docPageChecks(docPayloads(tree)), ...HOME_CHECKS];
 		const failures = [];
 		for (const check of checks) {
 			const res = await fetch(new URL(check.url, site));
@@ -107,7 +123,7 @@ const STEPS = {
 		return [];
 	},
 };
-const WRITE_STEPS = ["docs", "menu", "terms", "posts", "redirects"];
+const WRITE_STEPS = ["docs", "menu", "terms", "posts", "redirects", "home"];
 
 const steps = positionals.includes("all") ? WRITE_STEPS : positionals;
 if (!steps.length || steps.some((s) => !STEPS[s])) {

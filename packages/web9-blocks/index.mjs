@@ -1,5 +1,5 @@
 import { ContentSaveRejectedError, definePlugin } from "emdash";
-import { guardImageValue, guardPortableText } from "./lib/pt-guard.mjs";
+import { guardBlockImages, guardImageValue, guardPortableText } from "./lib/pt-guard.mjs";
 import { extractBlockText } from "./lib/search-text.mjs";
 
 const ID = "web9-blocks";
@@ -112,16 +112,24 @@ export const PT_FIELDS = { docs: ["body"], posts: ["content"], pages: ["content"
 export const IMAGE_FIELDS = { posts: ["featured_image"] };
 
 /**
+ * `blocks` fields per collection, and in each the paths of the `image` values inside a block type (the same
+ * colour and blurhash values, rendered by <Image> in the hero and feature_grid components). Pinned to the seed.
+ */
+export const BLOCK_IMAGE_FIELDS = { pages: { layout: { hero: ["image"], feature_grid: ["features[].image"] } } };
+
+/**
  * content:beforeSave. Rejects unsafe blocks and image values (spec §10), then mirrors this plugin's block
  * text into search_text, because core search only indexes text/alt/caption/code strings (spec §4).
  */
 export async function beforeSave({ content, collection }) {
 	const fields = PT_FIELDS[collection] ?? [];
 	const imageFields = IMAGE_FIELDS[collection] ?? [];
-	if (!fields.length && !imageFields.length) return content;
+	const blockFields = Object.entries(BLOCK_IMAGE_FIELDS[collection] ?? {});
+	if (!fields.length && !imageFields.length && !blockFields.length) return content;
 	const problems = [
 		...fields.flatMap((f) => guardPortableText(content[f]).map((p) => `${f}: ${p}`)),
 		...imageFields.flatMap((f) => guardImageValue(content[f]).map((p) => `${f}: ${p}`)),
+		...blockFields.flatMap(([f, paths]) => guardBlockImages(content[f], paths).map((p) => `${f}: ${p}`)),
 	];
 	if (problems.length) throw new ContentSaveRejectedError(`Save rejected (spec §10): ${problems.join("; ")}`.slice(0, 1000));
 	const [main] = fields;

@@ -1,0 +1,45 @@
+---
+// Home page for one locale: pages/home's `layout` blocks (spec §2). zh-CN without its own row gets the
+// en row through EmDash's fallback chain; an empty database gets a small stub, so `/` never 404s.
+import { getEmDashEntry, getSiteSettings } from "emdash";
+import { Blocks, defineBlockComponents } from "emdash/ui";
+import type { PageLayoutBlock } from "../../emdash-env";
+import { localizeHref } from "../../packages/web9-site/lib/nav.mjs";
+import Base from "../layouts/Base.astro";
+import { resolveBlogSiteIdentity } from "../utils/site-identity";
+import FeatureGrid from "./blocks/FeatureGrid.astro";
+import Hero from "./blocks/Hero.astro";
+
+interface Props {
+	locale: string;
+}
+const { locale } = Astro.props;
+
+const [{ entry: page, cacheHint }, settings] = await Promise.all([getEmDashEntry("pages", "home", { locale }), getSiteSettings()]);
+if (Astro.cache?.enabled && cacheHint) Astro.cache.set(cacheHint);
+const { siteTitle, siteTagline } = resolveBlogSiteIdentity(settings);
+const layout: PageLayoutBlock[] = page?.data.layout ?? [];
+const components = defineBlockComponents<PageLayoutBlock>({ hero: Hero, feature_grid: FeatureGrid });
+const canonical = new URL(localizeHref("/", locale), Astro.site).href;
+---
+
+<Base
+	title={page?.data.title ?? siteTitle}
+	description={siteTagline}
+	canonical={canonical}
+	content={page ? { collection: "pages", id: page.data.id, slug: "home" } : undefined}
+>
+	{
+		layout.length > 0 ? (
+			<Blocks value={layout} components={components} />
+		) : (
+			<section class="px-4 py-24 text-center">
+				<h1 class="text-4xl font-bold text-text">{siteTitle}</h1>
+				<p class="mt-3 text-text-secondary">{siteTagline}</p>
+				<a class="mt-6 inline-block text-brand" href={localizeHref("/docs/intro", locale)}>
+					Docs
+				</a>
+			</section>
+		)
+	}
+</Base>

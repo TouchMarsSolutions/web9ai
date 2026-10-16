@@ -54,7 +54,7 @@ The site rejects some blocks on save (`SAVE_REJECTED`, the message lists each pr
 - a `url` or `logo` that is not a string on `button`, `buttons[]`, `file`, `embed` and `tool_grid` tools;
 - an `embed` with `html` (an `embed` takes only `url`; YouTube and Vimeo render as a player, anything else as a link);
 - core block fields outside their allowed values: `image.alignment` (left, center, right, wide, full), colours that are not `#hex`/`rgb()`, `cover.minHeight` other than a plain length, `code.language` with spaces, `tool_grid.logo_size` outside 16–300;
-- an image whose `dominantColor` is not `#hex`/`rgb()` or whose `blurhash` does not decode: the `image` and `gallery` blocks, and the `featured_image` field of posts (including its `meta` and `darkVariant`).
+- an image whose `dominantColor` is not `#hex`/`rgb()` or whose `blurhash` does not decode: the `image` and `gallery` blocks, the `featured_image` field of posts and the images of a page's `layout` blocks (`hero.image`, `feature_grid` `features[].image`); for those two fields this includes `meta` and `darkVariant`, and a `meta.storageKey` that is not a string.
 Fix the block and send the save again; never try to get around the check.
 
 | Block | JSON |

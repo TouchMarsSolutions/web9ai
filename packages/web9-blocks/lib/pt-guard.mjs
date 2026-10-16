@@ -24,6 +24,12 @@
 // tool_grid tools[].url and tools[].logo (astro/ToolGrid.astro:29, :34).
 // Image values (an `image` field, `darkVariant`, PT image and gallery images) are checked for the colour and
 // blurhash fields that core renderers paste into style or decode: a blurhash that does not decode throws.
+// An `image` value also carries meta, a free-form record. EmDashImage.astro reads meta.dominantColor and
+// meta.blurhash as fallbacks and builds the src from meta.storageKey in a template string (media/url.ts), which
+// throws for an object without a callable toString; so meta.storageKey must be a string when present.
+// Image values inside the blocks of a `blocks` field (pages.layout: hero.image, feature_grid.features[].image)
+// are rendered by the same component and get the same checks (guardBlockImages). content:beforeSave runs before
+// core's normalizeBlocksData (emdash-runtime.ts), so the walk sees the raw value and must survive any shape.
 // Size caps, because the renderers are not linear in them: @portabletext/toolkit's buildMarksTree nests one
 // component per mark (3000 marks on a span overflow the stack), and its sortMarksByOccurences is O(n²) in a
 // block's children (20k spans = 12 s of CPU). So a span has at most MAX_MARKS marks and a block at most
@@ -283,6 +289,7 @@ const MEDIA_RULES = {
 	blurhash: validBlurhash,
 	"meta.dominantColor": COLOR_OK,
 	"meta.blurhash": validBlurhash,
+	"meta.storageKey": STRING,
 };
 const IMAGE_VALUE_RULES = {
 	...MEDIA_RULES,
@@ -293,5 +300,45 @@ const IMAGE_VALUE_RULES = {
 export function guardImageValue(value) {
 	const out = collector();
 	checkRules(value, IMAGE_VALUE_RULES, "", out);
+	return out.done();
+}
+
+/** [label, value] of every non-null value at `path` ("image", "features[].image"); arrays add their index to the label. */
+function labelledValuesAt(node, path) {
+	let current = [["", node]];
+	for (const part of path.split(".")) {
+		const list = part.endsWith("[]");
+		const key = list ? part.slice(0, -2) : part;
+		current = current.flatMap(([label, v]) => {
+			const next = v && typeof v === "object" ? v[key] : undefined;
+			const at = label ? `${label}.${key}` : key;
+			if (list) return Array.isArray(next) ? next.map((item, k) => [`${at}[${k}]`, item]) : [];
+			return next === undefined || next === null ? [] : [[at, next]];
+		});
+	}
+	return current;
+}
+
+/**
+ * Image values inside the blocks of a `blocks` field.
+ * @param {unknown} value the field value, e.g. pages.layout
+ * @param {Record<string, string[]>} imagePaths per block `_type`, the paths of its image values ("image", "features[].image")
+ * @returns problems like `#1 feature_grid features[0].image.dominantColor: value "..." is not allowed`; empty means OK.
+ * A block whose `_type` has no entry is left to core (normalizeBlocksData allows only the field's types).
+ */
+export function guardBlockImages(value, imagePaths) {
+	const out = collector();
+	if (!Array.isArray(value)) return out.done();
+	for (let i = 0; i < value.length && !out.full; i++) {
+		const block = value[i];
+		const type = block !== null && typeof block === "object" ? block._type : undefined;
+		if (typeof type !== "string" || !Object.hasOwn(imagePaths, type)) continue;
+		for (const path of imagePaths[type]) {
+			for (const [label, image] of labelledValuesAt(block, path)) {
+				if (out.full) break;
+				checkRules(image, IMAGE_VALUE_RULES, `#${i} ${type} ${label}.`, out);
+			}
+		}
+	}
 	return out.done();
 }

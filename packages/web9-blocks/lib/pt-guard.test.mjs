@@ -1,7 +1,7 @@
 import { markdownToPortableText } from "emdash/client";
 import { describe, expect, it } from "vitest";
 import { convertMdx } from "../../../scripts/lib/mdx-to-pt.mjs";
-import { guardImageValue, guardPortableText } from "./pt-guard.mjs";
+import { guardBlockImages, guardImageValue, guardPortableText } from "./pt-guard.mjs";
 
 const p = (text) => ({ _type: "block", _key: "b", style: "normal", markDefs: [], children: [{ _type: "span", _key: "s", text, marks: [] }] });
 
@@ -214,6 +214,87 @@ describe("guardImageValue", () => {
 		expect(guardImageValue({ id: "x", meta: { blurhash: "not a blurhash at all" } })).toEqual(['meta.blurhash: value "not a blurhash at all" is not allowed']);
 		expect(guardImageValue({ id: "x", blurhash: 42 })).toEqual(["blurhash: value 42 is not allowed"]);
 		expect(guardImageValue({ id: "x", darkVariant: { id: "y", blurhash: "x" } })).toEqual(['darkVariant.blurhash: value "x" is not allowed']);
+	});
+	// EmDashImage.astro builds the src from meta.storageKey with a template string (media/url.ts:buildRenderMediaUrl):
+	// an object without a callable toString throws there, which cuts the page off after the headers.
+	it("requires meta.storageKey to be a string when present", () => {
+		expect(guardImageValue({ id: "x", meta: { storageKey: "01ABC.png" }, darkVariant: { id: "y", meta: { storageKey: "01DEF.png" } } })).toEqual([]);
+		expect(guardImageValue({ id: "x", meta: {} })).toEqual([]);
+		expect(guardImageValue({ id: "x", meta: { storageKey: { toString: 1 } } })).toEqual(['meta.storageKey: value {"toString":1} is not allowed']);
+		expect(guardImageValue({ id: "x", darkVariant: { id: "y", meta: { storageKey: ["a"] } } })).toEqual(['darkVariant.meta.storageKey: value ["a"] is not allowed']);
+	});
+});
+
+// pages.layout is a `blocks` field: its hero.image and feature_grid.features[].image are `image` values that
+// <Image image={...}> renders (dominantColor into style, blurhash into a decoder). content:beforeSave sees the
+// raw value, before core's normalizeBlocksData, so the walk must survive any shape.
+describe("guardBlockImages", () => {
+	const PATHS = { hero: ["image"], feature_grid: ["features[].image"] };
+	const MORE = "…and more";
+	const img = (over = {}) => ({ id: "", provider: "external", src: "/img/ai.svg", mimeType: "image/svg+xml", alt: "AI", ...over });
+	const hero = (image) => ({ _type: "hero", _version: 1, _key: "h", title: "T", image });
+	const grid = (...images) => ({ _type: "feature_grid", _version: 1, _key: "g", features: images.map((image, k) => ({ title: `F${k}`, image })) });
+	const guard = (value) => guardBlockImages(value, PATHS);
+
+	it("passes the home page layout, valid placeholders and blocks without images", () => {
+		expect(guard([hero(img()), grid(img(), img(), img())])).toEqual([]);
+		expect(guard([hero(img({ dominantColor: "#aabbcc", blurhash: HASH, meta: { storageKey: "01ABC.svg" }, darkVariant: img({ dominantColor: "rgb(1,2,3)" }) }))])).toEqual([]);
+		expect(guard([hero(undefined), hero(null), { _type: "feature_grid", features: [{ title: "x" }, { title: "y", image: null }] }])).toEqual([]);
+		expect(guard([])).toEqual([]);
+	});
+	it("rejects a dominantColor pasted into style, on hero.image and on a feature image", () => {
+		const evil = "red;position:fixed;inset:0;z-index:99999";
+		expect(guard([hero(img({ dominantColor: evil }))])).toEqual([`#0 hero image.dominantColor: value "${evil}" is not allowed`]);
+		expect(guard([hero(img()), grid(img(), img({ dominantColor: evil }), img())])).toEqual([
+			`#1 feature_grid features[1].image.dominantColor: value "${evil}" is not allowed`,
+		]);
+	});
+	it("rejects the same fields on darkVariant and in meta", () => {
+		expect(guard([hero(img({ darkVariant: img({ dominantColor: "red;position:fixed" }) }))])).toEqual([
+			'#0 hero image.darkVariant.dominantColor: value "red;position:fixed" is not allowed',
+		]);
+		expect(guard([grid(img({ meta: { dominantColor: "url(//x)", blurhash: 5 } }))])).toEqual([
+			'#0 feature_grid features[0].image.meta.dominantColor: value "url(//x)" is not allowed',
+			"#0 feature_grid features[0].image.meta.blurhash: value 5 is not allowed",
+		]);
+	});
+	it("rejects a blurhash that does not decode and a meta.storageKey that is not a string", () => {
+		expect(guard([hero(img({ blurhash: "x" }))])).toEqual(['#0 hero image.blurhash: value "x" is not allowed']);
+		expect(guard([grid(img(), img(), img({ meta: { storageKey: { toString: 1 } } }))])).toEqual([
+			'#0 feature_grid features[2].image.meta.storageKey: value {"toString":1} is not allowed',
+		]);
+	});
+	it("reports every bad block, in order", () => {
+		expect(guard([hero(img({ blurhash: "x" })), grid(img({ dominantColor: "a b" }), img({ blurhash: "y" }))])).toEqual([
+			'#0 hero image.blurhash: value "x" is not allowed',
+			'#1 feature_grid features[0].image.dominantColor: value "a b" is not allowed',
+			'#1 feature_grid features[1].image.blurhash: value "y" is not allowed',
+		]);
+	});
+	it("never throws on a shape core would reject afterwards, and ignores types it has no paths for", () => {
+		for (const value of [undefined, null, "x", 5, true, {}, { length: 1 }, [null], [undefined], ["hero"], [5], [[]], [{}], [{ _type: 5 }], [{ _type: null }]]) {
+			expect(guard(value)).toEqual([]);
+		}
+		// prototype names are not types: the lookup is an own-property check
+		for (const _type of ["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf", "block", "unknown"]) {
+			expect(guard([{ _type, image: img({ dominantColor: "a b" }), features: [{ image: img({ dominantColor: "a b" }) }] }])).toEqual([]);
+		}
+		expect(guardBlockImages([hero(img({ dominantColor: "a b" }))], {})).toEqual([]);
+		for (const features of [undefined, null, "x", 5, {}, [null], [5], ["x"], [[]], [{ image: "https://example.com/a.png" }], [{ image: [] }], [{ image: 5 }]]) {
+			expect(guard([{ _type: "feature_grid", _key: "g", features }])).toEqual([]);
+		}
+		for (const image of ["https://example.com/a.png", 5, true, [], [img({ dominantColor: "a b" })]]) {
+			expect(guard([{ _type: "hero", _key: "h", image }])).toEqual([]);
+		}
+	});
+	it("is bounded: 200k bad features end in …and more and do not throw", () => {
+		const features = Array.from({ length: 200000 }, () => ({ title: "f", image: img({ dominantColor: "a b" }) }));
+		let problems;
+		expect(() => (problems = guard([{ _type: "feature_grid", _key: "g", features }]))).not.toThrow();
+		expect(problems).toHaveLength(51);
+		expect(problems[50]).toBe(MORE);
+		const blocks = Array.from({ length: 200000 }, () => hero(img({ blurhash: "x" })));
+		expect(guard(blocks)).toHaveLength(51);
 	});
 });
 
