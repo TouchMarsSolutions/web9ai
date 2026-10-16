@@ -1,0 +1,11 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "web9-ai",
+	"main": "./src/worker.ts",
+	"compatibility_date": "2026-02-24",
+	"compatibility_flags": ["nodejs_compat"],
+	"d1_databases": [{ "binding": "DB", "database_name": "web9-ai" }],
+	"r2_buckets": [{ "binding": "MEDIA", "bucket_name": "web9-ai-media" }],
+	// Scheduled publishing + maintenance; ~1440 invocations/day, inside the free tier (spec §9)
+	"triggers": { "crons": ["* * * * *"] },
+}

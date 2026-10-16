@@ -1,7 +1,7 @@
 {
-  // This file is not used in compilation. It is here just for a nice editor experience.
-  "extends": "@docusaurus/tsconfig",
-  "compilerOptions": {
-    "baseUrl": "."
-  }
+	"extends": "astro/tsconfigs/base",
+	"compilerOptions": {
+		"types": ["node"]
+	},
+	"include": ["src", ".astro/types.d.ts", "emdash-env.d.ts", "worker-configuration.d.ts"]
 }

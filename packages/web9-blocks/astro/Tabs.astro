@@ -1,0 +1,87 @@
+---
+import { renderMarkdown } from "../lib/markdown.mjs";
+
+interface Tab {
+	label?: string;
+	body?: string;
+}
+interface Props {
+	node: { _type: "tabs"; _key: string; tabs?: Tab[]; default_tab?: number; fullscreen?: boolean };
+}
+const { node } = Astro.props;
+const tabs = Array.isArray(node?.tabs) ? node.tabs : [];
+const active = Math.min(Math.max((node?.default_tab ?? 1) - 1, 0), Math.max(tabs.length - 1, 0));
+// Unique per render, so two tabs blocks on one page never share ids (a missing or repeated _key used to collide)
+const uid = `w9t-${crypto.randomUUID().slice(0, 8)}`;
+---
+
+<div class="relative my-6 rounded-lg border border-border px-4 pb-4 [&:fullscreen]:overflow-auto [&:fullscreen]:bg-bg [&:fullscreen]:p-8" data-w9-tabs>
+	{
+		node?.fullscreen && (
+			<button class="absolute top-1.5 right-2 cursor-pointer text-lg opacity-70 hover:opacity-100" type="button" data-fs aria-label="Toggle fullscreen">
+				⛶
+			</button>
+		)
+	}
+	<div class="-mx-4 mb-4 flex flex-wrap gap-1 border-b border-border px-3" role="tablist">
+		{
+			tabs.map((tab, i) => (
+				<button
+					type="button"
+					role="tab"
+					class="cursor-pointer border-b-2 border-transparent px-3 py-2.5 opacity-70 aria-selected:border-brand aria-selected:font-semibold aria-selected:opacity-100"
+					id={`${uid}-tab-${i}`}
+					aria-controls={`${uid}-panel-${i}`}
+					aria-selected={i === active ? "true" : "false"}
+					tabindex={i === active ? 0 : -1}
+				>
+					{tab.label}
+				</button>
+			))
+		}
+	</div>
+	{
+		tabs.map((tab, i) => (
+			<div
+				role="tabpanel"
+				id={`${uid}-panel-${i}`}
+				aria-labelledby={`${uid}-tab-${i}`}
+				hidden={i !== active}
+				set:html={renderMarkdown(tab.body)}
+			/>
+		))
+	}
+</div>
+
+<script>
+	import "./mermaid-client.mjs";
+
+	for (const root of document.querySelectorAll<HTMLElement>("[data-w9-tabs]")) {
+		const tabs = [...root.querySelectorAll<HTMLButtonElement>(":scope > [role=tablist] > [role=tab]")];
+		const panels = [...root.querySelectorAll<HTMLElement>(":scope > [role=tabpanel]")];
+		const select = (tab: HTMLButtonElement) => {
+			for (const [i, t] of tabs.entries()) {
+				const on = t === tab;
+				t.setAttribute("aria-selected", String(on));
+				t.tabIndex = on ? 0 : -1;
+				const panel = panels[i];
+				if (panel) panel.hidden = !on;
+				if (on && panel) (window as any).w9RenderMermaid?.(panel);
+			}
+		};
+		tabs.forEach((tab, i) => {
+			tab.addEventListener("click", () => select(tab));
+			tab.addEventListener("keydown", (e) => {
+				const next = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+				if (!next) return;
+				const target = tabs[(i + next + tabs.length) % tabs.length];
+				target.focus();
+				select(target);
+			});
+		});
+		root.querySelector("[data-fs]")?.addEventListener("click", () => {
+			if (document.fullscreenElement) document.exitFullscreen();
+			else root.requestFullscreen();
+		});
+	}
+</script>

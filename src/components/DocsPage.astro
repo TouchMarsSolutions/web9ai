@@ -1,0 +1,94 @@
+---
+import { getEmDashCollection, getTranslations } from "emdash";
+import { PortableText } from "emdash/ui";
+import Base from "../layouts/Base.astro";
+
+interface Props {
+	doc: any;
+	locale: string;
+	fallbackLocale?: string;
+}
+const { doc, locale, fallbackLocale } = Astro.props;
+const prefix = locale === "en" ? "" : `/${locale}`;
+
+// Sidebar: every en doc, with this locale's translation swapped in where one exists (an untranslated
+// doc is still reachable under this locale's prefix through the fallback route), plus docs that exist
+// only in this locale; grouped section -> category, ordered by sort_order.
+const byGroup = new Map();
+for (const l of new Set(["en", locale])) {
+	const { entries: list } = await getEmDashCollection("docs", { locale: l, limit: 500 });
+	// translationGroup is on every entry at runtime but not in the generated Doc type
+	for (const e of list) byGroup.set((e.data as { translationGroup?: string | null }).translationGroup ?? e.data.id, e);
+}
+const entries: any[] = [...byGroup.values()];
+const groups = new Map<string, typeof entries>();
+for (const e of [...entries].sort((a, b) => (a.data.sort_order ?? 0) - (b.data.sort_order ?? 0))) {
+	const key = `${e.data.section ?? "ai"} / ${e.data.category ?? "general"}`;
+	groups.set(key, [...(groups.get(key) ?? []), e]);
+}
+
+const translations = (await getTranslations("docs", doc.data.id)).translations?.filter(
+	(t) => t.status === "published",
+) ?? [];
+// Always offer every locale; one without a translation opens the fallback page for this doc.
+const languages = [
+	{ code: "en", label: "English" },
+	{ code: "zh-CN", label: "中文" },
+].map(({ code, label }) => ({
+	code,
+	label,
+	href: `${code === "en" ? "" : `/${code}`}/docs/${translations.find((t) => t.locale === code)?.slug ?? doc.data.slug}`,
+}));
+const notTranslated: Record<string, string> = {
+	en: "This page is not translated yet; showing the original.",
+	"zh-CN": "本页还没有中文翻译，以下显示原文。",
+};
+---
+
+<Base title={doc.data.title} description={doc.data.description} content={{ collection: "docs", id: doc.data.id, slug: doc.data.slug }}>
+	<div class="mx-auto my-8 grid max-w-[1200px] grid-cols-1 gap-10 px-4 md:grid-cols-[240px_minmax(0,1fr)]">
+		<nav class="text-[0.92rem] md:sticky md:top-4 md:self-start" aria-label="Docs">
+			{
+				[...groups].map(([group, items]) => (
+					<div>
+						<p class="mt-4 mb-1.5 text-xs tracking-wider text-muted uppercase">{group}</p>
+						<ul class="m-0 list-none p-0">
+							{items.map((e) => (
+								<li>
+									<a
+										class="block py-1 text-text-secondary hover:text-text aria-[current=page]:font-semibold aria-[current=page]:text-text"
+										href={`${prefix}/docs/${e.data.slug}`}
+										aria-current={e.data.slug === doc.data.slug ? "page" : undefined}
+									>
+										{e.data.title}
+									</a>
+								</li>
+							))}
+						</ul>
+					</div>
+				))
+			}
+		</nav>
+		<article class="prose max-w-none min-w-0">
+			{
+				fallbackLocale && (
+					<p class="rounded-md bg-[color-mix(in_srgb,#d9a400_15%,transparent)] px-3 py-2">
+						{notTranslated[locale] ?? notTranslated.en}
+					</p>
+				)
+			}
+			<p class="flex gap-3 text-sm">
+				{languages.map((l) => (
+					<a class="aria-[current=true]:font-bold" href={l.href} hreflang={l.code} aria-current={l.code === locale ? "true" : undefined}>
+						{l.label}
+					</a>
+				))}
+			</p>
+			<h1 {...doc.edit.title}>{doc.data.title}</h1>
+			{doc.data.description && <p class="lead">{doc.data.description}</p>}
+			<div {...doc.edit.body}>
+				<PortableText value={doc.data.body} />
+			</div>
+		</article>
+	</div>
+</Base>

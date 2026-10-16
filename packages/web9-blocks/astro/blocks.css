@@ -1,0 +1,29 @@
+/*
+ * Styles for HTML produced by renderMarkdown(). Sanitized content cannot carry utility classes
+ * (the sanitizer strips them on purpose, spec §10/§11), so whitelisted classes are styled here.
+ * Imported by src/styles/global.css; never import this file from a component (@apply needs the
+ * Tailwind entry).
+ *
+ * Utilities layer, not components: @tailwindcss/typography puts .prose in the utilities layer and
+ * layer order beats specificity, so components-layer rules would lose to prose margins.
+ */
+@layer utilities {
+	.callout {
+		--tone: #4b8bf5;
+		@apply my-5 rounded-md border-l-4 px-4 py-3;
+		border-left-color: var(--tone);
+		background: color-mix(in srgb, var(--tone) 10%, transparent);
+	}
+	.callout--note { --tone: #8a8f98; }
+	.callout--tip { --tone: #2e9e5b; }
+	.callout--info { --tone: #4b8bf5; }
+	.callout--warning,
+	.callout--caution { --tone: #d9a400; }
+	.callout--danger { --tone: #d6443a; }
+	.callout > :first-child,
+	.callout > div > :first-child { @apply mt-0; }
+	.callout > :last-child,
+	.callout > div > :last-child { @apply mb-0; }
+	.callout .callout__title { @apply mt-0 mb-1.5 font-bold; }
+	pre.mermaid { @apply bg-transparent text-center; }
+}

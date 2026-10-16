@@ -31,3 +31,20 @@ yarn-error.log*
 
 # lock files
 yarn.lock
+# Astro / EmDash
+/dist
+.astro
+.emdash/migrations.json
+uploads
+data.db
+data.db-*
+.env
+.env.*
+!.env.example
+
+# Local scratch (dev token, payloads)
+.local/
+.superpowers/
+.wrangler
+.dev.vars
+.dev.vars.*

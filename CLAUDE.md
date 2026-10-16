@@ -1,31 +1,31 @@
-# Web9.AI Development Guide
+# Web9.AI (EmDash + Astro)
 
-## Development Commands
+The site is an EmDash CMS on Astro. Content lives in the EmDash database, not in git.
+Read `AGENTS.md` for EmDash conventions; agent skills are in `.agents/skills/`.
 
-- Start development server: `npm run start`
-- Start in Chinese locale: `npm run startcn`
-- Build for production: `npm run build`
-- Serve production build: `npm run serve`
-- Clear cache: `npm run clear`
-- Type checking: `npm run typecheck`
+## Commands
 
-## Code Style Guidelines
+- Dev server: `npm run dev -- --port 4321` (daemon, runs in workerd like production; stop with `npx astro dev stop`)
+- First run on an empty local DB: `curl -X POST 'http://localhost:4321/_emdash/api/setup/dev-bypass?token=1&content=0'`, save `data.token` to `.local/dev-token`
+- Browser login (dev only): open `/_emdash/api/auth/dev-bypass?redirect=/_emdash/admin`
+- MCP from the shell: `node scripts/mcp.mjs <tool> '<json>'`; page assertions: `node scripts/check-page.mjs <url> <marker>...`
+- Tests: `npm test` (vitest; `*.test.mjs` under scripts/, packages/, seed/)
+- Build: `npm run build` · Type check: `npm run typecheck` · Content types: `npx emdash types`
+- Local D1/R2 state lives in `.wrangler/state` (delete it to start over); secrets in `.dev.vars`
 
-- **TypeScript**: Use TypeScript for all components and utilities
-- **Types**: Define explicit types for props, state, and function parameters
-- **Components**: Use functional components with explicit return types
-- **Imports**: Group imports by type (React, third-party, local)
-- **Translations**: Use `<Translate>` component for internationalized content
-- **Props**: Destructure props in function parameters
-- **Constants**: Use UPPERCASE for constants
+## Layout
 
-## Project Structure
+- `src/` — Astro routes, layouts, `DocsPage.astro`
+- `packages/web9-blocks/` — custom Portable Text blocks (editor definitions in `index.mjs`, renderers in `astro/`)
+- `scripts/lib/mdx-to-pt.mjs` — Docusaurus MDX -> EmDash `docs` payload (`convertMdx`); `scripts/convert-mdx.mjs` is its CLI
+- `legacy/` — the old Docusaurus site; input for the migration only, removed after cutover
+- `public/img/` — static images, same `/img/...` URLs as the old site
 
-- `/src/components/` - React components
-- `/src/css/` - CSS styling
-- `/src/pages/` - Page components
-- `/docs/` - Documentation content
-- `/blog/` - Blog posts
-- `/static/` - Static assets
+## Rules
 
-This is a Docusaurus project with TypeScript support running React 19.
+- Doc bodies are a `portableText` field plus inline custom blocks; never a `blocks` field (not searchable).
+- Adding a block type = definition in `packages/web9-blocks/index.mjs` + renderer in `astro/` + deploy before content uses it.
+- Markdown-valued block fields are rendered by `packages/web9-blocks/lib/markdown.mjs` and sanitized there.
+- Styling is Tailwind 4 (`src/styles/global.css`, spec §11). Colors are the template tokens (`bg-surface`, `text-muted`, `border-border`, `text-brand`); never use the `dark:` variant. `light-dark()` follows the theme toggle in dev; production builds currently lower it (spec §11, Plan 2 fix).
+- Tailwind scans only `src/` and `packages/web9-blocks/astro` (`source(none)` in `global.css`); never point `@source` at tests, docs, scripts or content, or their strings become real utilities (spec §10).
+- Content HTML never carries classes. Markdown output is styled only by `prose` on the container and by the whitelisted-class selectors in `packages/web9-blocks/astro/blocks.css` (utilities layer). Never widen the sanitizer's class/style whitelist; any block prop that reaches a `class` attribute must be whitelisted (see `safeTone`). Exception to know about: core `htmlBlock` keeps classes, so agents must not publish `htmlBlock` content (spec §10).
