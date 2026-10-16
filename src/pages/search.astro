@@ -11,27 +11,31 @@ const query = Astro.url.searchParams.get("q")?.trim() || "";
 // results, and handles tokenization/stemming. Templates that grep all
 // post bodies in JS quickly become unusable past a few hundred posts.
 const { items: results } = query
-	? await search(query, { collections: ["posts"], limit: 30 })
+	? await search(query, { collections: ["docs", "posts", "pages"], limit: 30 })
 	: { items: [] };
+
+// Every searchable collection is routed at /{collection}/{slug}; only docs have a zh-CN route.
+const resultHref = (r: { collection: string; id: string; slug?: string | null; locale?: string | null }) =>
+	`${r.collection === "docs" && r.locale && r.locale !== "en" ? `/${r.locale}` : ""}/${r.collection}/${r.slug ?? r.id}`;
 ---
 
 <Base
 	title={query ? `Search: ${query}` : "Search"}
-	description="Search blog posts"
+	description="Search the site"
 >
 	<section class="search-page">
 		<h1 class="search-title">Search</h1>
 
 		<form method="get" action="/search" class="search-form">
 			<label for="site-search-query" class="visually-hidden"
-				>Search blog posts</label
+				>Search the site</label
 			>
 			<input
 				id="site-search-query"
 				type="search"
 				name="q"
 				value={query}
-				placeholder="Search posts..."
+				placeholder="Search..."
 				class="search-input"
 				autofocus
 			/>
@@ -54,7 +58,7 @@ const { items: results } = query
 					{results.map((result) => (
 						<li class="search-result">
 							<a
-								href={`/posts/${result.slug ?? result.id}`}
+								href={resultHref(result)}
 								class="result-link"
 							>
 								<h2 class="result-title">{result.title ?? "Untitled"}</h2>
@@ -68,7 +72,7 @@ const { items: results } = query
 			)
 		}
 
-		{!query && <p class="search-hint">Enter a search term to find posts.</p>}
+		{!query && <p class="search-hint">Enter a search term.</p>}
 	</section>
 </Base>
 
