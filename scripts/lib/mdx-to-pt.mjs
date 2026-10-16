@@ -13,8 +13,12 @@
 //   images in prose                 -> core `image` blocks after the text block they were in
 //   <Tabs> inside <details>         -> bold tab labels + the tab bodies, in the details Markdown
 //   <MDXTemplate>, <AlignedText>, <TwitterFollowButton>, <style> -> dropped (children kept)
+//   code fences, <details>, HTML in a list item -> the same blocks as at top level, right after the item
+//   bilibili <iframe> player        -> dropped when the list item or the next block links to its video,
+//                                      else a paragraph linking to the player (never an iframe)
 //   everything else (prose)         -> standard Portable Text via the marked lexer
-// Any other raw HTML in prose is an error: the site rejects htmlBlock on save (spec §10).
+// Any other raw HTML in prose, block or inline (<img> and <br> aside), is an error: the site rejects htmlBlock
+// on save (spec §10).
 //
 // Output is deterministic: block keys come from the slug and the traversal order (fnv1a), so the
 // same source always gives the same JSON and the migration runner can skip unchanged entries.
@@ -211,7 +215,8 @@ export function mdxToBlocks(src, { path, slug: slugOption, lang = "en", site = "
 	}
 
 	/** Markdown for a block body (callout, details, tabs): videos become links, there is no block to put them in. */
-	const bodyMarkdown = (text) => mdxToMarkdown(text).replace(YOUTUBE_TOKEN, (_, n) => `[YouTube](${youtubeUrl(videos[n])})`);
+	const videoLinks = (markdown) => markdown.replace(YOUTUBE_TOKEN, (_, n) => `[YouTube](${youtubeUrl(videos[n])})`);
+	const bodyMarkdown = (text) => videoLinks(mdxToMarkdown(text));
 
 	/** Docusaurus Tabs inside Markdown: each tab becomes `**label**` + its dedented content (no label for a single tab). */
 	function tabsToMarkdown(text) {
@@ -226,6 +231,17 @@ export function mdxToBlocks(src, { path, slug: slugOption, lang = "en", site = "
 		const indents = lines.filter((l) => l.trim()).map((l) => l.match(/^ */)[0].length);
 		const min = indents.length ? Math.min(...indents) : 0;
 		return lines.map((l) => l.slice(min)).join("\n").trim();
+	}
+
+	/**
+	 * `<details>` content (what lies between the tags) -> details block. `toMarkdown` is bodyMarkdown for source
+	 * lines, videoLinks for HTML met in prose (the prose went through mdxToMarkdown already).
+	 */
+	function detailsBlock(inner, toMarkdown = bodyMarkdown) {
+		const summary = inner.match(/<summary>([\s\S]*?)<\/summary>/)?.[1].trim() ?? "Details";
+		const rest = inner.replace(/<summary>[\s\S]*?<\/summary>/, "").replace(/^\s*<\/?div>\s*$/gm, "");
+		// A details body is Markdown, so Tabs inside it become bold labels followed by each tab's content
+		return { _type: "details", _key: key(), summary, body: toMarkdown(tabsToMarkdown(dedent(rest))) };
 	}
 
 	// ---------------------------------------------------------------- Markdown -> Portable Text
@@ -278,7 +294,7 @@ export function mdxToBlocks(src, { path, slug: slugOption, lang = "en", site = "
 				case "html":
 					if (/^<br\s*\/?>$/i.test(t.raw.trim())) push("\n");
 					else if (/^<img\s/i.test(t.raw.trim())) media.push(imgAttributes(t.raw));
-					else push(t.raw);
+					else throw new Error(`${path}: unsupported HTML in prose: ${t.raw.trim().slice(0, 120)}`);
 					break;
 				case "image":
 					media.push({ src: t.href, alt: t.text ?? "" });
@@ -314,22 +330,24 @@ export function mdxToBlocks(src, { path, slug: slugOption, lang = "en", site = "
 		return { _type: "block", _key: key(), style: "normal", markDefs, children, ...extra };
 	};
 
-	// Numbered items carry listId + listStart (their own number) so a list split by an image, video or
-	// callout keeps counting instead of restarting at 1 (emdash/src/content/portable-text-lists.ts).
+	// Numbered items carry listId + listStart (their own number) so a list split by an image, video, callout or
+	// code block keeps counting instead of restarting at 1 (emdash/src/content/portable-text-lists.ts).
+	// `after` is the Markdown that follows the list, for the HTML rules of its last item.
 	let listSeq = 0;
-	function listToBlocks(list, level = 1) {
+	function listToBlocks(list, level = 1, after = "") {
 		const out = [];
 		const listId = list.ordered ? `${slug}:list-${listSeq++}` : undefined;
 		const start = Number(list.start) || 1;
 		for (const [n, item] of list.items.entries()) {
 			const extra = list.ordered ? { listItem: "number", level, listId, listStart: start + n } : { listItem: "bullet", level };
+			const near = `${item.raw}\n${list.items[n + 1]?.raw ?? after}`;
 			for (const t of item.tokens) {
-				if (t.type === "list") out.push(...listToBlocks(t, level + 1));
+				if (t.type === "list") out.push(...listToBlocks(t, level + 1, near));
 				else if (t.type === "text" || t.type === "paragraph") {
 					const block = textBlock(t.tokens ?? [t], extra);
 					if (hasText(block) || !media.length) out.push(block);
-					out.push(...mediaBlocks());
-				}
+				} else out.push(...tokenBlocks(t, near)); // code, details, other HTML: blocks of their own after the item
+				out.push(...mediaBlocks());
 			}
 		}
 		return out;
@@ -351,49 +369,65 @@ export function mdxToBlocks(src, { path, slug: slugOption, lang = "en", site = "
 		};
 	}
 
-	function markdownToBlocks(md) {
-		const blocks = [];
-		for (const t of marked.lexer(md)) {
-			switch (t.type) {
-				case "heading":
-					blocks.push(textBlock(t.tokens, { style: `h${t.depth}` }));
-					break;
-				case "paragraph": {
-					const block = textBlock(t.tokens);
-					if (hasText(block) || !media.length) blocks.push(block);
-					break;
-				}
-				case "list":
-					blocks.push(...listToBlocks(t));
-					break;
-				case "blockquote":
-					for (const p of t.tokens) if (p.tokens) blocks.push(textBlock(p.tokens, { style: "blockquote" }));
-					break;
-				case "hr":
-					blocks.push({ _type: "break", _key: key(), style: "line" });
-					break;
-				case "code":
-					blocks.push({ _type: "code", _key: key(), language: t.lang || undefined, code: t.text });
-					break;
-				case "table":
-					blocks.push(tableToCoreTable(t));
-					break;
-				case "html": {
-					// Only images (possibly in a styled wrapper div) are allowed; anything else needs a converter rule.
-					const html = t.raw.trim();
-					const tags = html.match(/<img\s[^>]*>/gi) ?? [];
-					const rest = html.replace(/<img\s[^>]*>/gi, "").replace(/<\/?(?:div|p|center)\b[^>]*>/gi, "").replace(/<br\s*\/?>/gi, "");
-					if (rest.trim()) throw new Error(`${path}: unsupported HTML in prose: ${html.slice(0, 120)}`);
-					for (const tag of tags) media.push(imgAttributes(tag));
-					break;
-				}
-				case "space":
-					break;
-				default:
-					console.error(`[convert] unhandled markdown token: ${t.type}`);
+	/** Blocks for one Markdown token, at top level or inside a list item; `near` is the Markdown around it. */
+	function tokenBlocks(t, near = "") {
+		switch (t.type) {
+			case "heading":
+				return [textBlock(t.tokens, { style: `h${t.depth}` })];
+			case "paragraph": {
+				const block = textBlock(t.tokens);
+				return hasText(block) || !media.length ? [block] : [];
 			}
-			blocks.push(...mediaBlocks());
+			case "list":
+				return listToBlocks(t, 1, near);
+			case "blockquote":
+				return t.tokens.filter((p) => p.tokens).map((p) => textBlock(p.tokens, { style: "blockquote" }));
+			case "hr":
+				return [{ _type: "break", _key: key(), style: "line" }];
+			case "code":
+				return [{ _type: "code", _key: key(), language: t.lang || undefined, code: t.text }];
+			case "table":
+				return [tableToCoreTable(t)];
+			case "html":
+				return htmlBlocks(t.raw.trim(), near);
+			case "space":
+				return [];
+			default:
+				console.error(`[convert] unhandled markdown token: ${t.type}`);
+				return [];
 		}
+	}
+
+	const PLAYER = /^<iframe\s[^>]*\bsrc="((?:https:)?\/\/player\.bilibili\.com\/player\.html\?[^"]*)"[^>]*>\s*<\/iframe>$/i;
+
+	/**
+	 * Block-level HTML in prose. `<details>` -> details block; a bilibili player -> nothing when `near` (the list
+	 * item and the next one, or the blocks around it) already links to its video, else a paragraph linking to the
+	 * player; images, also in a styled wrapper div -> image blocks. Anything else needs a converter rule.
+	 */
+	function htmlBlocks(html, near) {
+		const details = /^<details>([\s\S]*)<\/details>$/i.exec(html);
+		if (details) return [detailsBlock(details[1], videoLinks)];
+		const player = PLAYER.exec(html);
+		if (player) {
+			const url = new URL(player[1], "https://player.bilibili.com").href;
+			const bvid = /[?&]bvid=(BV\w+)/.exec(url)?.[1];
+			const aid = /[?&]aid=(\d+)/.exec(url)?.[1];
+			const video = bvid ?? (aid && `av${aid}`);
+			if (video && near.includes(`bilibili.com/video/${video}`)) return [];
+			return [textBlock([{ type: "link", href: url, tokens: [{ type: "text", text: "Bilibili" }] }])];
+		}
+		const tags = html.match(/<img\s[^>]*>/gi) ?? [];
+		const rest = html.replace(/<img\s[^>]*>/gi, "").replace(/<\/?(?:div|p|center)\b[^>]*>/gi, "").replace(/<br\s*\/?>/gi, "");
+		if (rest.trim()) throw new Error(`${path}: unsupported HTML in prose: ${html.slice(0, 120)}`);
+		for (const tag of tags) media.push(imgAttributes(tag));
+		return [];
+	}
+
+	function markdownToBlocks(md) {
+		const tokens = marked.lexer(md).filter((t) => t.type !== "space");
+		const blocks = [];
+		tokens.forEach((t, i) => blocks.push(...tokenBlocks(t, `${tokens[i - 1]?.raw ?? ""}\n${tokens[i + 1]?.raw ?? ""}`), ...mediaBlocks()));
 		return blocks;
 	}
 
@@ -492,11 +526,7 @@ export function mdxToBlocks(src, { path, slug: slugOption, lang = "en", site = "
 			flush();
 			const [inner, end] = collectUntil(i + 1, /^\s*<\/details>/);
 			i = end;
-			const joined = inner.join("\n");
-			const summary = joined.match(/<summary>([\s\S]*?)<\/summary>/)?.[1].trim() ?? "Details";
-			const rest = joined.replace(/<summary>[\s\S]*?<\/summary>/, "").replace(/^\s*<\/?div>\s*$/gm, "");
-			// A details body is Markdown, so Tabs inside it become bold labels followed by each tab's content
-			blocks.push({ _type: "details", _key: key(), summary, body: bodyMarkdown(tabsToMarkdown(dedent(rest))) });
+			blocks.push(detailsBlock(inner.join("\n")));
 		} else if (/^\s*<div className="tools-gallery">/.test(line)) {
 			flush();
 			const [inner, end] = collectUntil(i + 1, /^<\/div>\s*$/);

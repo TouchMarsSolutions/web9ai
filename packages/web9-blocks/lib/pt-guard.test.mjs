@@ -243,12 +243,12 @@ describe("guardPortableText: prototype keys and allow-lists on blocks", () => {
 		}
 		for (const listStart of [1, 2, 100000, undefined, null]) expect(guardPortableText([item(listStart)])).toEqual([]);
 	});
-	it("requires listId to be a string of at most 200 characters when present", () => {
+	it("requires listId to be a string of at most 128 characters when present (emdash normalizeListId ignores longer ones)", () => {
 		const item = (listId) => para({ listItem: "number", level: 1, listId, listStart: 1 });
 		for (const listId of [5, ["l"], { toString: 0 }, true]) expect(guardPortableText([item(listId)])).toEqual([notAllowed("#0 block", "listId", listId)]);
-		const long = "x".repeat(201);
+		const long = "x".repeat(129);
 		expect(guardPortableText([item(long)])).toEqual([`#0 block listId: value ${JSON.stringify(long).slice(0, 60)} is not allowed`]);
-		for (const listId of ["doc:list-0", "x".repeat(200), "", undefined, null]) expect(guardPortableText([item(listId)])).toEqual([]);
+		for (const listId of ["doc:list-0", "x".repeat(128), "", undefined, null]) expect(guardPortableText([item(listId)])).toEqual([]);
 	});
 	it("accepts prototype names as listId: emdash keys lists by Map and JSON strings, never by a plain object", () => {
 		// portable-text-lists.ts (activeLists, bases, counts) and numbered-list.ts use Map/Set; OrderedList.astro renders only start
@@ -366,10 +366,11 @@ describe("guardPortableText: converter output", () => {
 		expect(guardPortableText(blocks)).toEqual([]);
 	});
 	it("passes the migration converter output (scripts/lib/mdx-to-pt.mjs)", () => {
-		const mdx = `---\ntitle: T\n---\n\n## Heading\n\n${MARKDOWN}\n\nTail with <b>x</b>\n`;
-		const { data } = convertMdx(mdx, { path: "docs/a.mdx" });
-		const blocks = data.body.filter((b) => b._type !== "htmlBlock");
+		const mdx = `---\ntitle: T\n---\n\n## Heading\n\n${MARKDOWN}\n\nTail with a<br>break and ![x](/img/x.png)\n\n1. one\n    \`\`\`bash\n    echo 1\n    \`\`\`\n2. two\n`;
+		const { data: { body: blocks } } = convertMdx(mdx, { path: "docs/a.mdx" });
 		expect(blocks.some((b) => b.listItem === "bullet" && b.level === 2)).toBe(true);
+		expect(blocks.filter((b) => b.listStart).map((b) => [b.listStart, typeof b.listId])).toEqual(expect.arrayContaining([[1, "string"], [2, "string"]]));
+		expect(blocks.map((b) => b._type)).toEqual(expect.arrayContaining(["image", "code"]));
 		expect(guardPortableText(blocks)).toEqual([]);
 	});
 });

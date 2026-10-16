@@ -154,7 +154,7 @@ const LIST_ITEMS = new Set(["bullet", "number", "menu"]);
 // Decorators the editor emits (emdash content/converters/mark-safety.ts) and renders (components/marks.ts).
 const DECORATORS = new Set(["strong", "em", "underline", "strike-through", "subscript", "superscript", "code"]);
 const MAX_LIST_LEVEL = 20;
-const MAX_LIST_ID = 200;
+const MAX_LIST_ID = 128; // emdash normalizeListId (content/converters/numbered-list.ts) ignores longer ones
 const MAX_LIST_START = 100000;
 const MAX_MARKS = 20;
 const MAX_CHILDREN = 1000;

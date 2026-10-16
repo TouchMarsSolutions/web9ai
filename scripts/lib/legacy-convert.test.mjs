@@ -4,6 +4,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { ALLOWED_TAGS } from "../../packages/web9-blocks/lib/markdown.mjs";
 import { guardPortableText } from "../../packages/web9-blocks/lib/pt-guard.mjs";
 import { mdxToBlocks } from "./mdx-to-pt.mjs";
 
@@ -21,9 +22,41 @@ function strings(value, key = "", out = []) {
 	else if (value && typeof value === "object") for (const [k, v] of Object.entries(value)) strings(v, k, out);
 	return out;
 }
-const LEFTOVER = [/<[A-Z][A-Za-z]*\b/, /<\/?(?:Tabs|TabItem|details|summary|style)\b/, /%%(?:youtube|callout):/, /::::/];
+const LEFTOVER = [/<[A-Z][A-Za-z]*\b/, /<\/?(?:Tabs|TabItem|details|summary|style|iframe|script)\b/i, /%%(?:youtube|callout):/, /::::/];
 // Markdown bodies render `:::tone` at the start of a line (markdown.mjs); prose text and indented ones do not.
 const leftoverFor = (block) => (block._type === "block" ? [...LEFTOVER, /:::/] : [...LEFTOVER, /^[ \t]+:::/m]);
+// Tag names in any case: prose text holds no tag at all (inline HTML is an error), a Markdown body only tags its
+// sanitizer keeps (anything else would be dropped or shown as text).
+const unkeptTags = (block, s) =>
+	[...s.matchAll(/<\/?([a-z][\w-]*)/gi)].map((m) => m[1].toLowerCase()).filter((tag) => block._type === "block" || !ALLOWED_TAGS.includes(tag));
+
+/** First non-empty line of every fenced code block in the source (a fence inside a fence is code). */
+function fenceFirstLines(src) {
+	const out = [];
+	let fence = null;
+	let first = false;
+	for (const line of src.split("\n")) {
+		if (!fence) {
+			fence = /^\s*(`{3,}(?=[^`]*$)|~{3,})/.exec(line)?.[1] ?? null;
+			first = true;
+		} else if (new RegExp(`^\\s*${fence[0]}{${fence.length},}\\s*$`).test(line)) fence = null;
+		else if (first && line.trim()) {
+			out.push(line.trim());
+			first = false;
+		}
+	}
+	return out;
+}
+/** What a source must keep: fence first lines, http(s) link targets, and video ids (YouTube tags, bilibili players). */
+function mustKeep(src) {
+	const youtubeId = (url) => /(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/)|youtu\.be\/)([\w-]{11})/.exec(url)?.[1];
+	return [
+		...fenceFirstLines(src),
+		...[...src.matchAll(/\]\((https?:\/\/[^)\s]+)|\bhref="(https?:\/\/[^"]+)"/g)].map((m) => youtubeId(m[1] ?? m[2]) ?? m[1] ?? m[2]),
+		...[...src.matchAll(/<YouTube\b[^>]*?youTubeId=["']([\w-]{11})["']/g)].map((m) => m[1]),
+		...[...src.matchAll(/player\.bilibili\.com\/player\.html\?[^"]*\bbvid=(BV\w+)/g)].map((m) => m[1]),
+	];
+}
 
 describe.skipIf(!existsSync("legacy/docs"))("legacy content converts cleanly", () => {
 	const files = ROOTS.flatMap(walk);
@@ -40,10 +73,26 @@ describe.skipIf(!existsSync("legacy/docs"))("legacy content converts cleanly", (
 	it("leaves no MDX in visible text", () => {
 		const found = results.flatMap(({ file, blocks }) =>
 			blocks.flatMap((b, i) =>
-				b._type === "mermaid" ? [] : strings(b).flatMap((s) => leftoverFor(b).filter((re) => re.test(s)).map((re) => `${file} #${i} ${b._type}: ${re}`)),
+				b._type === "mermaid"
+					? []
+					: strings(b).flatMap((s) => [
+							...leftoverFor(b).filter((re) => re.test(s)).map((re) => `${file} #${i} ${b._type}: ${re}`),
+							...unkeptTags(b, s).map((tag) => `${file} #${i} ${b._type}: <${tag}>`),
+						]),
 			),
 		);
 		expect(found).toEqual([]);
+	});
+	it("keeps every code fence, every http(s) link and every video of the source", () => {
+		// Comments are dropped on purpose; YouTube links and tags are matched by video id (tags become embeds)
+		const lost = results.flatMap(({ file, blocks }) => {
+			const json = JSON.stringify(blocks);
+			const src = readFileSync(file, "utf8").replace(/<!--[\s\S]*?-->/g, "");
+			return mustKeep(src)
+				.filter((s) => !json.includes(JSON.stringify(s).slice(1, -1)))
+				.map((s) => `${file}: ${s.slice(0, 80)}`);
+		});
+		expect(lost).toEqual([]);
 	});
 	it("leaves no converter token anywhere, code included (an indented token would lex as code)", () => {
 		expect(results.flatMap(({ file, blocks }) => (JSON.stringify(blocks).match(/%%(?:youtube|callout):\d+%%/g) ?? []).map((t) => `${file}: ${t}`))).toEqual([]);

@@ -296,3 +296,53 @@ describe("convertMdx: legacy JSX (Task 7)", () => {
 		expect(shape(body("| a | b |\n|---|---|\n| ![x](/img/x.png) | y |\n\nafter\n"))).toEqual(["table", "image", "normal:after"]);
 	});
 });
+
+describe("convertMdx: list items keep their code, details and HTML (Task 7 fix round 1)", () => {
+	const body = (src) => convertMdx(src, { path: "a/b.mdx" }).data.body;
+	const shape = (blocks) => blocks.map((b) => (b._type === "block" ? `${b.listItem ?? b.style}:${b.children.map((c) => c.text).join("").trim()}` : b._type));
+	it("emits a fenced code block inside a list item as a code block after the item, numbering continues", () => {
+		const src = "1. Define `cog.yaml`\n    ```yaml\n    build:\n        gpu: true\n    ```\n2. Push\n    ```bash\n    cog push    \n    ```\n- Run it\n    ```python\n    def sum(a, b):\n        return a + b\n    ```\n";
+		const blocks = body(src);
+		expect(shape(blocks)).toEqual(["number:Define cog.yaml", "code", "number:Push", "code", "bullet:Run it", "code"]);
+		expect(blocks.filter((b) => b._type === "code").map((b) => [b.language, b.code])).toEqual([
+			["yaml", "build:\n    gpu: true"],
+			["bash", "cog push    "],
+			["python", "def sum(a, b):\n    return a + b"],
+		]);
+		expect([blocks[0].listStart, blocks[2].listStart]).toEqual([1, 2]);
+		expect(blocks[2].listId).toBe(blocks[0].listId);
+	});
+	it("emits a details element inside a list item as the same details block as at top level, after the item", () => {
+		const details = "<details>\n    <summary>Preloaded Models</summary>\n    - [openjourney](https://civitai.com/models/86/openjourney)\n    - [deliberate](https://civitai.com/models/4823/deliberate)\n</details>";
+		const listed = body(`- [Invoke AI](https://invoke-ai.github.io/InvokeAI/)\n- ${details.replace(/\n/g, "\n  ")}\n\nafter\n`);
+		expect(shape(listed)).toEqual(["bullet:Invoke AI", "details", "normal:after"]);
+		const top = body(`${details}\n`)[0];
+		expect(listed[1]).toEqual({ ...top, _key: listed[1]._key });
+		expect(top).toMatchObject({ summary: "Preloaded Models", body: "- [openjourney](https://civitai.com/models/86/openjourney)\n- [deliberate](https://civitai.com/models/4823/deliberate)" });
+	});
+	it("applies the top-level HTML rules to HTML inside a list item", () => {
+		expect(shape(body('- Poster\n\n  <div style={{textAlign: "center"}}>\n    <img src="/img/p.svg" alt="P">\n  </div>\n'))).toEqual(["bullet:Poster", "image"]);
+		expect(() => body('- Map\n\n  <iframe src="https://maps.example/embed"></iframe>\n')).toThrow(/unsupported HTML in prose: <iframe src="https:\/\/maps\.example/);
+		expect(() => body("- Note\n\n  <section>x</section>\n")).toThrow(/unsupported HTML in prose: <section>/);
+	});
+	it("drops a bilibili player whose video the list item or the next block already links to", () => {
+		const player = '<iframe src="//player.bilibili.com/player.html?aid=271160091&bvid=BV1Cc411P7rs&cid=1131288245&page=1" scrolling="no" allowfullscreen="true"></iframe>';
+		const inItem = body(`- [B站手把手视频讲解](https://www.bilibili.com/video/BV1Cc411P7rs/?share_source=copy_web):\n\n  ${player}\n- next\n`);
+		expect(shape(inItem)).toEqual(["bullet:B站手把手视频讲解:", "bullet:next"]);
+		expect(JSON.stringify(inItem)).not.toContain("player.bilibili.com");
+		const nextBlock = body(`${player}\n\n[B站](https://www.bilibili.com/video/BV1Cc411P7rs/)\n`);
+		expect(shape(nextBlock)).toEqual(["normal:B站"]);
+	});
+	it("links to the bilibili player when nothing nearby links to its video", () => {
+		const blocks = body('- Clip\n\n  <iframe src="//player.bilibili.com/player.html?aid=1&bvid=BV1Fg4y1c7qy&page=1"> </iframe>\n');
+		expect(shape(blocks)).toEqual(["bullet:Clip", "normal:Bilibili"]);
+		expect(blocks[1].markDefs.map((d) => d.href)).toEqual(["https://player.bilibili.com/player.html?aid=1&bvid=BV1Fg4y1c7qy&page=1"]);
+		expect(JSON.stringify(blocks)).not.toContain("iframe");
+	});
+	it("fails on inline raw HTML other than img and br, in prose, list items and table cells", () => {
+		for (const src of ["Tail with <b>x</b>\n", "- a <span>b</span>\n", "| a |\n|---|\n| <u>x</u> |\n", "Text <!-- note --> more\n"]) {
+			expect(() => body(src)).toThrow(/unsupported HTML in prose/);
+		}
+		expect(shape(body('Line<br>break <img src="/img/a.svg" alt="A"> end\n'))).toEqual(["normal:Line\nbreak  end", "image"]);
+	});
+});
