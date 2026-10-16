@@ -70,7 +70,7 @@ describe("widgetAreaIsSafe", () => {
 		const component = (componentId, componentProps) => ({ widgets: [{ id: "c", type: "component", componentId, componentProps }] });
 		expect(widgetAreaIsSafe(component("core:recent-posts", { urlTemplate: 5 }))).toBe(false);
 		expect(widgetAreaIsSafe(component("core:recent-posts", { count: 5, showDate: true }))).toBe(true);
-		expect(widgetAreaIsSafe(component("core:recent-posts", { count: 5, showThumbnails: true, showDate: false, urlTemplate: "/blog/:slug" }))).toBe(true);
+		expect(widgetAreaIsSafe(component("core:recent-posts", { count: 5, showThumbnails: true, showDate: false }))).toBe(true);
 		expect(widgetAreaIsSafe(component("core:recent-posts", "x"))).toBe(false);
 		expect(widgetAreaIsSafe(component("core:recent-posts", ["x"]))).toBe(false);
 		expect(widgetAreaIsSafe(component("core:recent-posts", { count: "5" }))).toBe(false);
@@ -99,11 +99,9 @@ describe("widgetAreaIsSafe", () => {
 		expect(widgetAreaIsSafe(component(JSON.parse('{"__proto__":{"placeholder":"x"}}')))).toBe(false);
 		expect(widgetAreaIsSafe(component({ constructor: "x" }))).toBe(false);
 	});
-	it("caps declared string props at 200 characters (core expands urlTemplate once per post)", () => {
+	it("caps declared string props at 200 characters", () => {
 		const component = (componentId, componentProps) => ({ widgets: [{ id: "c", type: "component", componentId, componentProps }] });
 		expect(widgetAreaIsSafe(component("core:recent-posts", { count: 100, urlTemplate: "/" + ":slug".repeat(399999) }))).toBe(false);
-		expect(widgetAreaIsSafe(component("core:recent-posts", { urlTemplate: "/" + "x".repeat(199) }))).toBe(true);
-		expect(widgetAreaIsSafe(component("core:recent-posts", { urlTemplate: "/" + "x".repeat(200) }))).toBe(false);
 		expect(widgetAreaIsSafe(component("core:search", { placeholder: "x".repeat(200) }))).toBe(true);
 		expect(widgetAreaIsSafe(component("core:search", { placeholder: "x".repeat(201) }))).toBe(false);
 	});
@@ -119,8 +117,35 @@ describe("widgetAreaIsSafe", () => {
 	});
 	it("fails an area with more than 20 widgets", () => {
 		const menus = (n) => ({ widgets: Array.from({ length: n }, (_, k) => ({ id: `m${k}`, type: "menu", menuName: "primary" })) });
-		expect(widgetAreaIsSafe(menus(20))).toBe(true);
 		expect(widgetAreaIsSafe(menus(21))).toBe(false);
+	});
+	it("rejects urlTemplate on core:recent-posts (templates expand :slug and :path per post, quadratically)", () => {
+		const recent = (componentProps) => ({ widgets: [{ id: "c", type: "component", componentId: "core:recent-posts", componentProps }] });
+		expect(widgetAreaIsSafe(recent({ urlTemplate: "/posts/:slug" }))).toBe(false);
+		expect(widgetAreaIsSafe(recent({ count: 5, urlTemplate: "/posts/:id" }))).toBe(false);
+		expect(widgetAreaIsSafe(recent({ count: 5 }))).toBe(true);
+	});
+	it("allows each componentId once per area and at most 2 menu widgets", () => {
+		const search = { id: "s", type: "component", componentId: "core:search" };
+		const menu = (k) => ({ id: `m${k}`, type: "menu", menuName: "primary" });
+		expect(widgetAreaIsSafe({ widgets: [search, { ...search, id: "s2" }] })).toBe(false);
+		expect(widgetAreaIsSafe({ widgets: [...stored(area("sidebar")).widgets, { id: "r2", type: "component", componentId: "core:recent-posts" }] })).toBe(false);
+		expect(widgetAreaIsSafe({ widgets: [menu(1), menu(2), menu(3)] })).toBe(false);
+		expect(widgetAreaIsSafe({ widgets: [menu(1), menu(2)] })).toBe(true);
+		expect(widgetAreaIsSafe({ widgets: [...stored(area("sidebar")).widgets, menu(1), menu(2)] })).toBe(true);
+	});
+	it("caps recent-posts count at 20, tags limit at 50 and archives limit at 24", () => {
+		const component = (componentId, componentProps) => ({ widgets: [{ id: "c", type: "component", componentId, componentProps }] });
+		expect(widgetAreaIsSafe(component("core:recent-posts", { count: 20 }))).toBe(true);
+		expect(widgetAreaIsSafe(component("core:recent-posts", { count: 21 }))).toBe(false);
+		expect(widgetAreaIsSafe(component("core:tags", { limit: 50 }))).toBe(true);
+		expect(widgetAreaIsSafe(component("core:tags", { limit: 51 }))).toBe(false);
+		expect(widgetAreaIsSafe(component("core:archives", { limit: 24 }))).toBe(true);
+		expect(widgetAreaIsSafe(component("core:archives", { limit: 25 }))).toBe(false);
+		for (const [id, key] of [["core:recent-posts", "count"], ["core:tags", "limit"], ["core:archives", "limit"]]) {
+			expect(widgetAreaIsSafe(component(id, { [key]: 1 }))).toBe(true);
+			for (const v of [0, 1.5]) expect(widgetAreaIsSafe(component(id, { [key]: v }))).toBe(false);
+		}
 	});
 	it("passes absent, null and empty componentProps", () => {
 		const component = (componentProps) => ({ widgets: [{ id: "c", type: "component", componentId: "core:search", componentProps }] });

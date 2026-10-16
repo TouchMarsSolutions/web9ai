@@ -8,16 +8,17 @@
 
 const TYPES = new Set(["menu", "component"]);
 
-// Every string a widget renders is bounded, and so is the number of widgets: core expands urlTemplate once per
-// post (count up to 100), so a 2 MB template becomes hundreds of MB of HTML on every page.
+// A footer widget renders on every page, so everything that multiplies its output is bounded: string lengths,
+// the number of widgets (each componentId once, at most MAX_MENUS menus) and the item counts below.
 const MAX_STRING = 200;
 const MAX_MENU_NAME = 100;
 const MAX_WIDGETS = 20;
+const MAX_MENUS = 2;
 
 const isString = (v) => typeof v === "string" && v.length <= MAX_STRING;
 const isBoolean = (v) => typeof v === "boolean";
-// count/limit reach SQL LIMIT or slice(); a fraction or a huge value is not a count anyone set on purpose
-const isCount = (v) => Number.isInteger(v) && v >= 1 && v <= 100;
+// count/limit reach SQL LIMIT or slice() and set how many items render; core's defaults are 5, 20 and 12
+const countUpTo = (max) => (v) => Number.isInteger(v) && v >= 1 && v <= max;
 const oneOf = (...values) => (v) => values.includes(v);
 
 // The five widgets in emdash components/WidgetRenderer.astro (componentMap, lines 19-25; line 36 indexes
@@ -26,12 +27,15 @@ const oneOf = (...values) => (v) => values.includes(v);
 // widgets/components.ts also declares; WidgetRenderer spreads componentProps into them unchecked. Astro reads
 // some prop keys itself before the component runs ("server:component-directive" throws), so a key the
 // component does not declare fails the area.
+// recent-posts has no urlTemplate here, so a widget that sets one fails: the site uses RecentPosts' default
+// `/posts/${post.id}` (RecentPosts.astro:53-63), and a template expands `:slug`/`:path` once per post, then
+// `:path` again inside the inserted slug, so its output grows quadratically.
 const COMPONENT_PROPS = {
-	"core:recent-posts": { count: isCount, showThumbnails: isBoolean, showDate: isBoolean, urlTemplate: isString },
+	"core:recent-posts": { count: countUpTo(20), showThumbnails: isBoolean, showDate: isBoolean },
 	"core:categories": { showCount: isBoolean, hierarchical: isBoolean },
-	"core:tags": { showCount: isBoolean, limit: isCount },
+	"core:tags": { showCount: isBoolean, limit: countUpTo(50) },
 	"core:search": { placeholder: isString },
-	"core:archives": { type: oneOf("monthly", "yearly"), limit: isCount },
+	"core:archives": { type: oneOf("monthly", "yearly"), limit: countUpTo(24) },
 };
 
 function componentIsSafe(widget) {
@@ -57,14 +61,17 @@ function widgetIsSafe(widget) {
 /**
  * @param {{ widgets?: Array<object> } | null | undefined} area
  * @returns {boolean} true only if the area holds at most 20 widgets and every one is a menu (menuName absent,
- *   null or a string of at most 100 characters) or one of the core components with only its declared
- *   componentProps, of the declared types; strings (title, urlTemplate, placeholder) hold at most 200
- *   characters; any content widget gives false
+ *   null or a string of at most 100 characters; at most 2 menus) or one of the core components (each at most
+ *   once) with only its declared componentProps, of the declared types; strings (title, placeholder) hold at
+ *   most 200 characters; any content widget gives false
  */
 export function widgetAreaIsSafe(area) {
 	try {
 		const widgets = area?.widgets ?? [];
-		return Array.isArray(widgets) && widgets.length <= MAX_WIDGETS && widgets.every(widgetIsSafe);
+		if (!Array.isArray(widgets) || widgets.length > MAX_WIDGETS || !widgets.every(widgetIsSafe)) return false;
+		const componentIds = widgets.filter((w) => w.type === "component").map((w) => w.componentId);
+		const menus = widgets.filter((w) => w.type === "menu").length;
+		return new Set(componentIds).size === componentIds.length && menus <= MAX_MENUS;
 	} catch {
 		return false;
 	}

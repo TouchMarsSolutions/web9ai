@@ -72,7 +72,7 @@ Fix the block and send the save again; never try to get around the check.
 
 ## Widgets
 
-Content widgets (rich text in a widget area) are not rendered: an area that holds one is hidden whole, the footer on every page included. Put that text in a doc or page instead. Component widgets take only the props their component declares; any other key hides the area too, and so do a `title` or string prop over 200 characters, a `menuName` over 100, or more than 20 widgets in one area.
+Content widgets (rich text in a widget area) are not rendered: an area that holds one is hidden whole, the footer on every page included. Put that text in a doc or page instead. Component widgets take only the props their component declares (`core:recent-posts` takes no `urlTemplate`: post links stay `/posts/<slug>`); any other key hides the area too, and so do a `title` or string prop over 200 characters, a `menuName` over 100, the same component twice in one area, more than 2 menu widgets, more than 20 widgets, or a recent-posts `count` over 20, a tags `limit` over 50 or an archives `limit` over 24.
 
 ## Checks after publishing
 
