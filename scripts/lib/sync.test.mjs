@@ -196,11 +196,15 @@ describe("upsertEntry", () => {
 		expect(await upsertEntry(cms.callTool, doc({ title: "Intro" }), { dryRun: true })).toMatchObject({ action: "published" });
 		expect(await upsertEntry(cms.callTool, doc({ title: "Intro" }))).toMatchObject({ action: "published" });
 		expect(cms.rows[0]).toMatchObject({ status: "published", draftRevisionId: null });
-		// A leftover that differs from the migration follows the ordinary overwrite rule.
+		// A draft that looks like a leftover but differs may be a person's (created in the admin, or saved then
+		// discarded): never replaced, with overwrite or in a dry run.
 		const stale = await leftover();
-		await expect(upsertEntry(stale.callTool, doc({ title: "Changed" }))).rejects.toThrow(/\[WOULD_OVERWRITE\]/);
-		expect(await upsertEntry(stale.callTool, doc({ title: "Changed" }), { overwrite: true })).toMatchObject({ action: "updated" });
-		expect(stale.rows[0]).toMatchObject({ status: "published", data: { title: "Changed" } });
+		const writesBefore = stale.writes().length;
+		for (const options of [{}, { overwrite: true }, { dryRun: true }]) {
+			await expect(upsertEntry(stale.callTool, doc({ title: "Changed" }), options)).rejects.toThrow(/^\[STATUS_MISMATCH\] docs\/intro \(en\)/);
+		}
+		expect(stale.writes().length).toBe(writesBefore);
+		expect(stale.rows[0]).toMatchObject({ status: "draft", data: { title: "Intro" } });
 		// Anything that has been published or saved before is somebody's decision, not a leftover.
 		const wasPublished = await leftover((r) => (r.publishedAt = "2026-01-01T00:00:00.000Z"));
 		const wasSaved = await leftover((r) => (r.draftRevisionId = "saved"));

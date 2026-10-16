@@ -14,7 +14,7 @@
 //   - stored equals want and nothing needs publishing      -> unchanged
 //   - want is published and the entry has a draft equal to want (an interrupted overwrite) -> publish it
 //   - want is published and the entry is a draft           -> [STATUS_MISMATCH] (an admin unpublished it, or a
-//     person drafted it), unless it is a crashed create's leftover, see isCreateLeftover
+//     person drafted it), unless it is a crashed create's leftover that equals want, see isCreateLeftover
 //   - want is a draft but the entry is not                 -> [STATUS_MISMATCH] (the runner never unpublishes)
 //   - otherwise it differs from want                       -> [WOULD_OVERWRITE] unless `overwrite` (a dry run reports it)
 
@@ -68,8 +68,10 @@ async function write(callTool, name, args) {
  * then publishes it (mcp/server.ts), so a crash in between leaves a draft that was never published and never
  * saved. An entry unpublished in the admin differs: unpublish keeps published_at, drops the live revision and
  * stages a draft copy, and every later save stages a draft too. All four fields must say "never touched";
- * a doubtful row fails closed ([STATUS_MISMATCH]) and a person publishes or deletes it. (A create that passes
- * publishedAt, as the posts step will, sets published_at on the draft and is not recognised here.)
+ * a doubtful row fails closed ([STATUS_MISMATCH]) and a person publishes or deletes it. A person's draft can look
+ * the same (created in the admin and never saved again, or saved then discarded), so only a leftover that equals
+ * want is published; one that differs is never replaced, even with overwrite. (A create that passes publishedAt,
+ * as the posts step will, sets published_at on the draft and is not recognised here.)
  */
 const isCreateLeftover = (item) =>
 	item.status === "draft" && item.liveRevisionId == null && item.draftRevisionId == null && item.publishedAt == null;
@@ -113,9 +115,9 @@ export async function upsertEntry(callTool, want, { dryRun = false, overwrite = 
 	if (pendingDraft && diff) {
 		throw new Error(`[PENDING_DRAFT] ${where}: ${diff}; this entry has an unpublished draft that differs from the migration, publish or discard it in the admin (the runner never overwrites a draft)`);
 	}
-	// The only status change the runner makes is to published, and only for an entry that was never touched.
+	// The only status change the runner makes is to published, and only for a leftover that equals want.
 	const wantsLive = status === "published";
-	if ((!wantsLive && item.status !== status) || (wantsLive && item.status !== "published" && !isCreateLeftover(item))) {
+	if ((!wantsLive && item.status !== status) || (wantsLive && item.status !== "published" && (diff || !isCreateLeftover(item)))) {
 		throw new Error(`[STATUS_MISMATCH] ${where}: the migration wants status ${status} but the entry is ${item.status}${item.status === "draft" ? " (unpublished or drafted by a person)" : ""}; the runner never changes that, fix it in the admin`);
 	}
 	const needsPublish = wantsLive && (item.status !== "published" || pendingDraft);
