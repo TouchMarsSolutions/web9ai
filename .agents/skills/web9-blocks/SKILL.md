@@ -19,6 +19,7 @@ Endpoint: `<site>/_emdash/api/mcp` with `Authorization: Bearer <token>`. In this
 - `section` is `ai` or `dev`. `sort_order` orders the sidebar within a category.
 - Chinese translation of an existing doc: same payload with `"locale": "zh-CN"` and `"translationOf": "<id of the en doc>"`.
 - `search_text` is generated automatically from block text on every save that includes a `body`; never write it.
+- Posts and pages work the same way: their block text also goes into an auto-generated `search_text` (field `content` instead of `body`).
 - Updating: `content_get` (slug as `id`) → `content_update` with `id`, `_rev` and only the changed `data` fields (this writes a draft; `status` still reads "published") → `content_get` again for the new `_rev` → `content_publish`.
 - Editing an existing body: `content_get` with `"markdown": true` returns `body` as Markdown plus `ec:block` lines; edit that and send the whole `body` back.
 - Translations share the slug with the en doc. `content_get` and `content_update` take `"locale": "zh-CN"` to scope the slug lookup; `content_publish` and `revision_list` have no `locale`, so for a translation use the item's ULID `id` (from `content_get`) in every call.
@@ -45,7 +46,11 @@ Always include a unique `_key` in every ec:block JSON, unique within the doc: ke
 
 Full Markdown (GFM, `:::tip Title … :::` admonitions, ```` ```mermaid ```` fences) works only in callout `body`, details `body` and tab `body`. Callout `title`, details `summary` and tool `tagline` are inline Markdown only (bold, links, code); tool_grid `title`, tab `label` and tool `name` are plain text. Raw HTML is sanitized: inline `style` keeps only cosmetic properties (no `position`, no `url()`), and `class`/`id` are removed. Do not try to style content with classes.
 
-Never use `htmlBlock` (`{"_type":"htmlBlock",…}`): raw HTML there keeps `class`/`id` and bypasses the Web9 sanitizer. Use the blocks listed below.
+The site rejects some blocks on save (`SAVE_REJECTED`, the message lists each problem as `body: #<index> <type> …`):
+- `htmlBlock`, `iframe` and any `_type` not listed in this file;
+- an `embed` with `html` (an `embed` takes only `url`; YouTube and Vimeo render as a player, anything else as a link);
+- core block fields outside their allowed values: `image.alignment` (left, center, right, wide, full), colours that are not `#hex`/`rgb()`, `cover.minHeight` other than a plain length, `code.language` with spaces, `tool_grid.logo_size` outside 16–300.
+Fix the block and send the save again; never try to get around the check.
 
 | Block | JSON |
 |---|---|

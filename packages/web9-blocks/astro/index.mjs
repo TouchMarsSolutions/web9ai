@@ -1,5 +1,7 @@
 import Callout from "./Callout.astro";
 import Details from "./Details.astro";
+import Embed from "./Embed.astro";
+import HtmlBlock from "./HtmlBlock.astro";
 import InvestmentWarning from "./InvestmentWarning.astro";
 import Mermaid from "./Mermaid.astro";
 import Tabs from "./Tabs.astro";
@@ -13,4 +15,7 @@ export const blockComponents = {
 	mermaid: Mermaid,
 	tool_grid: ToolGrid,
 	investment_warning: InvestmentWarning,
+	// Overrides of core renderers (plugin components win over core's, spec §10)
+	htmlBlock: HtmlBlock,
+	embed: Embed,
 };

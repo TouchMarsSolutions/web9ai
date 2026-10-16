@@ -1,0 +1,16 @@
+---
+// Replaces core's htmlBlock renderer (spec §10). Core keeps class/id/data-* and can render an isolated
+// srcdoc iframe that may navigate the top page on click; this renderer only ever emits sanitized inline
+// HTML. css, js and isolated are ignored on purpose. The save hook rejects new htmlBlocks; this covers
+// rows that reached the database some other way (seed, import).
+import { sanitizeHtmlFragment } from "../lib/html.mjs";
+
+interface Props {
+	node: { _type: "htmlBlock"; _key: string; html?: string; css?: string; js?: string; isolated?: boolean };
+}
+const { node } = Astro.props;
+const html = sanitizeHtmlFragment(node?.html);
+if (!html.trim()) return null;
+---
+
+<div class="my-6" set:html={html} />

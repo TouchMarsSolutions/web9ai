@@ -65,6 +65,7 @@
   - 按这条规则**推断**（未实测）：`callout` 的 `title`、`tabs` 的 `label`、`tool_grid` 的 `title` 和 `tagline`、`details` 的 `summary` 和 `body` 同样不会被索引；`mermaid` 的 `code` 会被 core 索引。
   - 做法：在 `docs` 上加一个 `search_text`（text, searchable）字段，由 `web9-blocks` 插件的 `content:beforeSave` hook 把**本插件自己的块类型**里的文字摊平写进去（core 的块不处理，留给 core 的索引）。
   - **已实现并验证（计划 1 Task 9）**：`search_text` hook 已实现；重新保存并发布探针 doc 后，`callout` 正文、`tabs` 正文、`tool_grid` 工具名称、`table` 单元格四个探针词各搜到 1 条；其中 `table` 单元格那条来自 core 自己的索引，不是 hook 写的。字段定义没有 hidden 选项，所以在 label 里注明是自动生成。已有内容需要重新保存一次才会生成 `search_text`（计划 2 的迁移会自然覆盖）。
+  - **已定（计划 2 Task 3）**：`posts.content`、`pages.content` 也用同一个 hook 写 `search_text`（hook 里的 collection → 字段映射 `{docs: body, posts: content, pages: content}`）。搜索只搜当前语言：zh-CN 页面上搜不到还没翻译的 en doc，接受（fallback 页面本来就是 en 内容）。
 - **建议**：在布局里加上 core 自带的 `WebMcpSearch`，让访客浏览器里的 AI agent 可以通过 WebMCP 搜索本站。
 
 ## 5. i18n
@@ -109,6 +110,7 @@
   - 在 Markdown 里插入自定义块，用单独一行 `<!--ec:block {json} -->`，已从源码确认解析器支持；
   - skill 里列出每种块的 JSON 示例；
   - **发布**：MCP 的 `content_create` 默认创建草稿（已实测）。要直接上线，传 `status: "published"`，或者之后再调用 `content_publish`。
+  - 写入时 guard：hook 拒绝 `htmlBlock`、`iframe`、带 `html` 的 `embed`、未知 `_type` 和 core 块里会被拼进 `class`/`style` 的非法字段值（计划 2 Task 3），错误码 `SAVE_REJECTED`。
 - **已验证（计划 1 Task 10）**：agent 只通过 MCP（一次 `content_create`，`status: "published"`，`body` 是 Markdown 字符串，块用单独一行 `<!--ec:block {json} -->`）从头写了一篇带 callout ×2、tabs、表格的 doc（slug `ai-e2e`）。workerd 上页面返回 200，所有块都渲染了，页面里没有残留的 `ec:block` 文本。(a) 没写 `_key` 的块存下来**也没有** `_key`：原样存储，runtime 不会补，页面渲染不受影响；写了 `_key` 的块原样保留。所以 skill 要求每个块都带唯一 `_key`（后台编辑器的表现见 §3 的 Task 11 结果：没有 `_key` 的块能正常编辑，保存时编辑器会补上 key；只走 MCP 的内容仍然没有 key）。(b) 表格**可以**通过 `ec:block` 写入：core 的 `table` 块 JSON 原样存下，页面渲染成 `<table>`，不需要退回 Portable Text JSON 数组。同一次创建里，`content:beforeSave` 钩子还写入了 `search_text`（含 callout 和 tabs 的文字，不含表格），`search` 能找到这篇。cookbook 在 `.agents/skills/web9-blocks/SKILL.md`。
 - 让 AI 读站点：`/llms.txt` 路由，从 `docs` 集合生成；可以再加 `/docs/{slug}.md`，用 `emdash/client` 的 `portableTextToMarkdown` 输出。
 
@@ -137,7 +139,7 @@
 | Markdown 字段不是所见即所得 | 后台编辑体验一般 | 已接受；AI 和开发者是主要作者 |
 | EmDash 1.x 刚发布（1.1.0 在 10-01） | API 变动较快 | 锁定 minor 版本，升级前读 changelog |
 | 预览环境和生产共用数据库 | 分支代码可能改到生产数据 | §9 staging environment |
-| AI 直接发布的 Markdown / HTML | XSS、CSS 注入（全屏遮罩钓鱼、`url()` 追踪） | `sanitize-html` 白名单（已实现并测试）：<br>• 去掉事件属性和 `javascript:` 链接<br>• class 只允许白名单里的几个。用了 Tailwind 之后，这条白名单**不能放宽**：`<div class="fixed inset-0 z-50">` 只靠 class 就能做出全屏遮罩<br>• inline style 只允许排版类属性，不允许定位，也不允许 `url()`、`expression()` 和 CSS 转义<br>• **`htmlBlock` 不在这条白名单里，不是 class-safe**：core 的 sanitizer 保留 `class`/`id`/`data-*`，`ec:block` 解析器接受任意 `_type`，所以任何能写内容的人都能发布带 class 的 `htmlBlock`<br>• 目前的不变式：公开页面加载的 CSS 里没有内容能用的遮罩类 utility（emdash 后台自己的样式表只在 `/_emdash/admin` 加载，不算在内）。靠 Tailwind 只扫描 `src/` 和 `packages/web9-blocks/astro`（`global.css` 里用 `source(none)`）来保证<br>• 长期的控制是计划 2 的关口，必须在创建 AI Editor 账号之前落地：web9 自己的 `htmlBlock` renderer 覆盖（去掉 class/id），加构建期的 CSS denylist |
+| AI 直接发布的 Markdown / HTML | XSS、CSS 注入（全屏遮罩钓鱼、`url()` 追踪） | `sanitize-html` 白名单（已实现并测试）：<br>• 去掉事件属性和 `javascript:` 链接<br>• class 只允许白名单里的几个。用了 Tailwind 之后，这条白名单**不能放宽**：`<div class="fixed inset-0 z-50">` 只靠 class 就能做出全屏遮罩<br>• inline style 只允许排版类属性，不允许定位，也不允许 `url()`、`expression()` 和 CSS 转义<br>• **`htmlBlock` 不在这条白名单里，不是 class-safe**：core 的 sanitizer 保留 `class`/`id`/`data-*`，`ec:block` 解析器接受任意 `_type`，所以任何能写内容的人都能发布带 class 的 `htmlBlock`<br>• **三层控制（计划 2 落地，必须在创建 AI Editor 账号之前）**：① 写入时 `content:beforeSave` 里的 PT guard（拒绝 `htmlBlock`、`iframe`、带 `html` 的 `embed`、未知类型，以及 `cover.minHeight`、`image.dominantColor`、`columns[].width`、`button.style`、`code.language` 等会被 core renderer 原样拼进 `style`/`class` 的字段值）；② 渲染时 web9 的 `htmlBlock`/`embed` renderer 覆盖 core（`sanitizeHtmlFragment` 去掉 class/id/data-*/style；`isolated` 直接忽略，不交给 core 的 srcdoc iframe，因为它能在点击时导航顶层页面）；③ 构建后 `check-public-css`：公开页面加载的 CSS 里不能有 `fixed`、`inset-*`、`z-*`、`*-screen`、视口单位这类 utility（emdash 后台的样式表只在 `/_emdash/admin` 加载，按来源排除）<br>• `data-*` 必须去掉：Astro 的 scoped CSS 选择器是 `[data-astro-cid-*]`，`class` + `data-astro-cid-*` 能复用公开 CSS 里任何组件规则（例如 `.emdash-cover__background{position:absolute;inset:0}`） |
 | 用请求的 Host 头拼绝对 URL（模板代码） | RSS / OG 链接被投毒 | `astro.config` 固定 `site: "https://www.web9.ai"`；`rss.xml.ts`、`posts/[slug]`、`pages/[slug]` 改为用 `site`（已修） |
 
 ## 11. 样式（2026-10-15 新增：owner 要求用 Tailwind）

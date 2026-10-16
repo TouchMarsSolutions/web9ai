@@ -1,4 +1,5 @@
-import { definePlugin } from "emdash";
+import { ContentSaveRejectedError, definePlugin } from "emdash";
+import { guardPortableText } from "./lib/pt-guard.mjs";
 import { extractBlockText } from "./lib/search-text.mjs";
 
 const ID = "web9-blocks";
@@ -101,8 +102,26 @@ export const BLOCKS = [
 	},
 ];
 
-/** `_type`s of this plugin's blocks; only their text is mirrored into docs.search_text. */
+/** `_type`s of this plugin's blocks; only their text is mirrored into search_text. */
 const BLOCK_TYPES = new Set(BLOCKS.map((b) => b.type));
+
+/** Portable Text fields per collection: all are guarded on every save; the first one feeds search_text. */
+export const PT_FIELDS = { docs: ["body"], posts: ["content"], pages: ["content"] };
+
+/**
+ * content:beforeSave. Rejects unsafe blocks (spec §10), then mirrors this plugin's block text into
+ * search_text, because core search only indexes text/alt/caption/code strings (spec §4).
+ */
+export async function beforeSave({ content, collection }) {
+	const fields = PT_FIELDS[collection];
+	if (!fields) return content;
+	const problems = fields.flatMap((f) => (content[f] === undefined ? [] : guardPortableText(content[f]).map((p) => `${f}: ${p}`)));
+	if (problems.length) throw new ContentSaveRejectedError(`Save rejected (spec §10): ${problems.join("; ")}`.slice(0, 1000));
+	const [main] = fields;
+	// Updates pass only the changed fields; when the body didn't change, keep search_text as is.
+	if (content[main] === undefined) return content;
+	return { ...content, search_text: extractBlockText(content[main], BLOCK_TYPES) };
+}
 
 export function web9Blocks() {
 	return {
@@ -122,13 +141,7 @@ export function createPlugin() {
 		// content:beforeSave is skipped without this capability
 		capabilities: ["content:write"],
 		hooks: {
-			// Spec §4: core search does not index custom-block text; mirror it into docs.search_text.
-			// Only this plugin's block types are walked; core nodes are left to core search.
-			"content:beforeSave": async ({ content, collection }) => {
-				// Updates pass only the changed fields; when body didn't change, keep search_text as is.
-				if (collection !== "docs" || content.body === undefined) return content;
-				return { ...content, search_text: extractBlockText(content.body, BLOCK_TYPES) };
-			},
+			"content:beforeSave": beforeSave,
 		},
 		admin: { portableTextBlocks: BLOCKS },
 	});
