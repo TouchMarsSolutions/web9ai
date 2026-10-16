@@ -17,7 +17,8 @@ const prefix = locale === "en" ? "" : `/${locale}`;
 const byGroup = new Map();
 for (const l of new Set(["en", locale])) {
 	const { entries: list } = await getEmDashCollection("docs", { locale: l, limit: 500 });
-	for (const e of list) byGroup.set(e.data.translationGroup ?? e.data.id, e);
+	// translationGroup is on every entry at runtime but not in the generated Doc type
+	for (const e of list) byGroup.set((e.data as { translationGroup?: string | null }).translationGroup ?? e.data.id, e);
 }
 const entries: any[] = [...byGroup.values()];
 const groups = new Map<string, typeof entries>();
