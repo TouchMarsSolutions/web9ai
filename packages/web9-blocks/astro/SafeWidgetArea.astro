@@ -1,0 +1,18 @@
+---
+// Replaces core's WidgetArea in Base.astro and posts/[slug].astro (spec §10). Widget content reaches the
+// database through REST without passing content:beforeSave, so check it here and render nothing if it holds
+// a block the save guard would reject.
+import { getWidgetArea } from "emdash";
+import { WidgetArea } from "emdash/ui";
+import { widgetAreaIsSafe } from "../lib/widgets.mjs";
+
+interface Props {
+	name: string;
+	class?: string;
+}
+const { name, class: className } = Astro.props;
+const safe = widgetAreaIsSafe(await getWidgetArea(name));
+if (!safe) console.warn(`[web9-blocks] widget area "${name}" holds content the save guard would reject; not rendered`);
+---
+
+{safe && <WidgetArea name={name} class={className} />}

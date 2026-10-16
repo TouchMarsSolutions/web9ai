@@ -47,9 +47,11 @@ Always include a unique `_key` in every ec:block JSON, unique within the doc: ke
 Full Markdown (GFM, `:::tip Title … :::` admonitions, ```` ```mermaid ```` fences) works only in callout `body`, details `body` and tab `body`. Callout `title`, details `summary` and tool `tagline` are inline Markdown only (bold, links, code); tool_grid `title`, tab `label` and tool `name` are plain text. Raw HTML is sanitized: inline `style` keeps only cosmetic properties (no `position`, no `url()`), and `class`/`id` are removed. Do not try to style content with classes.
 
 The site rejects some blocks on save (`SAVE_REJECTED`, the message lists each problem as `body: #<index> <type> …`):
-- `htmlBlock`, `iframe` and any `_type` not listed in this file;
+- `htmlBlock`, `iframe` and any `_type` outside this allow list: `block` (paragraphs, headings, list items), `blockquoteGroup`, `break`, `table`, `file`, `pullquote`, `video`, `image`, `gallery`, `columns`, `cover`, `button`, `buttons`, `code`, `embed`, `callout`, `tabs`, `details`, `mermaid`, `tool_grid`, `investment_warning`;
+- a `block` whose `children` hold anything but `span` (no blocks, covers, images or iframes inside a paragraph), a `span` with its own `children`, and any other node with `children`;
 - an `embed` with `html` (an `embed` takes only `url`; YouTube and Vimeo render as a player, anything else as a link);
-- core block fields outside their allowed values: `image.alignment` (left, center, right, wide, full), colours that are not `#hex`/`rgb()`, `cover.minHeight` other than a plain length, `code.language` with spaces, `tool_grid.logo_size` outside 16–300.
+- core block fields outside their allowed values: `image.alignment` (left, center, right, wide, full), colours that are not `#hex`/`rgb()`, `cover.minHeight` other than a plain length, `code.language` with spaces, `tool_grid.logo_size` outside 16–300;
+- an image whose `dominantColor` is not `#hex`/`rgb()` or whose `blurhash` does not decode: the `image` and `gallery` blocks, and the `featured_image` field of posts (including its `meta` and `darkVariant`).
 Fix the block and send the save again; never try to get around the check.
 
 | Block | JSON |

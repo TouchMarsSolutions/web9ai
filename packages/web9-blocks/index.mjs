@@ -1,5 +1,5 @@
 import { ContentSaveRejectedError, definePlugin } from "emdash";
-import { guardPortableText } from "./lib/pt-guard.mjs";
+import { guardImageValue, guardPortableText } from "./lib/pt-guard.mjs";
 import { extractBlockText } from "./lib/search-text.mjs";
 
 const ID = "web9-blocks";
@@ -108,18 +108,30 @@ const BLOCK_TYPES = new Set(BLOCKS.map((b) => b.type));
 /** Portable Text fields per collection: all are guarded on every save; the first one feeds search_text. */
 export const PT_FIELDS = { docs: ["body"], posts: ["content"], pages: ["content"] };
 
+/** `image` fields per collection: guarded on every save (colour and blurhash values reach style and a decoder). */
+export const IMAGE_FIELDS = { posts: ["featured_image"] };
+
 /**
- * content:beforeSave. Rejects unsafe blocks (spec §10), then mirrors this plugin's block text into
- * search_text, because core search only indexes text/alt/caption/code strings (spec §4).
+ * content:beforeSave. Rejects unsafe blocks and image values (spec §10), then mirrors this plugin's block
+ * text into search_text, because core search only indexes text/alt/caption/code strings (spec §4).
  */
 export async function beforeSave({ content, collection }) {
-	const fields = PT_FIELDS[collection];
-	if (!fields) return content;
-	const problems = fields.flatMap((f) => (content[f] === undefined ? [] : guardPortableText(content[f]).map((p) => `${f}: ${p}`)));
+	const fields = PT_FIELDS[collection] ?? [];
+	const imageFields = IMAGE_FIELDS[collection] ?? [];
+	if (!fields.length && !imageFields.length) return content;
+	const problems = [
+		...fields.flatMap((f) => guardPortableText(content[f]).map((p) => `${f}: ${p}`)),
+		...imageFields.flatMap((f) => guardImageValue(content[f]).map((p) => `${f}: ${p}`)),
+	];
 	if (problems.length) throw new ContentSaveRejectedError(`Save rejected (spec §10): ${problems.join("; ")}`.slice(0, 1000));
 	const [main] = fields;
-	// Updates pass only the changed fields; when the body didn't change, keep search_text as is.
-	if (content[main] === undefined) return content;
+	// Updates pass only the changed fields; when the body didn't change, keep the stored search_text
+	// (so a caller-sent one is dropped, not stored).
+	if (main === undefined || content[main] === undefined) {
+		if (!("search_text" in content)) return content;
+		const { search_text: _dropped, ...rest } = content;
+		return rest;
+	}
 	return { ...content, search_text: extractBlockText(content[main], BLOCK_TYPES) };
 }
 

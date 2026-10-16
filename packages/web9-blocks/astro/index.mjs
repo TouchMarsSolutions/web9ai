@@ -19,3 +19,6 @@ export const blockComponents = {
 	htmlBlock: HtmlBlock,
 	embed: Embed,
 };
+
+// Widget content skips content:beforeSave, so layouts render widget areas through this (spec §10)
+export { default as SafeWidgetArea } from "./SafeWidgetArea.astro";

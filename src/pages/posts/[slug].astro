@@ -7,7 +7,8 @@ import {
 	decodeSlug,
 	getSiteSettings,
 } from "emdash";
-import { Image, PortableText, WidgetArea } from "emdash/ui";
+import { Image, PortableText } from "emdash/ui";
+import { SafeWidgetArea } from "@web9/blocks/astro";
 import { Comments, CommentForm } from "emdash/ui/comments";
 import Base from "../../layouts/Base.astro";
 import PostCard from "../../components/PostCard.astro";
@@ -248,7 +249,7 @@ const publishDate =
 						</div>
 					</nav>
 					<div class="sidebar-widgets">
-						<WidgetArea name="sidebar" />
+						<SafeWidgetArea name="sidebar" />
 					</div>
 				</div>
 			</aside>
