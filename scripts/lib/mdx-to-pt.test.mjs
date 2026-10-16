@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { convertMdx, cssObjectToString, mdxToBlocks, parseTabs } from "./mdx-to-pt.mjs";
+import { convertMdx, cssObjectToString, fnv1a, mdxToBlocks, parseTabs } from "./mdx-to-pt.mjs";
 
 describe("cssObjectToString", () => {
 	it("keeps commas inside CSS functions", () => {
@@ -87,7 +87,26 @@ describe("convertMdx", () => {
 		const out = convertMdx("---\ntitle: Lambda Labs\n---\n# Lambda Labs GPU Cloud\n\nhello\n", { path: "a/05-lambda.mdx" });
 		expect(out.data.title).toBe("Lambda Labs");
 		expect(out.data.body.map((b) => b.style)).toEqual(["normal"]);
-		expect(convertMdx("# Only H1\n\nx\n", { path: "a/b.mdx" }).data.title).toBe("Only H1");
+		const plain = convertMdx("# Only H1\n\nx\n", { path: "a/b.mdx" });
+		expect(plain.data.title).toBe("Only H1");
+		expect(plain.data.body).toHaveLength(1); // a plain H1 leaves nothing behind
+	});
+	it("keeps the link of the dropped first H1 as a normal paragraph", () => {
+		const rewriteHref = (href) => (href === "./lat" ? "/docs/lat" : href);
+		const out = convertMdx("# [Latitude](https://www.latitude.sh/r/C4FC3EA5)\n\nhello\n", { path: "a/08-latitude.mdx" });
+		expect(out.data.title).toBe("Latitude");
+		expect(out.data.body).toHaveLength(2);
+		const [first, second] = out.data.body;
+		expect(first).toMatchObject({ _type: "block", style: "normal" });
+		expect(first.children.map((c) => c.text).join("")).toBe("Latitude");
+		expect(first.markDefs.map((d) => d.href)).toEqual(["https://www.latitude.sh/r/C4FC3EA5"]);
+		expect(first.children[0].marks).toEqual([first.markDefs[0]._key]);
+		expect(second.children[0].text).toBe("hello");
+		// the frontmatter title wins; the link is still kept and goes through rewriteHref
+		const fm = convertMdx("---\ntitle: Lat Labs\n---\n# [Latitude](./lat)\n", { path: "a/b.mdx", rewriteHref });
+		expect(fm.data.title).toBe("Lat Labs");
+		expect(fm.data.body.map((b) => b.style)).toEqual(["normal"]);
+		expect(fm.data.body[0].markDefs.map((d) => d.href)).toEqual(["/docs/lat"]);
 	});
 	it("takes the InvestmentWarning language from its import", () => {
 		const warn = (file) => `import InvestmentWarning from '@site/src/components/invest/${file}';\n\n<InvestmentWarning />\n`;
@@ -115,6 +134,40 @@ describe("convertMdx", () => {
 		expect(body[0].markDefs.map((d) => d.href)).toEqual(["/docs/qblock", "https://x.example"]);
 		expect(body[1].body).toBe("Also [q](/docs/qblock).");
 	});
+	it("rewrites href attributes in block bodies", () => {
+		const rewriteHref = (href) => (href === "./qblock" ? "/docs/qblock" : href);
+		const src = ':::tip T\nSee <a href="./qblock">q</a> and <a href="https://x.example">x</a>.\n:::\n';
+		const { body } = convertMdx(src, { path: "a/b.mdx", rewriteHref }).data.body[0];
+		expect(body).toBe('See <a href="/docs/qblock">q</a> and <a href="https://x.example">x</a>.');
+	});
+	it("does not rewrite links inside fenced code, inline code or mermaid", () => {
+		const rewriteHref = () => "/rewritten";
+		const src = [
+			"See [a](./a) and `](./x)` here.",
+			"",
+			"```md",
+			'See [x](./x) <a href="./h">',
+			"```",
+			"",
+			":::tip T",
+			"~~~",
+			"[y](./y)",
+			"~~~",
+			"[z](./z) `[w](./w)`",
+			":::",
+			"",
+			"```mermaid",
+			"A[x](./m) --> B",
+			"```",
+		].join("\n");
+		const body = convertMdx(src, { path: "a/b.mdx", rewriteHref }).data.body;
+		expect(body.map((b) => b._type)).toEqual(["block", "code", "callout", "mermaid"]);
+		expect(body[0].markDefs.map((d) => d.href)).toEqual(["/rewritten"]);
+		expect(body[0].children.find((c) => c.marks.includes("code")).text).toBe("](./x)");
+		expect(body[1].code).toBe('See [x](./x) <a href="./h">');
+		expect(body[2].body).toBe("~~~\n[y](./y)\n~~~\n[z](/rewritten) `[w](./w)`");
+		expect(body[3].code).toBe("A[x](./m) --> B");
+	});
 	it("gives every block, span and markDef a deterministic key unique within the doc", () => {
 		const src = "# T\n\nA [l](/x) **b**\n\n| a | b |\n|---|---|\n| 1 | 2 |\n";
 		const keys = (v) => JSON.stringify(v).match(/"_key":"[^"]+"/g);
@@ -122,5 +175,24 @@ describe("convertMdx", () => {
 		expect(keys(mdxToBlocks(src, { path: "a/b.mdx" }).blocks)).toEqual(first);
 		expect(new Set(first).size).toBe(first.length);
 		expect(keys(mdxToBlocks(src, { path: "a/other.mdx" }).blocks)).not.toEqual(first);
+	});
+	it("pins the fnv1a hash and the key format", () => {
+		// 32-bit FNV-1a test vectors
+		expect(fnv1a("")).toBe(0x811c9dc5);
+		expect(fnv1a("a")).toBe(0xe40c292c);
+		expect(fnv1a("foobar")).toBe(0xbf9cf968);
+		// k<n base36><last 4 base36 digits of fnv1a("<slug>:<n>")>: the span is key 0, its block key 1
+		const [block] = mdxToBlocks("hello\n", { path: "a/b.mdx" }).blocks;
+		expect([block.children[0]._key, block._key]).toEqual(["k0d4av", "k1dilw"]);
+		const other = mdxToBlocks("hello\n", { path: "a/b.mdx", slug: "other" });
+		expect(other.slug).toBe("other");
+		expect([other.blocks[0].children[0]._key, other.blocks[0]._key]).toEqual(["k060pj", "k16f0k"]);
+	});
+	it("uses the lang option only when the file imports no InvestmentWarning", () => {
+		const bare = "<InvestmentWarning />\n";
+		const lang = (src, options) => convertMdx(src, { path: "a/b.mdx", ...options }).data.body[0].lang;
+		expect(lang(bare)).toBe("en");
+		expect(lang(bare, { lang: "zh" })).toBe("zh");
+		expect(lang(`import InvestmentWarning from '@site/x/InvestmentWarning.mdx';\n\n${bare}`, { lang: "zh" })).toBe("en");
 	});
 });

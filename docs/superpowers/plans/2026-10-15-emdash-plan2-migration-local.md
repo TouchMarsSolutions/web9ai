@@ -64,7 +64,7 @@
 | redirects 由 runner 通过 REST 写入（幂等），不写进 seed | runner 需要 admin token；本来写内容也要 |
 | blog 日期用 git 首次提交时间（Docusaurus 显示的日期），不用目录名里的日期 | `ai-tools-adhoc` 帖子显示 2025-04-11，不是 05-18 |
 | `legacy/blog/20250518-ai-tools-adhoc` 作为一篇短帖迁移，链接改成 `/docs/ai-tools-adhoc` | 多一篇只有一句话的帖子 |
-| doc 标题 = frontmatter `title`，没有才用正文第一个 H1；第一个 H1 总是从正文删掉 | 9 篇 doc 的页面大标题和旧站不同（旧站页面显示 H1，侧栏显示 frontmatter title） |
+| doc 标题 = frontmatter `title`，没有才用正文第一个 H1；第一个 H1 总是从正文删掉（H1 里带链接的，链接保留成一个普通段落） | 8 篇 doc 的页面大标题和旧站不同（旧站页面显示 H1，侧栏显示 frontmatter title） |
 | `category` 存目录名（`cloud`、`usecase`……），显示名由 `DocsPage` 映射（zh-CN 的 `usecase` 显示"神兵利器"） | 改显示名要改代码 |
 | 只有一个 en `primary` 菜单；zh-CN 页面上 `Base` 给 `/`、`/docs/...` 链接加 `/zh-CN` 前缀 | zh-CN 菜单文字是英文 |
 | 搜索只搜当前语言（现状）：zh-CN 页面上搜不到没翻译的 en doc | 写进 spec §4，不改 |
@@ -2180,13 +2180,13 @@ Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
 现在的问题：
 - `key()` 用 `Math.random()`：同一个文件两次转换，35/35 个文件输出都不一样，runner 没法判断"内容没变、跳过"。
 - frontmatter 只认单行 `key: value`：`tags: [a, b]` 是字符串，`draft: true` 是字符串 `"true"`（Task 10 的 posts 要用）。
-- 标题取第一个 H1，Docusaurus 是 frontmatter `title` 优先（9 个文件不一样，例如 `05-lambda`：fm "Lambda Labs"，H1 "Lambda Labs GPU Cloud"）。裁决：`title = fm.title ?? H1`，第一个 H1 总是从正文删掉（语料里每篇最多一个 H1，而且都是重复的标题，已逐个检查）。
+- 标题取第一个 H1，Docusaurus 是 frontmatter `title` 优先（8 个文件不一样，例如 `05-lambda`：fm "Lambda Labs"，H1 "Lambda Labs GPU Cloud"）。裁决：`title = fm.title ?? H1`，第一个 H1 总是从正文删掉（语料里每篇最多一个 H1，而且都是重复的标题，已逐个检查）；H1 里带链接的（16 篇，其中 5 篇的链接在正文别处没有），链接保留成一个普通段落。
 - `lang` 默认 `"zh"`：en 文档里的 `<InvestmentWarning />` 全变成中文。应由 import 决定：`InvestmentWarning.cn.mdx` → zh，`InvestmentWarning.mdx` → en（en 的 `01_ai_hot_tools` 确实导入 `.cn.mdx`，保持 zh）。
 - 4 冒号 admonition（`::::warning Problem:` 包着 `:::info`，en+zh 的 `run_diffusion`、`replicate`、`qblock` 共 6 个文件）不识别：外层变成两段字面文字 `::::warning Problem:` / `::::`，列表散落在外面。callout 正文是 Markdown，不能嵌套 callout，所以拆成两个相邻的 callout。
 - `collectUntil` 不认代码块：callout 正文的代码块里如果有一行 `:::`，callout 会提前结束。
 - 文档里的相对链接（`./qblock`、`../16-prompt/01-popular-prompt-guide.mdx`）和旧站 URL（`/ai/usecase/ai-tools-adhoc`）原样保留，会 404。这里只加一个 `rewriteHref` 钩子，映射表在 Task 8 由 legacy inventory 生成。
 
-实测（在副本上跑全部 35 个文件）：改完后两次转换逐字节相同，每篇 key 不重复；和改之前相比，只有 6 个 4 冒号文件的块数变化（例如 en `qblock` 25 → 14：13 个散落的段落合进了 "Problem" callout）和 9 个文件的标题变化，其余只是 key 不同。
+实测（在副本上跑全部 35 个文件）：改完后两次转换逐字节相同，每篇 key 不重复；和改之前相比，只有 6 个 4 冒号文件的块数变化（例如 en `qblock` 25 → 14：13 个散落的段落合进了 "Problem" callout）和 8 个文件的标题变化，其余只是 key 不同。
 
 **Files:**
 - Create: `scripts/lib/frontmatter.mjs`、`scripts/lib/frontmatter.test.mjs`、`scripts/lib/fixtures/01_ai_hot_tools.mdx`（复制）

@@ -90,11 +90,61 @@ export function parseTabs(jsx) {
 	return { tabs, defaultIndex: Math.max(0, tabs.findIndex((t) => t.value === defaultValue)) };
 }
 
-/** Markdown links and href attributes in `text`, passed through `rewriteHref`. */
+/** Apply `fn` to the parts of one paragraph outside inline code spans (a span never crosses a blank line). */
+function outsideInlineCode(paragraph, fn) {
+	let out = "";
+	let last = 0;
+	const ticks = /`+/g;
+	for (let open; (open = ticks.exec(paragraph)); ) {
+		const n = open[0].length;
+		const closing = new RegExp(`(?<!\`)\`{${n}}(?!\`)`, "g");
+		closing.lastIndex = ticks.lastIndex;
+		const close = closing.exec(paragraph);
+		if (!close) continue; // an unmatched backtick run is literal text
+		const end = close.index + n;
+		out += fn(paragraph.slice(last, open.index)) + paragraph.slice(open.index, end);
+		last = ticks.lastIndex = end;
+	}
+	return out + fn(paragraph.slice(last));
+}
+
+/** Apply `fn` to the Markdown outside fenced code blocks and inline code spans. */
+function outsideCode(text, fn) {
+	const out = [];
+	let plain = [];
+	let fence = null;
+	const flushPlain = () => {
+		if (!plain.length) return;
+		const chunk = plain.join("\n");
+		plain = [];
+		out.push(chunk.split(/(\n[ \t]*\n)/).map((part, i) => (i % 2 ? part : outsideInlineCode(part, fn))).join(""));
+	};
+	for (const line of text.split("\n")) {
+		if (fence) {
+			out.push(line);
+			if (new RegExp(`^\\s*${fence[0]}{${fence.length},}\\s*$`).test(line)) fence = null;
+			continue;
+		}
+		const open = /^\s*(`{3,}(?=[^`]*$)|~{3,})/.exec(line);
+		if (!open) {
+			plain.push(line);
+			continue;
+		}
+		flushPlain();
+		fence = open[1];
+		out.push(line);
+	}
+	flushPlain();
+	return out.join("\n");
+}
+
+/** Markdown links and href attributes in `text`, passed through `rewriteHref`. Code is left alone. */
 function rewriteLinks(text, rewriteHref) {
-	return text
-		.replace(/(\]\()([^)\s]+)((?:\s+"[^"]*")?\))/g, (_, open, href, close) => `${open}${rewriteHref(href)}${close}`)
-		.replace(/(\bhref=")([^"]+)(")/g, (_, open, href, close) => `${open}${rewriteHref(href)}${close}`);
+	return outsideCode(text, (part) =>
+		part
+			.replace(/(\]\()([^)\s]+)((?:\s+"[^"]*")?\))/g, (_, open, href, close) => `${open}${rewriteHref(href)}${close}`)
+			.replace(/(\bhref=")([^"]+)(")/g, (_, open, href, close) => `${open}${rewriteHref(href)}${close}`),
+	);
 }
 
 /**
@@ -103,9 +153,11 @@ function rewriteLinks(text, rewriteHref) {
  * - `lang` is the InvestmentWarning language when the file does not import one (the import decides:
  *   `InvestmentWarning.cn.mdx` -> "zh", `InvestmentWarning.mdx` -> "en").
  * - `site` prefixes /img/... URLs; the default "" keeps them site-relative (served from public/img).
- * - `rewriteHref(href)` maps legacy links to new URLs; it must return unknown hrefs unchanged.
+ * - `rewriteHref(href)` maps legacy links to new URLs; it must return unknown hrefs unchanged. It is not applied
+ *   inside code (fences, inline code, mermaid), nor to table cells and tool_grid urls.
  * Returns { frontmatter, slug, title, blocks }. Title = frontmatter title, else the first H1;
- * the first H1 is always removed from the body (Docusaurus pages repeat the title as an H1).
+ * the first H1 is always removed from the body (Docusaurus pages repeat the title as an H1), except that
+ * a link inside it stays behind as a normal paragraph (a few pages carry their only link to the product there).
  */
 export function mdxToBlocks(src, { path, slug: slugOption, lang = "en", site = "", rewriteHref = (href) => href }) {
 	const { data: frontmatter, body: afterFrontmatter } = parseFrontmatter(src);
@@ -130,8 +182,8 @@ export function mdxToBlocks(src, { path, slug: slugOption, lang = "en", site = "
 	body = body.replace(/^import\s+.*$/gm, "");
 	const img = (name) => images[name] ?? "";
 
-	/** Rewrite MDX/JSX inline constructs into plain Markdown/HTML. */
-	function mdxToMarkdown(text) {
+	/** Rewrite MDX/JSX inline constructs into plain Markdown/HTML; `links: false` leaves hrefs alone (mermaid source). */
+	function mdxToMarkdown(text, { links = true } = {}) {
 		const markdown =
 			text
 				// <Image img={X} .../>  and  <XSvg width={w} height={h} />
@@ -145,7 +197,7 @@ export function mdxToBlocks(src, { path, slug: slugOption, lang = "en", site = "
 				.replace(/img:\s*'(\/img\/[^']+)'/g, (_, p) => `img: '${site}${p}'`) // mermaid image nodes
 				.replace(/\s*\{#[\w-]+\}\s*$/gm, "") // Docusaurus heading ids
 				.replace(/^\s*<!--.*?-->\s*$/gm, "");
-		return rewriteLinks(markdown, rewriteHref);
+		return links ? rewriteLinks(markdown, rewriteHref) : markdown;
 	}
 
 	function dedent(text) {
@@ -390,7 +442,7 @@ export function mdxToBlocks(src, { path, slug: slugOption, lang = "en", site = "
 			flush();
 			const [inner, end] = collectUntil(i + 1, /^```\s*$/);
 			i = end;
-			blocks.push({ _type: "mermaid", _key: key(), code: mdxToMarkdown(inner.join("\n")) });
+			blocks.push({ _type: "mermaid", _key: key(), code: mdxToMarkdown(inner.join("\n"), { links: false }) });
 		} else if ((m = line.match(/^\s*(`{3,}|~{3,})/))) {
 			// A fenced code block is prose: `|`, `:::`, `<details>` or `<Tabs` lines inside it are code, not blocks
 			const close = new RegExp(`^\\s*${m[1][0]}{${m[1].length},}\\s*$`);
@@ -410,8 +462,12 @@ export function mdxToBlocks(src, { path, slug: slugOption, lang = "en", site = "
 	}
 	flush();
 
+	// The first H1 is dropped (the page title replaces it); if it carries a link, that link survives as a normal paragraph
 	const h1 = blocks.findIndex((b) => b.style === "h1");
-	const h1Text = h1 >= 0 ? blocks.splice(h1, 1)[0].children.map((c) => c.text).join("") : undefined;
+	const h1Block = h1 >= 0 ? blocks[h1] : undefined;
+	if (h1Block?.markDefs.length) blocks[h1] = { ...h1Block, style: "normal" };
+	else if (h1Block) blocks.splice(h1, 1);
+	const h1Text = h1Block?.children.map((c) => c.text).join("");
 	const title = String(frontmatter.title ?? h1Text ?? slug);
 	return { frontmatter, slug, title, blocks };
 }
