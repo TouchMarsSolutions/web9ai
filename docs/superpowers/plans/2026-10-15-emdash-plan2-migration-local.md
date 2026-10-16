@@ -34,7 +34,7 @@
   - 后台有人打开着某个条目时，写它会返回 `ENTRY_LOCKED`：runner 停下来报告，让人关掉那个后台标签页，**不准**用 `overrideLock`；
   - core 搜索只索引 portableText 里 key 为 `text`、`alt`、`caption`、`code` 的字符串，web9 块的文字靠 hook 写进 `search_text`；hook 在没带正文字段的保存上不动 `search_text`。
 - 图片 URL 保持站内相对路径 `/img/...`，不加 `https://www.web9.ai` 前缀。
-- **seed 只在空库第一次启动时应用一次**（`onConflict: "skip"`）。所有"首次启动才生效"的东西（块类型、字段、tag terms、`settings.url`）都在 Task 1 写进 seed，并且在 Task 1 重建本地库之前定稿；计划 3 的生产首次启动用的也是这份 seed。
+- **seed 只在空库第一次启动时应用一次**（`onConflict: "skip"`）。所有"首次启动才生效"的东西（块类型、字段、`settings.url`）都在 Task 1 写进 seed，并且在 Task 1 重建本地库之前定稿；计划 3 的生产首次启动用的也是这份 seed。tag terms 也定义在 seed 里，但 `applySeed` 只在 `includeContent` 为 true 时写 terms（运行时首次启动和 `dev-bypass?content=0` 都不写；Task 1 实测），所以库里的 terms 由 runner 的 `terms` 步骤（Task 10）从 seed 补建（owner 2026-10-16 选定）。
 - **安全关口（Task 2、3、5）必须在任何 AI PAT 存在之前落地**。AI Editor 账号和 PAT 是计划 3 的事，本计划不创建。
 - 本计划不部署、不改 Cloudflare 和 GitHub 的设置、不碰 `gh-pages`。分支 `plan2`；push 和 PR 在计划结束时按 finishing 流程由用户决定。
 - **dev server**：`npm run dev -- --port 4321`（daemon）。`npm run build`、`npm run typecheck` **不能在 dev 运行时跑**：先 `npx astro dev stop`，构建或检查完再启动。需要这样做的任务标了 ⏹。
@@ -89,10 +89,11 @@
 | `scripts/lib/public-css.mjs` + test、`scripts/check-public-css.mjs` | 构建后扫描公开 CSS（`postbuild`） | 5 |
 | `scripts/lib/mdx-to-pt.mjs` + test、`scripts/lib/fixtures/` | converter：确定性 `_key`、frontmatter、标题、`lang`、四冒号提示块、链接改写、图片、YouTube、tools gallery、Tabs-in-details | 6、7 |
 | `scripts/lib/posts.mjs` + test | blog → `posts`：excerpt、tag、git 日期 | 10 |
+| `scripts/lib/terms.mjs` + test | 从 seed 读 tag terms，缺的用 MCP 建（runner 的 `terms` 步骤） | 10 |
 | `scripts/lib/legacy-tree.mjs` + test | legacy 清单：section/category/`sort_order`、旧 URL、slug 去重、翻译配对、链接解析 | 8 |
 | `scripts/lib/sync.mjs` + test | 幂等写入一个条目（create / update + publish / 跳过） | 9 |
 | `scripts/lib/docs-payloads.mjs`、`scripts/lib/verify-pages.mjs` + test | docs 的 payload；迁移后的页面检查 | 9 |
-| `scripts/migrate.mjs` | runner CLI：`docs`、`menu`、`posts`、`redirects`、`home` | 9、10、11 |
+| `scripts/migrate.mjs` | runner CLI：`docs`、`menu`、`terms`、`posts`、`redirects`、`home` | 9、10、11 |
 | `scripts/lib/redirects.mjs` + test | 旧 URL → 新 URL 的规则表和 REST 同步 | 10 |
 | `astro.config.mjs` | feed 重定向（带扩展名的路径不经过 EmDash 重定向中间件） | 10 |
 | `src/pages/posts/[slug].astro` | 正文容器加 `prose` | 10 |
@@ -149,7 +150,7 @@
   - 块类型 `hero`（`title` 必填、`tagline`、`image`、`primary_label`、`primary_href`、`secondary_label`、`secondary_href`）和 `feature_grid`（`title`、`features` repeater：`title` 必填、`description`、`image`）；
   - `pages` 字段顺序 `title, content, search_text, layout`，`layout` 是 `blocks`，`allowedTypes: ["hero", "feature_grid"]`；
   - `posts` 字段顺序 `title, featured_image, content, excerpt, search_text`；
-  - tag terms（en）：`ai`、`course`、`workshop`、`tools`、`tiny-course`；
+  - tag terms（en）：`ai`、`course`、`workshop`、`tools`、`tiny-course`，只定义在 seed 里（库里由 Task 10 的 runner `terms` 步骤创建，见 Global Constraints）；
   - `settings.url = "https://www.web9.ai"`（sitemap、robots 的绝对 URL 不再依赖请求的 Host）；
   - 生成类型 `PageLayoutBlock`、`PageLayoutHeroBlock`、`PageLayoutFeatureGridBlock`（`emdash-env.d.ts`）；
   - 新的 `.local/dev-token`（admin），本地库里没有任何内容条目。
@@ -334,7 +335,7 @@ node scripts/mcp.mjs menu_get '{"name":"primary"}'
 Expected：
 - 块类型列表有 `hero` 和 `feature_grid`；
 - `pages`：`title:string, content:portableText, search_text:text, layout:blocks`；`posts` 最后一个字段是 `search_text:text`；
-- tag terms 正好是那 5 个；
+- `taxonomy_list_terms` 返回 `{"items": []}`：这是预期的。`applySeed` 只在 `includeContent` 为 true 时写 terms，`content=0` 和运行时首次启动都不写；terms 由 Task 10 的 runner `terms` 步骤补建（执行时实测后修订，owner 2026-10-16 选定）；
 - settings 是 `title: "Web9.AI"`、`tagline: "square of web3 to the power of AI"`、`url: "https://www.web9.ai"`；
 - posts 列表为空；菜单只有 Blog、GitHub 两项。
 
@@ -346,10 +347,10 @@ Expected：
 
 - [ ] **Step 8: 更新 spec**
 
-- §2 表格：`posts` 行改成"模板自带字段 + `search_text`（text, searchable，hook 生成）；Docusaurus tags 映射到 `tag` taxonomy，5 个 term 写在 seed 里"；`pages` 行改成"字段 `title`、`content`、`search_text`、`layout`（`blocks`，`allowedTypes: hero, feature_grid`）；块类型由 seed 的 `blockTypes` 定义"。
+- §2 表格：`posts` 行改成"模板自带字段 + `search_text`（text, searchable，hook 生成）；Docusaurus tags 映射到 `tag` taxonomy，5 个 term 定义在 seed 里，由迁移 runner 的 `terms` 步骤写进库"；`pages` 行改成"字段 `title`、`content`、`search_text`、`layout`（`blocks`，`allowedTypes: hero, feature_grid`）；块类型由 seed 的 `blockTypes` 定义"。
 - §3 表格最后一行"页面块"的"新增一种组件需要做什么"改成："在 `seed/seed.json` 的 `blockTypes` 里定义（新库首次启动时应用）；已经存在的库用 MCP `schema_create_block_type` 加上同样的定义，再 `schema_update_field` 把它加进 `pages.layout` 的 `allowedTypes`；在 `src/components/blocks/` 写渲染组件，在 `HomePage.astro` 的 components map 里登记"。
 - §7 "首页"一条改成："首页：块类型 `hero`、`feature_grid` 和 `pages.layout` 由 seed 定义（**已定**，计划 2 Task 1）；内容由 runner 写入 `pages/home`（en + zh-CN），来自旧首页的 hero 和 3 个 features。"
-- §9 "首次启动"一条末尾加一句："计划 2 Task 1 起，seed 还包含块类型、`pages.layout`、`posts`/`pages` 的 `search_text`、5 个 tag term 和 `settings.url`。"
+- §9 "首次启动"一条末尾加一句："计划 2 Task 1 起，seed 还包含块类型、`pages.layout`、`posts`/`pages` 的 `search_text`、5 个 tag term 和 `settings.url`。注意 `applySeed` 只在 `includeContent` 为 true 时写 taxonomy terms（运行时首次启动用的是 `onConflict: \"skip\"`、不带 `includeContent`；setup 向导取决于是否勾选导入内容），所以 terms 由迁移 runner 的 `terms` 步骤从 seed 补建（计划 2 Task 1 实测）。"
 
 - [ ] **Step 9: Commit**
 
@@ -4225,10 +4226,12 @@ Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
 - EmDash 的重定向中间件（`order: "pre"`）先匹配精确规则，再匹配 `[param]` 模式；跳过 `/_emdash`、`/_image` 和**所有带扩展名的路径**。所以 `/blog/rss.xml` 这类 feed 放在 `astro.config.mjs` 的 `redirects` 里。
 - Astro 的 i18n fallback（`/zh-CN/...` 没有对应路由时 302 到 en）只在响应是 404 时触发（`astro/dist/core/i18n/handler.js`），中间件返回的 301 不会被它改写。Step 1 实测确认。
 
-写计划时对当前（还是模板 demo 数据的）库跑了只读的 `redirects --dry-run`：`created 73`，说明 `GET ?group=` 和分页按预期工作；`posts --dry-run` 报 `tag terms ai, course, workshop, tiny-course do not exist`，这是对的（demo 库没有这些 term，Task 1 重建后就有）。
+写计划时对当前（还是模板 demo 数据的）库跑了只读的 `redirects --dry-run`：`created 73`，说明 `GET ?group=` 和分页按预期工作；`posts --dry-run` 报 `tag terms ai, course, workshop, tiny-course do not exist`，这是对的（demo 库没有这些 term）。
+
+**执行时修订（Task 1 实测，owner 2026-10-16 选定）**：seed 里的 terms 只在 `applySeed` 带 `includeContent` 时写入，重建后的库里也没有，生产首次启动同样不写。所以本任务加一个 `terms` 步骤：从 `seed/seed.json` 读出 tag terms，缺的用 MCP `taxonomy_create_term` 建，已有的不动；它排在 `posts` 前面。`posts` 只在真正写入时检查 term（`all --dry-run` 时 `terms` 还没建）。
 
 **Files:**
-- Create: `scripts/lib/posts.mjs`、`scripts/lib/posts.test.mjs`、`scripts/lib/redirects.mjs`、`scripts/lib/redirects.test.mjs`
+- Create: `scripts/lib/posts.mjs`、`scripts/lib/posts.test.mjs`、`scripts/lib/redirects.mjs`、`scripts/lib/redirects.test.mjs`、`scripts/lib/terms.mjs`、`scripts/lib/terms.test.mjs`
 - Modify: `scripts/migrate.mjs`、`scripts/lib/mcp.mjs`（导出 `defaultToken`）、`astro.config.mjs`、`src/pages/posts/[slug].astro`、spec §7
 
 **Interfaces:**
@@ -4237,7 +4240,8 @@ Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
   - `convertPost(src, { path, rewriteHref, publishedAt }) → want`（`{ collection: "posts", slug, locale: "en", status, data: { title, excerpt?, content }, taxonomies: { tag: [...] }, publishedAt }`）、`firstCommitDate(file)`、`postPayloads(tree) → [{ file, want }]`、`BLOG_ROOT`（`scripts/lib/posts.mjs`）。
   - `legacyRedirects(tree) → [{ source, destination, type: 301, groupName }]`、`syncRedirects(request, rules, { dryRun }) → [{ name, action, diff? }]`、`GROUP = "legacy-docusaurus"`（`scripts/lib/redirects.mjs`）。
   - `defaultToken()`（`scripts/lib/mcp.mjs`）。
-  - runner 步骤 `posts`、`redirects`；`verify` 额外检查每条精确重定向和 5 个样例（模式规则、feed）。
+  - `seedTerms(seed, taxonomy) → [{ slug, label }]`、`syncTerms(callTool, taxonomy, terms, { dryRun }) → [{ name, action: "created" | "unchanged" }]`（`scripts/lib/terms.mjs`）。
+  - runner 步骤 `terms`、`posts`、`redirects`（`WRITE_STEPS` = docs、menu、terms、posts、redirects）；`verify` 额外检查每条精确重定向和 5 个样例（模式规则、feed）。
 
 - [ ] **Step 1: 🚦 探针：中间件的 301 先于 Astro i18n fallback**
 
@@ -4435,10 +4439,73 @@ describe("syncRedirects", () => {
 });
 ```
 
+Create `scripts/lib/terms.test.mjs`：
+
+```js
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import { seedTerms, syncTerms } from "./terms.mjs";
+
+/** In-memory stand-in for the two MCP tools syncTerms uses. */
+function fakeCms(slugs) {
+	const terms = slugs.map((slug) => ({ slug, label: slug }));
+	const calls = [];
+	async function callTool(tool, args) {
+		calls.push([tool, args]);
+		if (tool === "taxonomy_list_terms") return { items: terms.map((t) => ({ ...t })) };
+		if (tool === "taxonomy_create_term") {
+			terms.push({ slug: args.slug, label: args.label });
+			return { term: { ...args } };
+		}
+		throw new Error(`unexpected tool ${tool}`);
+	}
+	return { callTool, calls };
+}
+
+describe("seedTerms", () => {
+	it("reads the tag terms of the real seed", () => {
+		const seed = JSON.parse(readFileSync(new URL("../../seed/seed.json", import.meta.url), "utf8"));
+		expect(seedTerms(seed, "tag")).toEqual([
+			{ slug: "ai", label: "AI" },
+			{ slug: "course", label: "course" },
+			{ slug: "workshop", label: "workshop" },
+			{ slug: "tools", label: "tools" },
+			{ slug: "tiny-course", label: "tiny-course" },
+		]);
+	});
+	it("throws on a taxonomy the seed does not define", () => {
+		expect(() => seedTerms({ taxonomies: [] }, "tag")).toThrow('seed has no taxonomy "tag"');
+	});
+});
+
+describe("syncTerms", () => {
+	const want = [
+		{ slug: "ai", label: "AI" },
+		{ slug: "course", label: "course" },
+	];
+	it("creates the missing terms, then reports everything unchanged", async () => {
+		const cms = fakeCms(["ai"]);
+		expect(await syncTerms(cms.callTool, "tag", want)).toEqual([
+			{ name: "tag ai", action: "unchanged" },
+			{ name: "tag course", action: "created" },
+		]);
+		expect(cms.calls.filter(([tool]) => tool === "taxonomy_create_term")).toEqual([
+			["taxonomy_create_term", { taxonomy: "tag", slug: "course", label: "course" }],
+		]);
+		expect((await syncTerms(cms.callTool, "tag", want)).map((r) => r.action)).toEqual(["unchanged", "unchanged"]);
+	});
+	it("writes nothing in a dry run", async () => {
+		const cms = fakeCms([]);
+		expect((await syncTerms(cms.callTool, "tag", want, { dryRun: true })).map((r) => r.action)).toEqual(["created", "created"]);
+		expect(cms.calls.map(([tool]) => tool)).toEqual(["taxonomy_list_terms"]);
+	});
+});
+```
+
 - [ ] **Step 3: 跑测试，确认失败**
 
-Run: `npx vitest run scripts/lib/posts.test.mjs scripts/lib/redirects.test.mjs`
-Expected: FAIL：`posts.mjs`、`redirects.mjs` 不存在。
+Run: `npx vitest run scripts/lib/posts.test.mjs scripts/lib/redirects.test.mjs scripts/lib/terms.test.mjs`
+Expected: FAIL：`posts.mjs`、`redirects.mjs`、`terms.mjs` 不存在。
 
 - [ ] **Step 4: 实现**
 
@@ -4621,21 +4688,54 @@ diff --git a/scripts/lib/mcp.mjs b/scripts/lib/mcp.mjs
  }
 ```
 
-`scripts/migrate.mjs` 加 `posts`、`redirects` 两步，`verify` 加重定向检查：
+Create `scripts/lib/terms.mjs`：
+
+```js
+// Taxonomy terms of the seed (spec §9). applySeed writes terms only with `includeContent`, which the
+// runtime's first-boot seed never sets (and dev-bypass `content=0` turns off), so the runner creates them.
+
+/** [{ slug, label }] of `taxonomy` in a parsed seed/seed.json. */
+export function seedTerms(seed, taxonomy) {
+	const def = seed.taxonomies?.find((t) => t.name === taxonomy);
+	if (!def) throw new Error(`seed has no taxonomy "${taxonomy}"`);
+	return (def.terms ?? []).map(({ slug, label }) => ({ slug, label }));
+}
+
+/**
+ * Creates the terms that do not exist yet; existing ones are left alone (the owner may relabel them).
+ * Returns [{ name, action: "created" | "unchanged" }].
+ */
+export async function syncTerms(callTool, taxonomy, terms, { dryRun = false } = {}) {
+	const have = new Set((await callTool("taxonomy_list_terms", { taxonomy })).items.map((t) => t.slug));
+	const results = [];
+	for (const { slug, label } of terms) {
+		if (have.has(slug)) {
+			results.push({ name: `${taxonomy} ${slug}`, action: "unchanged" });
+			continue;
+		}
+		if (!dryRun) await callTool("taxonomy_create_term", { taxonomy, slug, label });
+		results.push({ name: `${taxonomy} ${slug}`, action: "created" });
+	}
+	return results;
+}
+```
+
+`scripts/migrate.mjs` 加 `terms`、`posts`、`redirects` 三步，`verify` 加重定向检查：
 
 ```diff
 diff --git a/scripts/migrate.mjs b/scripts/migrate.mjs
 --- a/scripts/migrate.mjs
 +++ b/scripts/migrate.mjs
-@@ -3,13 +3,16 @@
+@@ -3,14 +3,19 @@
  // reports "unchanged" for everything already in place and writes nothing.
  //
  //   node scripts/migrate.mjs <step>... [--dry-run]
 -//   steps: docs, menu, verify (reads only), all (every write step, in order)
 -// Env: EMDASH_URL (default http://localhost:4321), EMDASH_TOKEN (default: .local/dev-token).
-+//   steps: docs, menu, posts, redirects, verify (reads only), all (every write step, in order)
++//   steps: docs, menu, terms, posts, redirects, verify (reads only), all (every write step, in order)
 +// Env: EMDASH_URL (default http://localhost:4321), EMDASH_TOKEN (default: .local/dev-token). The
 +// redirects step needs an admin token (the dev-bypass token is one).
++import { readFileSync } from "node:fs";
  import { parseArgs } from "node:util";
  import { docPayloads } from "./lib/docs-payloads.mjs";
  import { readLegacyTree } from "./lib/legacy-tree.mjs";
@@ -4645,9 +4745,11 @@ diff --git a/scripts/migrate.mjs b/scripts/migrate.mjs
 +import { postPayloads } from "./lib/posts.mjs";
 +import { legacyRedirects, syncRedirects } from "./lib/redirects.mjs";
  import { upsertEntry, upsertMenu } from "./lib/sync.mjs";
++import { seedTerms, syncTerms } from "./lib/terms.mjs";
  import { docPageChecks } from "./lib/verify-pages.mjs";
  
-@@ -25,6 +28,27 @@ const MENU = [
+ const { values, positionals } = parseArgs({ allowPositionals: true, options: { "dry-run": { type: "boolean", default: false } } });
+@@ -25,6 +30,27 @@ const MENU = [
  	{ label: "GitHub", type: "custom", customUrl: "https://github.com/TouchMarsSolutions/web9ai", target: "_blank" },
  ];
  
@@ -4675,17 +4777,20 @@ diff --git a/scripts/migrate.mjs b/scripts/migrate.mjs
  const STEPS = {
  	async docs() {
  		const en = new Map();
-@@ -43,21 +67,44 @@ const STEPS = {
+@@ -43,21 +69,47 @@ const STEPS = {
  	async menu() {
  		return [{ name: "primary", ...(await upsertMenu(callTool, "primary", MENU, { dryRun })) }];
  	},
++	async terms() {
++		return syncTerms(callTool, "tag", seedTerms(JSON.parse(readFileSync("seed/seed.json", "utf8")), "tag"), { dryRun });
++	},
 +	async posts() {
-+		// Tag terms come from the seed (plan 2 Task 1); content_create fails on an unknown term.
++		// content_create fails on an unknown term. A dry run of `all` has not created them yet, so only check when writing.
 +		const terms = new Set((await callTool("taxonomy_list_terms", { taxonomy: "tag" })).items.map((t) => t.slug));
 +		const results = [];
 +		for (const { want } of postPayloads(readLegacyTree())) {
 +			const missing = want.taxonomies.tag.filter((t) => !terms.has(t));
-+			if (missing.length) throw new Error(`posts/${want.slug}: tag terms ${missing.join(", ")} do not exist; they come from the seed`);
++			if (missing.length && !dryRun) throw new Error(`posts/${want.slug}: tag terms ${missing.join(", ")} do not exist; run the terms step first`);
 +			results.push({ name: `en ${want.slug}`, ...(await upsertEntry(callTool, want, { dryRun })) });
 +		}
 +		return results;
@@ -4719,7 +4824,7 @@ diff --git a/scripts/migrate.mjs b/scripts/migrate.mjs
  	},
  };
 -const WRITE_STEPS = ["docs", "menu"];
-+const WRITE_STEPS = ["docs", "menu", "posts", "redirects"];
++const WRITE_STEPS = ["docs", "menu", "terms", "posts", "redirects"];
  
  const steps = positionals.includes("all") ? WRITE_STEPS : positionals;
  if (!steps.length || steps.some((s) => !STEPS[s])) {
@@ -4778,17 +4883,17 @@ Expected: PASS。`posts.test.mjs` 里读 `legacy/blog` 的那组在本机运行�
 cd /Users/john/git/web9ai
 npx astro dev stop
 npm run dev -- --port 4321
-node scripts/migrate.mjs posts redirects --dry-run
+node scripts/migrate.mjs terms posts redirects --dry-run
 ```
 
-Expected：`posts (dry run): created 2`、`redirects (dry run): created 73`。
+Expected：`terms (dry run): created 5`、`posts (dry run): created 2`、`redirects (dry run): created 73`。
 
 ```bash
-node scripts/migrate.mjs posts redirects
+node scripts/migrate.mjs terms posts redirects
 node scripts/migrate.mjs all
 ```
 
-Expected：第一条 `posts: created 2`、`redirects: created 73`；第二条（`all` = docs、menu、posts、redirects）全部 `unchanged`：`docs: unchanged 35`、`menu: unchanged 1`、`posts: unchanged 2`、`redirects: unchanged 73`，没有 `extra`。如果 posts 有 "updated"，按 Task 9 Step 5 的办法看 diff 路径（例如 EmDash 把空字段存成 `null`）。
+Expected：第一条 `terms: created 5`、`posts: created 2`、`redirects: created 73`；第二条（`all` = docs、menu、terms、posts、redirects）全部 `unchanged`：`docs: unchanged 35`、`menu: unchanged 1`、`terms: unchanged 5`、`posts: unchanged 2`、`redirects: unchanged 73`，没有 `extra`。如果 posts 有 "updated"，按 Task 9 Step 5 的办法看 diff 路径（例如 EmDash 把空字段存成 `null`）。
 
 ```bash
 node scripts/migrate.mjs verify
@@ -4814,7 +4919,7 @@ Expected：三个 `check-page` 通过；草稿帖子 `/posts/ai-tiny-course` 是
 
 §7 的 "Blog：……" 那条换成：
 
-"Blog（计划 2 Task 10）：`scripts/lib/posts.mjs` 用同一个 converter 写入 `posts`；`<!-- truncate -->` 上面的文字成为 `excerpt` 并从 `content` 里去掉；tag 用 seed 里的 term；日期 `publishedAt` 用 Docusaurus 显示的日期（文件第一次 git 提交，目录名里的日期 Docusaurus 不认）；`draft: true` 的文章保持草稿状态。"
+"Blog（计划 2 Task 10）：`scripts/lib/posts.mjs` 用同一个 converter 写入 `posts`；`<!-- truncate -->` 上面的文字成为 `excerpt` 并从 `content` 里去掉；tag 用 seed 里定义的 term（runner 的 `terms` 步骤从 `seed/seed.json` 补建，因为 `applySeed` 只在 `includeContent` 时写 terms）；日期 `publishedAt` 用 Docusaurus 显示的日期（文件第一次 git 提交，目录名里的日期 Docusaurus 不认）；`draft: true` 的文章保持草稿状态。"
 
 在它后面加一条：
 
@@ -4823,8 +4928,8 @@ Expected：三个 `check-page` 通过；草稿帖子 `/posts/ai-tiny-course` 是
 - [ ] **Step 8: Commit**
 
 ```bash
-git add scripts/lib/posts.mjs scripts/lib/posts.test.mjs scripts/lib/redirects.mjs scripts/lib/redirects.test.mjs scripts/migrate.mjs scripts/lib/mcp.mjs astro.config.mjs 'src/pages/posts/[slug].astro' docs/superpowers/specs/2026-10-15-emdash-migration-design.md
-git commit -m "feat(migrate): blog posts and legacy URL redirects; feed redirects; prose on posts
+git add scripts/lib/posts.mjs scripts/lib/posts.test.mjs scripts/lib/redirects.mjs scripts/lib/redirects.test.mjs scripts/lib/terms.mjs scripts/lib/terms.test.mjs scripts/migrate.mjs scripts/lib/mcp.mjs astro.config.mjs 'src/pages/posts/[slug].astro' docs/superpowers/specs/2026-10-15-emdash-migration-design.md
+git commit -m "feat(migrate): tag terms, blog posts and legacy URL redirects; feed redirects; prose on posts
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
@@ -5135,21 +5240,22 @@ import HomePage from "../../components/HomePage.astro";
 diff --git a/scripts/migrate.mjs b/scripts/migrate.mjs
 --- a/scripts/migrate.mjs
 +++ b/scripts/migrate.mjs
-@@ -3,11 +3,12 @@
+@@ -3,12 +3,13 @@
  // reports "unchanged" for everything already in place and writes nothing.
  //
  //   node scripts/migrate.mjs <step>... [--dry-run]
--//   steps: docs, menu, posts, redirects, verify (reads only), all (every write step, in order)
-+//   steps: docs, menu, posts, redirects, home, verify (reads only), all (every write step, in order)
+-//   steps: docs, menu, terms, posts, redirects, verify (reads only), all (every write step, in order)
++//   steps: docs, menu, terms, posts, redirects, home, verify (reads only), all (every write step, in order)
  // Env: EMDASH_URL (default http://localhost:4321), EMDASH_TOKEN (default: .local/dev-token). The
  // redirects step needs an admin token (the dev-bypass token is one).
+ import { readFileSync } from "node:fs";
  import { parseArgs } from "node:util";
  import { docPayloads } from "./lib/docs-payloads.mjs";
 +import { homePayload } from "./lib/home-content.mjs";
  import { readLegacyTree } from "./lib/legacy-tree.mjs";
  import { checkMarkers } from "./lib/markers.mjs";
  import { callTool, defaultToken } from "./lib/mcp.mjs";
-@@ -37,6 +38,12 @@ const REDIRECT_SAMPLES = [
+@@ -39,6 +40,12 @@ const REDIRECT_SAMPLES = [
  	["/blog/atom.xml", "/rss.xml"],
  ];
  
@@ -5162,7 +5268,7 @@ diff --git a/scripts/migrate.mjs b/scripts/migrate.mjs
  /** JSON `data` of an EmDash REST call made with the runner's token. */
  async function request(method, path, body) {
  	const res = await fetch(new URL(path, site), {
-@@ -81,9 +88,18 @@ const STEPS = {
+@@ -86,9 +93,18 @@ const STEPS = {
  	async redirects() {
  		return syncRedirects(request, legacyRedirects(readLegacyTree()), { dryRun });
  	},
@@ -5182,12 +5288,12 @@ diff --git a/scripts/migrate.mjs b/scripts/migrate.mjs
  		const failures = [];
  		for (const check of checks) {
  			const res = await fetch(new URL(check.url, site));
-@@ -104,7 +120,7 @@ const STEPS = {
+@@ -109,7 +125,7 @@ const STEPS = {
  		return [];
  	},
  };
--const WRITE_STEPS = ["docs", "menu", "posts", "redirects"];
-+const WRITE_STEPS = ["docs", "menu", "posts", "redirects", "home"];
+-const WRITE_STEPS = ["docs", "menu", "terms", "posts", "redirects"];
++const WRITE_STEPS = ["docs", "menu", "terms", "posts", "redirects", "home"];
  
  const steps = positionals.includes("all") ? WRITE_STEPS : positionals;
  if (!steps.length || steps.some((s) => !STEPS[s])) {
@@ -6155,7 +6261,7 @@ node scripts/migrate.mjs all --dry-run
 
 （`npm run dev` 是 daemon；curl 连不上就等几秒再试。）
 
-Expected（dry run，只读）：`docs (dry run): created 35`、`menu (dry run): updated 1`、`posts (dry run): created 2`、`redirects (dry run): created 73`、`home (dry run): created 2`。
+Expected（dry run，只读）：`docs (dry run): created 35`、`menu (dry run): updated 1`、`terms (dry run): created 5`、`posts (dry run): created 2`、`redirects (dry run): created 73`、`home (dry run): created 2`。
 
 ```bash
 node scripts/migrate.mjs all
@@ -6164,8 +6270,8 @@ node scripts/migrate.mjs verify
 ```
 
 Expected：
-- 第一次：`docs: created 35`、`menu: updated 1`、`posts: created 2`、`redirects: created 73`、`home: created 2`，exit 0；
-- 第二次：每一步都只有 `unchanged`（`docs: unchanged 35`、`menu: unchanged 1`、`posts: unchanged 2`、`redirects: unchanged 73`、`home: unchanged 2`），没有任何 `created`/`updated`/`published`/`extra` 行；
+- 第一次：`docs: created 35`、`menu: updated 1`、`terms: created 5`、`posts: created 2`、`redirects: created 73`、`home: created 2`，exit 0；
+- 第二次：每一步都只有 `unchanged`（`docs: unchanged 35`、`menu: unchanged 1`、`terms: unchanged 5`、`posts: unchanged 2`、`redirects: unchanged 73`、`home: unchanged 2`），没有任何 `created`/`updated`/`published`/`extra` 行；
 - `verify: 54/54 pages ok`、`verify: 74/74 redirects ok`。
 
 任何一项不符：停下来，把三条命令的完整输出报告给用户。
@@ -6253,7 +6359,7 @@ Expected：`git status --short` 没有输出（`.local/`、`.wrangler/`、`dist/
 全部满足才算计划 2 完成：
 
 1. `npm test`、`npm run build`（`postbuild` 的公开 CSS 检查 PASS）、`npm run typecheck`（0 errors）在最终代码上通过；浅克隆 + Node 22 的 CI 模拟通过（Task 14 Step 8）。
-2. 从空的本地库，`node scripts/migrate.mjs all` 写入 35 篇 doc（26 en + 9 zh-CN）、菜单、2 篇 post（1 篇草稿）、73 条重定向、2 个首页；第二次运行 0 写入；`verify` 是 54/54 页面、74/74 重定向。
+2. 从空的本地库，`node scripts/migrate.mjs all` 写入 35 篇 doc（26 en + 9 zh-CN）、菜单、5 个 tag term、2 篇 post（1 篇草稿）、73 条重定向、2 个首页；第二次运行 0 写入；`verify` 是 54/54 页面、74/74 重定向。
 3. 内容安全关口生效：写入时拒绝 `htmlBlock`、`iframe`、带 `html` 的 `embed`、未知块和危险的样式值（docs、posts、pages 都覆盖）；渲染时用 web9 的 `htmlBlock`/`embed`；公开 CSS 里没有遮罩类 utility，也没有被降级的 `light-dark()`。
 4. `/llms.txt`、`/zh-CN/llms.txt` 和全部 `.md` 里没有 `ec:block`；fallback 页面的 canonical 指向 en URL。
 5. spec、`CLAUDE.md`、`AGENTS.md`、`.agents/skills/web9-blocks/SKILL.md` 记录了本计划的结论。
@@ -6265,7 +6371,7 @@ Expected：`git status --short` 没有输出（`.local/`、`.wrangler/`、`dist/
 
 1. **部署配置**：`wrangler.jsonc` 里 D1 的 `database_id`（或确认 wrangler 自动创建）、R2 bucket、adapter 注入的 KV `SESSION` 和 `IMAGES` binding；**先决定套餐**：worker 压缩后约 4.9 MiB（Task 15 的 `wrangler deploy --dry-run`），超过免费套餐 3 MiB，owner 选付费套餐（10 MiB）或者先查能不能裁剪；用 workerd 跑一次构建产物。
 2. **Workers Builds**：连接仓库，生产分支 `main`，构建命令 `npm run build`（`postbuild` 的 CSS 检查失败会挡住部署）。在第一次推 `main` 以外的分支之前，确认预览版本是否和生产共用 D1/R2（spec §9 待验证）。首次部署前备份 `EMDASH_ENCRYPTION_KEY`。在 `*.workers.dev` 上验证。
-3. **生产首次启动**：空 D1 上 EmDash 自动应用 seed（块类型、字段、tag terms、`settings.url`）。如果生产库不是从空库建的，先 `schema_create_field` 补 `search_text`，再上线带 hook 的插件（hook 的 `errorPolicy` 是 abort）。
+3. **生产首次启动**：空 D1 上 EmDash 自动应用 seed（块类型、字段、`settings.url`；tag terms 不写，由第 4 步 runner 的 `terms` 步骤建）。setup 向导会用 owner 填的 title、tagline 覆盖 seed 里的 settings（`emdash/dist/astro/routes/api/setup/index.mjs`），所以向导里要填 `Web9.AI` 和原来的 tagline。如果生产库不是从空库建的，先 `schema_create_field` 补 `search_text`，再上线带 hook 的插件（hook 的 `errorPolicy` 是 abort）。
 4. **生产迁移**：owner 建管理员账号（passkey），拿 admin token；`EMDASH_URL=https://<worker>.workers.dev EMDASH_TOKEN=<admin token> node scripts/migrate.mjs all`，再跑一次确认 0 写入，再 `verify`（`verify` 也读 `EMDASH_URL`）。
 5. **切换**：Worker 绑定 `www.web9.ai`，apex 重定向到 www；GitHub Pages（`gh-pages` 上已构建的旧站）保留作回退，稳定后关闭。
 6. **AI 账号**：owner 邀请 Editor 账号、passkey 注册、创建 PAT（spec §8）。安全关口已经在计划 2 落地，这一步才可以做。
