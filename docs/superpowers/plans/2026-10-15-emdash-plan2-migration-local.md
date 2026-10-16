@@ -3287,3 +3287,382 @@ Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
 ```
 
 ---
+
+### Task 8: legacy inventory（section、category、`sort_order`、slug、旧 URL、链接解析）
+
+**模型：** standard
+
+`convertMdx` 自己不看目录结构：section、category、order 都是调用方传的参数，默认 `ai / general / 0`，所以 35 个文件现在全是 `ai / general / 0`（`dev/00_overview.md` 也是 `ai`）。这个 Task 把 Docusaurus 3.7 的规则搬过来，一次性算出每篇文档的元数据、旧 URL 和新 URL，并给 converter 提供 `rewriteHref`（调研 `p2-research-5-legacy.md` §1–§4，规则是读 Docusaurus 3.7.0 源码得到的）。
+
+规则：
+- **number prefix**（`lib/numberPrefix.js`）：`^(\d+)\s*[-_.]+\s*([^-_.\s].*)$`，但名字匹配 `^\d+[-_.]\d+` 时不算前缀。所以 `01_3d` 没有前缀：旧 URL 是 `/ai/model/01_3d`，排序位置为空（排最后）；新 slug 仍然是 converter 规则给出的 `3d`，旧 URL 由 Task 10 的 redirect 接住。
+- **侧边栏顺序**（`lib/sidebars/generator.js`）：每个目录里，文档和子分类在同一个列表里排序，先按 position 升序（没有 position 的排最后），再按源文件名 / 目录名。文档的 position 是 `sidebar_position ?? number prefix`；分类的 position 是 `_category_.yml` 的 `position ?? 目录名的 number prefix`（cloud 100、prompt 1600 覆盖了目录前缀 8、16）。
+- **`sort_order`**：`DocsPage` 把所有文档按 `sort_order` 排序后再分组，所以它必须编码整个侧边栏，不能用分类内的位置。公式：`section 序号 × 1_000_000 + 根条目名次 × 1000 + 分类内名次`（名次从 1 开始；section 根目录下的文档分类内名次是 0）。结果：`ai/intro` 1000；usecase 2001–2003；article 3001；cloud 4001–4016；prompt 5001；model 6001–6002；`dev/overview` 1001000；`dev/learn_ai_coding` 1002000。中间留了空位，以后插文档不用重新编号。
+- **category**：目录名去掉数字前缀（`cloud`、`prompt`、`usecase`、`article`、`model`）；直接在 `ai/`、`dev/` 下的文档是 `general`。不存显示名：zh-CN 只翻译了部分文档，存显示名会把同一个分类拆成两组。显示名（`_category_.yml` 的 `label`，zh-CN 的 usecase 是"神兵利器"）由 Task 12 的站点代码映射。
+- **slug**：converter 的规则（frontmatter `slug` 去掉开头的 `/`，否则文件名去掉 `^\d+[-_]`）。重名时整组（不是"除第一个外"，这样和顺序无关）改成 `<category，general 时用 section>-<slug>`，还重名再加 section；仍然重名就报错。目前 26 个 slug 没有重名。zh-CN 的 slug 一律取 en 原文的 slug。
+- **旧 URL**（`routeBasePath: "/"`，没有 `/docs` 前缀）：frontmatter slug 以 `/` 开头就是绝对路径（`/rundiffusion`）；不以 `/` 开头就是相对所在目录（`ai/16-prompt/` 里的 `prompt-guides` → `/ai/prompt/prompt-guides`）；没有 slug 时是去掉前缀的目录 + 文件名（`/ai/cloud/qblock`）。zh-CN 是 `/zh-CN` + 同一路径；Docusaurus 的 zh-CN 站点有全部 26 篇（没翻译的用 en 内容），所以 zh-CN 旧 URL 也是 26 个。
+- **zh-CN 是 en 树的覆盖层**：只有在 en 树里存在的文件才是文档。zh-CN 独有的文件 Docusaurus 会忽略；这里直接报错（目前没有）。
+- 只认 `.md` / `.mdx`：跳过 `_category_.yml` 和 `09_embed_voomly.mdx.bak`。
+- **链接**（语料里所有站内链接：`../16-prompt/01-popular-prompt-guide.mdx` ×2、`./monster_api` ×2、`./qblock` ×2、`/ai/usecase/ai-tools-adhoc` ×1，外加 8 个页内锚点）：
+  - 以 `.md`/`.mdx` 结尾的相对链接按文件路径解析；
+  - 其他相对链接按旧页面 URL 解析（Docusaurus 渲染成普通 `<a>`，浏览器相对当前 URL 解析：`/ai/cloud/monster_api` 里的 `./qblock` → `/ai/cloud/qblock`）；
+  - 绝对路径按旧 URL 表查找；
+  - 解析结果按链接所在页面的语言加前缀（zh-CN 页面里的链接指向 `/zh-CN/docs/...`）；
+  - 外链、`#anchor`、`/img/`、`/cover/` 原样返回；
+  - 解析不了的站内链接原样返回，同时记进 `unresolved`，runner 遇到非空就停（Task 9）。
+  - 页内锚点（`#programming-code` 等）保持原样：新页面的标题没有 id，这些链接点了不会跳转。记为已知遗留（计划结尾的 Open items）。
+
+**Files:**
+- Create: `scripts/lib/legacy-tree.mjs`、`scripts/lib/legacy-tree.test.mjs`
+- Modify: spec §2
+
+**Interfaces:**
+- Consumes: Task 6 的 `parseFrontmatter`、`deriveSlug`
+- Produces（`scripts/lib/legacy-tree.mjs`）：
+  - `EN_ROOT = "legacy/docs"`、`ZH_ROOT = "legacy/i18n/zh-CN/docusaurus-plugin-content-docs/current"`。
+  - `numberPrefix(name) → { position: number | undefined, name }`。
+  - `readLegacyTree({ enRoot?, zhRoot? }) → { docs, categories, resolveLink, unresolved }`：
+    - `docs`：先是 26 个 en（按 `sortOrder`），再是 9 个 zh-CN；每项 `{ locale: "en" | "zh-CN", rel, file, section, category, sortOrder, slug, oldUrl, newUrl }`，`rel` 是相对语言根目录的路径（en 和 zh-CN 的同一篇 `rel` 相同，用来配对翻译）。
+    - `categories`：`{ [category]: { label, zhLabel? } }`。
+    - `resolveLink(href, from) → string`：`from` 是 `docs` 里的一项，或者文章用的 `{ rel, locale }`。
+    - `unresolved: string[]`：`"<rel>: <href>"`。
+
+- [ ] **Step 1: 写失败的测试**
+
+Create `scripts/lib/legacy-tree.test.mjs`。前两组用临时目录里造的小树测规则；第三组读真实的 `legacy/`，`legacy/` 删掉后自动跳过（计划 3 删 `legacy/` 时把这一组一起删）：
+
+```js
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
+import { convertMdx } from "./mdx-to-pt.mjs";
+import { numberPrefix, readLegacyTree } from "./legacy-tree.mjs";
+
+describe("numberPrefix", () => {
+	it.each([
+		["08-cloud", 8, "cloud"],
+		["00_guide", 0, "guide"],
+		["01-run_diffusion", 1, "run_diffusion"],
+		["01_3d", undefined, "01_3d"],
+		["model", undefined, "model"],
+	])("%s", (name, position, rest) => expect(numberPrefix(name)).toEqual({ position, name: rest }));
+});
+
+describe("readLegacyTree on a small tree", () => {
+	const dir = mkdtempSync(path.join(tmpdir(), "legacy-tree-"));
+	afterAll(() => rmSync(dir, { recursive: true, force: true }));
+	const write = (rel, text) => {
+		mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+		writeFileSync(path.join(dir, rel), text);
+	};
+	write("en/ai/intro.md", "---\nsidebar_position: 1\n---\n# Intro\n");
+	write("en/ai/guide.md", "# Guide\n");
+	write("en/ai/05-cloud/_category_.yml", "position: 100 # comment\nlabel: 'Cloud'\n");
+	write("en/ai/05-cloud/02-b.mdx", "# B\n[a](./a)\n");
+	write("en/ai/05-cloud/01-a.mdx", "---\nslug: /a-top\n---\n# A\n");
+	write("en/ai/07-misc/x.mdx", "# X\n");
+	write("en/ai/07-misc/x.mdx.bak", "not a doc\n");
+	write("en/dev/guide.md", "# Dev guide\n");
+	write("zh/ai/05-cloud/02-b.mdx", "# 乙\n");
+	write("zh/ai/05-cloud/_category_.yml", "label: 云\n");
+	const tree = readLegacyTree({ enRoot: path.join(dir, "en"), zhRoot: path.join(dir, "zh") });
+	const by = (locale, rel) => tree.docs.find((d) => d.locale === locale && d.rel === rel);
+
+	it("orders like the Docusaurus sidebar and encodes it in sort_order", () => {
+		expect(tree.docs.filter((d) => d.locale === "en").map((d) => `${d.rel}=${d.sortOrder}`)).toEqual([
+			"ai/intro.md=1000", // sidebar_position 1
+			"ai/07-misc/x.mdx=2001", // folder prefix 7
+			"ai/05-cloud/01-a.mdx=3001", // _category_ position 100
+			"ai/05-cloud/02-b.mdx=3002",
+			"ai/guide.md=4000", // no position: last
+			"dev/guide.md=1001000",
+		]);
+	});
+	it("derives category, slugs (de-duplicated), old and new URLs", () => {
+		expect(by("en", "ai/guide.md")).toMatchObject({ section: "ai", category: "general", slug: "ai-guide", oldUrl: "/ai/guide" });
+		expect(by("en", "dev/guide.md")).toMatchObject({ section: "dev", slug: "dev-guide", newUrl: "/docs/dev-guide" });
+		expect(by("en", "ai/05-cloud/01-a.mdx")).toMatchObject({ category: "cloud", slug: "a-top", oldUrl: "/a-top" });
+		expect(by("en", "ai/05-cloud/02-b.mdx")).toMatchObject({ slug: "b", oldUrl: "/ai/cloud/b" });
+		expect(by("zh-CN", "ai/05-cloud/02-b.mdx")).toMatchObject({ slug: "b", sortOrder: 3002, oldUrl: "/zh-CN/ai/cloud/b", newUrl: "/zh-CN/docs/b" });
+		expect(tree.categories).toEqual({ cloud: { label: "Cloud", zhLabel: "云" }, misc: { label: "misc" } });
+		expect(tree.docs.some((d) => d.rel.endsWith(".bak"))).toBe(false);
+	});
+	it("resolves links by URL, by file path and per locale", () => {
+		const b = by("en", "ai/05-cloud/02-b.mdx");
+		// a relative URL resolves against the page URL /ai/cloud/b: /ai/cloud/a is not a page (a lives at /a-top)
+		expect(tree.resolveLink("./a", b)).toBe("./a");
+		expect(tree.unresolved).toEqual(["ai/05-cloud/02-b.mdx: ./a"]);
+		tree.unresolved.length = 0;
+		expect(tree.resolveLink("../07-misc/x.mdx#top", b)).toBe("/docs/x#top");
+		expect(tree.resolveLink("/a-top", b)).toBe("/docs/a-top");
+		expect(tree.resolveLink("/ai/cloud/b", by("zh-CN", "ai/05-cloud/02-b.mdx"))).toBe("/zh-CN/docs/b");
+		for (const href of ["https://x.example/a", "#anchor", "/img/a.png", "mailto:a@b.c"]) expect(tree.resolveLink(href, b)).toBe(href);
+		expect(tree.unresolved).toEqual([]);
+	});
+});
+
+describe.skipIf(!existsSync("legacy/docs"))("readLegacyTree on legacy/", () => {
+	const tree = readLegacyTree();
+	const en = tree.docs.filter((d) => d.locale === "en");
+	const zh = tree.docs.filter((d) => d.locale === "zh-CN");
+
+	it("lists 26 en docs in sidebar order and 9 zh-CN translations", () => {
+		expect(en.map((d) => `${d.slug}:${d.section}/${d.category}:${d.sortOrder}`)).toEqual([
+			"intro:ai/general:1000",
+			"guide:ai/usecase:2001",
+			"ai-tools-adhoc:ai/usecase:2002",
+			"tools-summary:ai/usecase:2003",
+			"ai-product-ideas:ai/article:3001",
+			...["rundiffusion", "replicate", "qblock", "monster_api", "lambda", "javis", "paperspace", "latitude", "baseten", "banana", "modal", "datacrunch", "ovhcloud", "runpod", "huggingface", "fullstack"].map(
+				(s, i) => `${s}:ai/cloud:${4001 + i}`,
+			),
+			"prompt-guides:ai/prompt:5001",
+			"llm:ai/model:6001",
+			"3d:ai/model:6002",
+			"overview:dev/general:1001000",
+			"learn_ai_coding:dev/general:1002000",
+		]);
+		expect(zh.map((d) => d.slug).sort()).toEqual(["ai-product-ideas", "guide", "intro", "learn_ai_coding", "monster_api", "prompt-guides", "qblock", "replicate", "rundiffusion"]);
+		for (const d of zh) expect(en.find((e) => e.rel === d.rel)).toMatchObject({ slug: d.slug, sortOrder: d.sortOrder });
+	});
+	it("knows the old URLs, including absolute and relative frontmatter slugs and 01_3d", () => {
+		const old = Object.fromEntries(en.map((d) => [d.slug, d.oldUrl]));
+		expect(old).toMatchObject({
+			rundiffusion: "/rundiffusion",
+			qblock: "/ai/cloud/qblock",
+			"prompt-guides": "/ai/prompt/prompt-guides",
+			"ai-tools-adhoc": "/ai/usecase/ai-tools-adhoc",
+			"3d": "/ai/model/01_3d",
+			intro: "/ai/intro",
+			overview: "/dev/overview",
+		});
+	});
+	it("has the category labels, including the intended zh label", () => {
+		expect(tree.categories).toEqual({
+			usecase: { label: "Use Case", zhLabel: "神兵利器" },
+			article: { label: "Articles" },
+			cloud: { label: "Cloud" },
+			prompt: { label: "Prompt Engineering" },
+			model: { label: "Model" },
+		});
+	});
+	it("resolves every internal link in the corpus", () => {
+		for (const d of tree.docs) convertMdx(readFileSync(d.file, "utf8"), { path: d.file, slug: d.slug, rewriteHref: (h) => tree.resolveLink(h, d) });
+		expect(tree.unresolved).toEqual([]);
+		const qblock = tree.docs.find((d) => d.locale === "zh-CN" && d.slug === "monster_api");
+		expect(tree.resolveLink("./qblock", qblock)).toBe("/zh-CN/docs/qblock");
+		expect(tree.resolveLink("/ai/usecase/ai-tools-adhoc", { rel: "blog/x/index.mdx", locale: "en" })).toBe("/docs/ai-tools-adhoc");
+	});
+});
+```
+
+- [ ] **Step 2: 跑测试，确认失败**
+
+Run: `npx vitest run scripts/lib/legacy-tree.test.mjs`
+Expected: FAIL：`legacy-tree.mjs` 不存在。
+
+- [ ] **Step 3: 实现**
+
+Create `scripts/lib/legacy-tree.mjs`：
+
+```js
+// Inventory of the legacy Docusaurus docs (research p2-research-5-legacy.md §1-§4): every doc with its
+// section, category, sort_order, slug, old URL and new URL, plus a link resolver for the converter.
+// Docusaurus 3.7 rules reproduced here: number prefixes (lib/numberPrefix.js), autogenerated sidebar order
+// (lib/sidebars/generator.js), permalinks with routeBasePath "/" (lib/slug.js), and zh-CN as an overlay
+// on the en tree. Removed together with legacy/ in plan 3.
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import path from "node:path";
+import { parseFrontmatter } from "./frontmatter.mjs";
+import { deriveSlug } from "./mdx-to-pt.mjs";
+
+export const EN_ROOT = "legacy/docs";
+export const ZH_ROOT = "legacy/i18n/zh-CN/docusaurus-plugin-content-docs/current";
+
+/** Docusaurus number prefix: `08-cloud` -> 8 / "cloud". Names like `01_3d` (`^\d+[-_.]\d+`) have none. */
+export function numberPrefix(name) {
+	if (/^\d+[-_.]\d+/.test(name)) return { position: undefined, name };
+	const m = /^(\d+)\s*[-_.]+\s*([^-_.\s].*)$/.exec(name);
+	return m ? { position: Number(m[1]), name: m[2] } : { position: undefined, name };
+}
+
+/** `key: value` from a flat YAML file such as `_category_.yml` (comments and quotes removed). */
+function yamlValue(src, key) {
+	const m = new RegExp(`^${key}:\\s*(.*?)\\s*(?:#.*)?$`, "m").exec(src);
+	return m?.[1] ? m[1].replace(/^(['"])(.*)\1$/, "$2") : undefined;
+}
+
+/** Doc files under root, relative and sorted (`.md`/`.mdx` only: skips `_category_.yml` and `.bak`). */
+function listDocs(root) {
+	return readdirSync(root, { recursive: true, withFileTypes: true })
+		.filter((e) => e.isFile() && /\.mdx?$/.test(e.name))
+		.map((e) => path.relative(root, path.join(e.parentPath, e.name)).split(path.sep).join("/"))
+		.sort();
+}
+
+const sortItems = (items) =>
+	items.sort((a, b) => (a.position ?? Infinity) - (b.position ?? Infinity) || (a.source < b.source ? -1 : a.source > b.source ? 1 : 0));
+
+/**
+ * sort_order for every en doc: sectionIndex * 1_000_000 + rootRank * 1000 + docRank, where rootRank is the
+ * 1-based place of the doc or its category folder among the section's root items and docRank the place
+ * inside the folder (0 for docs at the section root). DocsPage sorts all docs by it, then groups.
+ */
+function sortOrders(docs, root) {
+	const out = new Map();
+	const sections = [...new Set(docs.map((d) => d.segs[0]))].sort();
+	sections.forEach((section, s) => {
+		const inSection = docs.filter((d) => d.segs[0] === section);
+		const roots = new Map();
+		for (const d of inSection) {
+			if (d.segs.length > 3) throw new Error(`${d.rel}: categories nested more than one level are not supported`);
+			if (d.segs.length === 2) roots.set(d.rel, { source: d.segs[1], position: d.position, docs: [d] });
+			else {
+				const folder = d.segs[1];
+				if (!roots.has(folder)) {
+					const yml = path.join(root, section, folder, "_category_.yml");
+					const fromYml = existsSync(yml) ? Number(yamlValue(readFileSync(yml, "utf8"), "position")) : NaN;
+					roots.set(folder, { source: folder, position: Number.isFinite(fromYml) ? fromYml : numberPrefix(folder).position, docs: [], folder: true });
+				}
+				roots.get(folder).docs.push({ ...d, source: d.segs[2] });
+			}
+		}
+		sortItems([...roots.values()]).forEach((item, r) => {
+			if (!item.folder) out.set(item.docs[0].rel, s * 1_000_000 + (r + 1) * 1000);
+			else sortItems(item.docs).forEach((d, n) => out.set(d.rel, s * 1_000_000 + (r + 1) * 1000 + n + 1));
+		});
+	});
+	return out;
+}
+
+/** Old Docusaurus permalink (routeBasePath "/"): absolute frontmatter slug, slug relative to the folder, or the id. */
+function oldUrl(segs, fmSlug) {
+	const dirs = segs.slice(0, -1).map((d) => numberPrefix(d).name);
+	if (typeof fmSlug === "string" && fmSlug.startsWith("/")) return fmSlug;
+	const leaf = fmSlug ?? numberPrefix(segs.at(-1).replace(/\.mdx?$/, "")).name;
+	return `/${[...dirs, leaf].join("/")}`;
+}
+
+/** Slug collisions: every member of a colliding group gets `<category or section>-<slug>`, then more context. */
+function uniqueSlugs(docs) {
+	const tries = [
+		(d) => d.base,
+		(d) => `${d.category === "general" ? d.section : d.category}-${d.base}`,
+		(d) => `${d.section}-${d.category === "general" ? "root" : d.category}-${d.base}`,
+	];
+	const slugs = new Map(docs.map((d) => [d.rel, d.base]));
+	for (let t = 1; t < tries.length; t++) {
+		const count = new Map();
+		for (const d of docs) count.set(slugs.get(d.rel), (count.get(slugs.get(d.rel)) ?? 0) + 1);
+		for (const d of docs) if (count.get(slugs.get(d.rel)) > 1) slugs.set(d.rel, tries[t](d));
+	}
+	const all = [...slugs.values()];
+	const dup = all.find((s, i) => all.indexOf(s) !== i);
+	if (dup) throw new Error(`slug "${dup}" is still not unique; rename a file or set a frontmatter slug`);
+	return slugs;
+}
+
+/** The whole legacy docs tree. `docs` lists en entries (by sort_order) then their zh-CN translations. */
+export function readLegacyTree({ enRoot = EN_ROOT, zhRoot = ZH_ROOT } = {}) {
+	const read = (root, rel) => {
+		const { data } = parseFrontmatter(readFileSync(path.join(root, rel), "utf8"));
+		const segs = rel.split("/");
+		const category = segs.length > 2 ? numberPrefix(segs[1]).name : "general";
+		return { rel, segs, frontmatter: data, section: segs[0], category, position: data.sidebar_position ?? numberPrefix(segs.at(-1).replace(/\.mdx?$/, "")).position };
+	};
+	const en = listDocs(enRoot).map((rel) => read(enRoot, rel));
+	for (const d of en) d.base = deriveSlug(d.frontmatter, d.rel);
+	const orders = sortOrders(en, enRoot);
+	const slugs = uniqueSlugs(en);
+
+	const categories = {};
+	for (const d of en.filter((x) => x.category !== "general")) {
+		const yml = path.join(enRoot, d.segs[0], d.segs[1], "_category_.yml");
+		const zhYml = path.join(zhRoot, d.segs[0], d.segs[1], "_category_.yml");
+		categories[d.category] ??= {
+			label: existsSync(yml) ? yamlValue(readFileSync(yml, "utf8"), "label") : d.category,
+			...(existsSync(zhYml) ? { zhLabel: yamlValue(readFileSync(zhYml, "utf8"), "label") } : {}),
+		};
+	}
+
+	const entry = (d, locale, root) => {
+		const slug = slugs.get(d.rel);
+		const old = oldUrl(d.segs, d.frontmatter.slug);
+		const prefix = locale === "en" ? "" : `/${locale}`;
+		return {
+			locale,
+			rel: d.rel,
+			file: path.join(root, d.rel),
+			section: d.section,
+			category: d.category,
+			sortOrder: orders.get(d.rel),
+			slug,
+			oldUrl: `${prefix}${old}`,
+			newUrl: `${prefix}/docs/${slug}`,
+		};
+	};
+	const enDocs = en.map((d) => entry(d, "en", enRoot)).sort((a, b) => a.sortOrder - b.sortOrder);
+	const enByRel = new Map(en.map((d) => [d.rel, d]));
+	const zhDocs = (existsSync(zhRoot) ? listDocs(zhRoot) : []).map((rel) => {
+		const d = enByRel.get(rel);
+		if (!d) throw new Error(`${zhRoot}/${rel} has no en original; Docusaurus ignored it, so does the migration`);
+		return entry(d, "zh-CN", zhRoot);
+	});
+	zhDocs.sort((a, b) => a.sortOrder - b.sortOrder);
+	const docs = [...enDocs, ...zhDocs];
+
+	const byOldUrl = new Map(enDocs.map((d) => [d.oldUrl, d]));
+	const byRel = new Map(enDocs.map((d) => [d.rel, d]));
+	const unresolved = [];
+
+	/**
+	 * New URL for a link found in `from` (a doc entry, or `{ rel, locale }` for a post). External links,
+	 * `#anchors`, images and unknown paths come back unchanged; unknown internal doc links are also pushed
+	 * to `unresolved` so the runner can fail on them.
+	 */
+	function resolveLink(href, from) {
+		if (typeof href !== "string" || /^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i.test(href) || /^\/(?:img|cover)\//.test(href)) return href;
+		const [target, hash = ""] = href.split(/(?=#)/);
+		let doc;
+		if (/\.mdx?$/.test(target) && !target.startsWith("/")) {
+			doc = byRel.get(path.posix.normalize(path.posix.join(path.posix.dirname(from.rel), target)));
+		} else {
+			const base = from.oldUrl ? from.oldUrl.replace(/^\/zh-CN(?=\/)/, "") : "/";
+			const url = new URL(target, `https://legacy.invalid${base}`).pathname.replace(/\/$/, "");
+			doc = byOldUrl.get(url.replace(/^\/zh-CN(?=\/)/, "")) ?? enDocs.find((d) => `/docs/${d.slug}` === url);
+		}
+		if (!doc) {
+			unresolved.push(`${from.rel ?? from.file}: ${href}`);
+			return href;
+		}
+		const locale = from.locale ?? "en";
+		return `${locale === "en" ? "" : `/${locale}`}/docs/${doc.slug}${hash}`;
+	}
+
+	return { docs, categories, resolveLink, unresolved };
+}
+```
+
+- [ ] **Step 4: 跑测试，确认通过**
+
+Run: `npm test`
+Expected: PASS（`legacy-tree.test.mjs` 12 个用例，其中最后一组对真实 `legacy/` 断言了上面的 `sort_order`、旧 URL、分类名，以及全部站内链接都能解析）。
+
+- [ ] **Step 5: 更新 spec**
+
+§2 "**建议**：URL 用 `/docs/{slug}` ……"那一条后面加：
+
+"- **已定（计划 2 Task 8）**：`category` 存目录名去掉数字前缀（`cloud`、`prompt`、`usecase`、`article`、`model`；直接在 `ai/`、`dev/` 下的文档存 `general`），显示名由站点代码映射（Cloud / Prompt Engineering / Use Case / Articles / Model；zh-CN 的 usecase 显示"神兵利器"）。存显示名的话，zh-CN 只翻译了部分文档时同一个分类会分成两组。`sort_order` = section 序号 × 1,000,000 + 根条目名次 × 1000 + 分类内名次，复现 Docusaurus 的侧边栏顺序。slug 重名时整组改成 `<category 或 section>-<slug>`（目前没有重名）。规则实现在 `scripts/lib/legacy-tree.mjs`。"
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add scripts/lib/legacy-tree.mjs scripts/lib/legacy-tree.test.mjs docs/superpowers/specs/2026-10-15-emdash-migration-design.md
+git commit -m "feat(migrate): legacy docs inventory (sidebar order, categories, slugs, old URLs, link resolver)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
+```
+
+---
