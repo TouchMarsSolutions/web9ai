@@ -2,6 +2,7 @@
 // Supports GFM, Docusaurus-style `:::tone title` admonitions, and ```mermaid fences.
 import { Marked } from "marked";
 import sanitizeHtml from "sanitize-html";
+import { safeValueFor } from "./css-value.mjs";
 
 const TONES = new Set(["note", "tip", "info", "warning", "danger", "caution"]);
 
@@ -52,14 +53,26 @@ marked.use({
 });
 
 // Content is published by AI agents without review, so inline CSS is limited to cosmetic
-// properties. No positioning (overlays), no url()/expression() (tracking, exfiltration).
-const SAFE_VALUE = /^(?!.*(?:url\s*\(|expression\s*\(|@import|\\))[\w\s#%.,()+\-/'"]+$/i;
+// properties (no positioning) and every value goes through isSafeCssValue (css-value.mjs).
 const STYLE_PROPS = [
 	"color", "background", "background-color", "text-align", "font-size", "font-weight", "font-style",
 	"padding", "margin", "border", "border-radius", "box-shadow", "line-height", "width", "max-width",
 ];
+
+/** Tags renderMarkdown keeps; html.mjs reuses the same set. */
+export const ALLOWED_TAGS = sanitizeHtml.defaults.allowedTags.concat(["img", "details", "summary", "del", "s", "h1", "h2"]);
+
+/** Absolute (http(s)://), protocol-relative (//) and mailto: links leave the site; everything else stays on it. */
+const isExternalHref = (href = "") => /^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(href) || /^mailto:/i.test(href);
+
+function transformLink(tagName, attribs) {
+	if (isExternalHref(attribs.href)) return { tagName, attribs: { ...attribs, rel: "noopener noreferrer", target: "_blank" } };
+	const { target, ...rest } = attribs;
+	return { tagName, attribs: rest };
+}
+
 const SANITIZE = {
-	allowedTags: sanitizeHtml.defaults.allowedTags.concat(["img", "details", "summary", "del", "s", "h1", "h2"]),
+	allowedTags: ALLOWED_TAGS,
 	allowedAttributes: {
 		"*": ["style"],
 		a: ["href", "title", "target", "rel"],
@@ -75,11 +88,9 @@ const SANITIZE = {
 		aside: ["callout", /^callout--(note|tip|info|warning|danger|caution)$/],
 		p: ["callout__title"],
 	},
-	allowedStyles: { "*": Object.fromEntries(STYLE_PROPS.map((p) => [p, [SAFE_VALUE]])) },
+	allowedStyles: { "*": Object.fromEntries(STYLE_PROPS.map((p) => [p, [safeValueFor(p)]])) },
 	allowedSchemes: ["http", "https", "mailto"],
-	transformTags: {
-		a: sanitizeHtml.simpleTransform("a", { rel: "noopener noreferrer", target: "_blank" }, true),
-	},
+	transformTags: { a: transformLink },
 };
 
 /** Dedent a block so indented MDX children don't turn into code blocks. */

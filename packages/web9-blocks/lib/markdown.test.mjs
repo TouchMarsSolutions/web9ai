@@ -45,6 +45,48 @@ describe("renderMarkdown sanitizer", () => {
 	it("sanitizes inline markdown too", () => {
 		expect(renderInlineMarkdown('<b onclick="x()">hi</b>')).toBe("<b>hi</b>");
 	});
+	it("drops url() smuggled past a newline", () => {
+		expect(renderMarkdown('<div style="background: red\nurl(//evil.example/t.gif)">x</div>')).toBe("<div>x</div>");
+		expect(renderMarkdown('<div style="background: red&#10;url(//evil.example/t.gif)">x</div>')).toBe("<div>x</div>");
+	});
+	it("drops every function that can fetch or leak: image-set, cross-fade, src, attr, var", () => {
+		for (const fn of ["image-set", "-webkit-image-set", "cross-fade", "src", "element", "paint"]) {
+			expect(renderMarkdown(`<div style="background: ${fn}('//evil.example/t.gif' 1x)">x</div>`)).toBe("<div>x</div>");
+		}
+		expect(renderMarkdown('<div style="width: attr(data-w px)">x</div>')).toBe("<div>x</div>");
+	});
+	it("drops protocol-relative URLs", () => {
+		expect(renderMarkdown('<div style="background: //evil.example/t.gif">x</div>')).toBe("<div>x</div>");
+	});
+	it("keeps rgb()/hsl()/gradients/calc()/min()", () => {
+		expect(renderMarkdown('<div style="color: rgb(10, 20, 30); background: radial-gradient(circle, rgba(255,255,255,.4), transparent)">x</div>')).toBe(
+			'<div style="color:rgb(10, 20, 30);background:radial-gradient(circle, rgba(255,255,255,.4), transparent)">x</div>',
+		);
+		expect(renderMarkdown('<div style="width: calc(100% - 20px); max-width: min(100%, 600px)">x</div>')).toBe(
+			'<div style="width:calc(100% - 20px);max-width:min(100%, 600px)">x</div>',
+		);
+	});
+	it("drops full-page box-shadow spreads and viewport units", () => {
+		expect(renderMarkdown('<div style="box-shadow: 0 0 0 9999px red">x</div>')).toBe("<div>x</div>");
+		expect(renderMarkdown('<div style="box-shadow: 0 0 0 100vmax #000">x</div>')).toBe("<div>x</div>");
+		expect(renderMarkdown('<div style="width: 100vw; color: red">x</div>')).toBe('<div style="color:red">x</div>');
+		expect(renderMarkdown('<div style="box-shadow: 0 2px 8px rgba(0,0,0,0.2)">x</div>')).toBe('<div style="box-shadow:0 2px 8px rgba(0,0,0,0.2)">x</div>');
+	});
+	it("drops negative margins and absurd sizes", () => {
+		expect(renderMarkdown('<div style="margin: -9999px 0 0 -9999px">x</div>')).toBe("<div>x</div>");
+		expect(renderMarkdown('<div style="margin: -1px">x</div>')).toBe("<div>x</div>");
+		expect(renderMarkdown('<div style="padding: 99999px; font-size: 9999px">x</div>')).toBe("<div>x</div>");
+		expect(renderMarkdown('<div style="margin: 0 auto; padding: 100px 20px">x</div>')).toBe('<div style="margin:0 auto;padding:100px 20px">x</div>');
+	});
+	it("drops upper-case property names (the whitelist is case-sensitive, so they fail closed)", () => {
+		expect(renderMarkdown('<div style="POSITION: fixed; Background-Color: red; color: red">x</div>')).toBe('<div style="color:red">x</div>');
+	});
+	it("opens only external links in a new tab", () => {
+		expect(renderMarkdown("[a](/docs/intro) [b](#top) [c](https://example.com)")).toBe(
+			'<p><a href="/docs/intro">a</a> <a href="#top">b</a> <a href="https://example.com" rel="noopener noreferrer" target="_blank">c</a></p>\n',
+		);
+		expect(renderMarkdown('<a href="/docs/x" target="_top">t</a>')).toBe('<p><a href="/docs/x">t</a></p>\n');
+	});
 });
 
 describe("safeTone", () => {

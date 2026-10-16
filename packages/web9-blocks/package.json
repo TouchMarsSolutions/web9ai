@@ -8,6 +8,7 @@
     ".": "./index.mjs",
     "./astro": "./astro/index.mjs",
     "./markdown": "./lib/markdown.mjs",
+    "./html": "./lib/html.mjs",
     "./styles.css": "./astro/blocks.css"
   },
   "peerDependencies": {
