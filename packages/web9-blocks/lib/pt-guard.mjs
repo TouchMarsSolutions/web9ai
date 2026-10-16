@@ -18,6 +18,8 @@
 // (spans only) and marks (decorators or a link) but not their sizes, so the caps below do not reach them.
 // Output is bounded: collecting stops after MAX_PROBLEMS (plain pushes, never spreads of a long list, which
 // throw RangeError past ~120k items) and ends with MORE, so a hostile value cannot make the guard throw.
+// Messages print a value through show(): JSON.stringify overflows the stack on a value nested a few thousand levels
+// deep (6154 in node), so show() catches that and prints [unprintable array|object]; a long string is cut first.
 // sanitizeHref (emdash utils/url.ts) throws on a non-string, so every field a core or web9 renderer passes to
 // it must be a string when present: link markDef href (marks/Link.astro:21), button.url (Button.astro:21),
 // buttons[].url (Buttons.astro maps Button), file.url (File.astro:21), embed.url (astro/Embed.astro),
@@ -140,17 +142,32 @@ function valuesAt(node, path) {
 	return current.filter((v) => v !== undefined && v !== null);
 }
 
+const MAX_SHOWN = 60;
+
+/**
+ * A value as it appears in a problem: its JSON, cut to MAX_SHOWN characters. Never throws: JSON.stringify
+ * overflows the stack on a value nested a few thousand levels deep (the guard sees raw request data), so
+ * that one prints as [unprintable array] or [unprintable object]. A string is cut before it is serialised.
+ */
+function show(v) {
+	try {
+		const json = JSON.stringify(typeof v === "string" ? v.slice(0, MAX_SHOWN) : v);
+		return json === undefined ? String(v) : json.slice(0, MAX_SHOWN);
+	} catch {
+		return `[unprintable ${Array.isArray(v) ? "array" : typeof v}]`;
+	}
+}
+
 /** Adds `path: value ... is not allowed` to `out` per failing value of one node. */
 function checkRules(node, rules, prefix, out) {
 	for (const [path, ok] of Object.entries(rules)) {
 		for (const v of valuesAt(node, path)) {
 			if (out.full) return;
-			if (!ok(v)) out.add(`${prefix}${path}: value ${JSON.stringify(v).slice(0, 60)} is not allowed`);
+			if (!ok(v)) out.add(`${prefix}${path}: value ${show(v)} is not allowed`);
 		}
 	}
 }
 
-const show = (v) => JSON.stringify(v)?.slice(0, 60) ?? String(v);
 const notAllowed = (where, field, v) => `${where} ${field}: value ${show(v)} is not allowed`;
 
 // Names core renders. Sets, so a lookup never reaches Object.prototype.

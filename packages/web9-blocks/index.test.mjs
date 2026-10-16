@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { BLOCK_IMAGE_FIELDS, IMAGE_FIELDS, PT_FIELDS, beforeSave } from "./index.mjs";
+import { localizeHref } from "../web9-site/lib/nav.mjs";
+import { BLOCK_IMAGE_FIELDS, HOME_ALTERNATES, IMAGE_FIELDS, PT_FIELDS, beforeSave, createPlugin, pageMetadata } from "./index.mjs";
 
 const seed = JSON.parse(readFileSync(new URL("../../seed/seed.json", import.meta.url), "utf8"));
 const callout = { _type: "callout", _key: "c1", tone: "tip", title: "T", body: "probe-word" };
@@ -133,6 +134,20 @@ describe("content:beforeSave", () => {
 			message: expect.stringContaining("content: #0 block children[0] iframe"),
 		});
 	});
+	it("answers a deeply nested value with a rejection, never an exception", async () => {
+		const deep = (n) => {
+			let v = "x";
+			for (let i = 0; i < n; i++) v = [v];
+			return v;
+		};
+		const rejected = { name: "ContentSaveRejectedError", message: expect.stringContaining("meta.storageKey: value [unprintable array] is not allowed") };
+		await expect(beforeSave({ collection: "posts", content: { featured_image: { id: "x", meta: { storageKey: deep(20000) } } } })).rejects.toMatchObject(rejected);
+		const hero = { _type: "hero", _version: 1, _key: "h", title: "T", image: { id: "", src: "/img/ai.svg", meta: { storageKey: deep(20000) } } };
+		await expect(beforeSave({ collection: "pages", content: { title: "Home", layout: [hero] } })).rejects.toMatchObject(rejected);
+		// text of a web9 block is walked for search_text after the guard passed it (callout has no field rules)
+		const saved = await beforeSave({ collection: "docs", content: { body: [{ _type: "callout", _key: "c", body: deep(50000) }] } });
+		expect(saved.search_text).toBe("x");
+	});
 	it("drops a caller-sent search_text from saves without the body field", async () => {
 		const saved = await beforeSave({ collection: "docs", content: { title: "x", search_text: "spam" } });
 		expect(saved).toEqual({ title: "x" });
@@ -143,5 +158,50 @@ describe("content:beforeSave", () => {
 	it("replaces a caller-sent search_text when the body is saved", async () => {
 		const saved = await beforeSave({ collection: "docs", content: { body: [callout], search_text: "spam" } });
 		expect(saved.search_text).toBe("T\nprobe-word");
+	});
+});
+
+// Core builds hreflang alternates from the collection's urlPattern (/pages/{slug}), which for the home page is a
+// redirect (and /zh-CN/pages/home is a 302 to the English one). Plugin links win the dedupe (page/metadata.ts).
+describe("page:metadata", () => {
+	const SITE = "https://www.web9.ai";
+	const event = (content, siteUrl = SITE) => ({ page: { url: `${SITE}/`, path: "/", locale: "en", kind: content ? "content" : "custom", pageType: "website", title: "x", description: null, canonical: null, image: null, content, siteUrl } });
+	const home = { collection: "pages", id: "01HOME", slug: "home" };
+	const link = (hreflang, path) => ({ kind: "link", rel: "alternate", hreflang, href: `${SITE}${path}` });
+	const wanted = [link("en", "/"), link("zh-CN", "/zh-CN/"), link("x-default", "/")];
+
+	it("gives both home pages alternates at / and /zh-CN/ and x-default /", () => {
+		expect(pageMetadata(event(home))).toEqual(wanted);
+		expect(pageMetadata({ page: { ...event(home).page, locale: "zh-CN", path: "/zh-CN/" } })).toEqual(wanted);
+	});
+	it("uses the site origin it is given, never a fixed host", () => {
+		expect(pageMetadata(event(home, "https://staging.web9.ai"))).toEqual([
+			{ kind: "link", rel: "alternate", hreflang: "en", href: "https://staging.web9.ai/" },
+			{ kind: "link", rel: "alternate", hreflang: "zh-CN", href: "https://staging.web9.ai/zh-CN/" },
+			{ kind: "link", rel: "alternate", hreflang: "x-default", href: "https://staging.web9.ai/" },
+		]);
+	});
+	it("leaves every other page to core", () => {
+		for (const content of [
+			undefined,
+			{ collection: "docs", id: "1", slug: "home" },
+			{ collection: "posts", id: "1", slug: "home" },
+			{ collection: "pages", id: "1", slug: "about" },
+			{ collection: "pages", id: "1", slug: null },
+			{ collection: "pages", id: "1" },
+		]) {
+			expect(pageMetadata(event(content))).toBeNull();
+		}
+		for (const siteUrl of [undefined, "", "not a url", "javascript:alert(1)"]) expect(pageMetadata({ page: { ...event(home).page, siteUrl } })).toBeNull();
+		expect(pageMetadata({})).toBeNull();
+		expect(pageMetadata({ page: null })).toBeNull();
+	});
+	it("points at the routes the site serves (localizeHref) and is registered by the plugin", () => {
+		expect(HOME_ALTERNATES).toEqual([
+			{ hreflang: "en", path: localizeHref("/", "en") },
+			{ hreflang: "zh-CN", path: localizeHref("/", "zh-CN") },
+			{ hreflang: "x-default", path: "/" },
+		]);
+		expect(createPlugin().hooks["page:metadata"]).toMatchObject({ handler: pageMetadata });
 	});
 });

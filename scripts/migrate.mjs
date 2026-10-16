@@ -13,7 +13,7 @@
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { docPayloads } from "./lib/docs-payloads.mjs";
-import { homePayload } from "./lib/home-content.mjs";
+import { homePageChecks, homePayload } from "./lib/home-content.mjs";
 import { readLegacyTree } from "./lib/legacy-tree.mjs";
 import { checkMarkers } from "./lib/markers.mjs";
 import { callTool, defaultToken } from "./lib/mcp.mjs";
@@ -48,12 +48,6 @@ const REDIRECT_SAMPLES = [
 	["/blog/atom.xml", "/rss.xml"],
 	["/zh-CN/blog/rss.xml", "/rss.xml"],
 	["/zh-CN/blog/atom.xml", "/rss.xml"],
-];
-
-/** The home pages (Task 11): blocks rendered, buttons localized, no missing-renderer placeholder. */
-const HOME_CHECKS = [
-	{ url: "/", present: [">Magic Starts</a>", 'href="/docs/intro"', 'src="/img/energy_free.svg"', "Energy free is"], absent: ["data-emdash-missing-block", "Energe"] },
-	{ url: "/zh-CN/", present: [">魔法启动</a>", 'href="/zh-CN/docs/intro"', "能源自由"], absent: ["data-emdash-missing-block"] },
 ];
 
 const STEPS = {
@@ -102,7 +96,7 @@ const STEPS = {
 	},
 	async verify() {
 		const tree = readLegacyTree();
-		const checks = [...docPageChecks(docPayloads(tree)), ...HOME_CHECKS];
+		const checks = [...docPageChecks(docPayloads(tree)), ...homePageChecks()];
 		const failures = [];
 		for (const check of checks) {
 			const res = await fetch(new URL(check.url, site));

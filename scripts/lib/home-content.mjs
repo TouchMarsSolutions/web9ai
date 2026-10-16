@@ -2,6 +2,8 @@
 // HomepageFeatures, i18n/zh-CN/code.json) as hero + feature_grid blocks in the `layout` field.
 // Stable _keys, so a re-run compares equal and an edit needs no replaceBlocks.
 
+import { escapeHtml } from "./verify-pages.mjs";
+
 /** A static file in public/img, in the shape the admin's "from URL" picker stores. No width/height:
  * with both set, EmDash sends same-origin images through astro:assets. */
 const svg = (file, alt) => ({ id: "", provider: "external", src: `/img/${file}`, mimeType: "image/svg+xml", alt });
@@ -56,4 +58,33 @@ export function homePayload(locale) {
 			],
 		},
 	};
+}
+
+const SITE = "https://www.web9.ai";
+/** The hreflang alternates of the home pages (page:metadata in packages/web9-blocks); core would emit /pages/home. */
+const ALTERNATES = [
+	`<link rel="alternate" href="${SITE}/" hreflang="en">`,
+	`<link rel="alternate" href="${SITE}/zh-CN/" hreflang="zh-CN">`,
+	`<link rel="alternate" href="${SITE}/" hreflang="x-default">`,
+];
+
+/**
+ * What `verify` expects of the rendered home pages. The hero marker carries the button text: the menu and the
+ * footer link to /docs/intro too, so the href alone would pass with a wrong hero link.
+ */
+export function homePageChecks() {
+	return ["en", "zh-CN"].map((locale) => {
+		const [hero, grid] = homePayload(locale).data.layout;
+		const energy = grid.features[1];
+		return {
+			url: locale === "en" ? "/" : `/${locale}/`,
+			present: [
+				`href="${hero.primary_href}">${escapeHtml(hero.primary_label)}</a>`,
+				`src="${energy.image.src}"`,
+				escapeHtml(energy.description),
+				...ALTERNATES,
+			],
+			absent: ["data-emdash-missing-block", "/pages/home", ...(locale === "en" ? ["Energe"] : [])],
+		};
+	});
 }

@@ -143,6 +143,34 @@ export async function beforeSave({ content, collection }) {
 	return { ...content, search_text: extractBlockText(content[main], BLOCK_TYPES) };
 }
 
+/**
+ * hreflang alternates of the home pages. Core derives them from the collection's urlPattern, `/pages/{slug}`,
+ * which for the home page is a redirect to `/` (and `/zh-CN/pages/home` redirects to the English home), and a
+ * crawler drops hreflang that points at a redirect. These paths are the routes HomePage.astro serves; the test
+ * pins them to localizeHref.
+ */
+export const HOME_ALTERNATES = [
+	{ hreflang: "en", path: "/" },
+	{ hreflang: "zh-CN", path: "/zh-CN/" },
+	{ hreflang: "x-default", path: "/" },
+];
+
+/**
+ * page:metadata. A contribution from a plugin sits before core's in the list, and the first link per hreflang
+ * wins (page/metadata.ts resolvePageMetadata), so these replace core's three home alternates. The home page is
+ * the `pages` entry with slug `home` (HomePage.astro passes it as `content`, which keeps the SEO-panel overlay);
+ * every other page, and a page without an absolute site URL, is left to core.
+ */
+export function pageMetadata(event) {
+	const page = event?.page;
+	if (page?.content?.collection !== "pages" || page.content.slug !== "home") return null;
+	try {
+		return HOME_ALTERNATES.map(({ hreflang, path }) => ({ kind: "link", rel: "alternate", hreflang, href: new URL(path, page.siteUrl).href }));
+	} catch {
+		return null;
+	}
+}
+
 export function web9Blocks() {
 	return {
 		id: ID,
@@ -162,6 +190,7 @@ export function createPlugin() {
 		capabilities: ["content:write"],
 		hooks: {
 			"content:beforeSave": beforeSave,
+			"page:metadata": pageMetadata,
 		},
 		admin: { portableTextBlocks: BLOCKS },
 	});

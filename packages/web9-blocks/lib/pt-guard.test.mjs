@@ -568,3 +568,50 @@ describe("guardPortableText: size caps and _key (core renderers throw or stall p
 		expect(guardPortableText([{ _type: "callout", tone: "tip", body: "x" }, { _type: "break", _key: null }])).toEqual([]);
 	});
 });
+
+// The guard runs in content:beforeSave on raw request data: it must answer with problems, never throw.
+// JSON.stringify overflows the stack on a value nested a few thousand levels deep (6154 in node), and the
+// guard used to stringify every failing value for its message.
+describe("guards never throw on deeply nested values", () => {
+	const deepArray = (n) => {
+		let v = "x";
+		for (let i = 0; i < n; i++) v = [v];
+		return v;
+	};
+	const deepObject = (n) => {
+		let v = "x";
+		for (let i = 0; i < n; i++) v = { a: v };
+		return v;
+	};
+	const img = (over = {}) => ({ id: "", provider: "external", src: "/img/ai.svg", ...over });
+	it("is a real overflow for JSON.stringify", () => {
+		expect(() => JSON.stringify(deepArray(20000))).toThrow(RangeError);
+		expect(() => JSON.stringify(deepObject(20000))).toThrow(RangeError);
+	});
+	it("guardImageValue reports a deep meta.storageKey, dominantColor or blurhash", () => {
+		expect(guardImageValue({ id: "x", meta: { storageKey: deepArray(20000) } })).toEqual(["meta.storageKey: value [unprintable array] is not allowed"]);
+		expect(guardImageValue({ id: "x", dominantColor: deepObject(20000) })).toEqual(["dominantColor: value [unprintable object] is not allowed"]);
+		expect(guardImageValue({ id: "x", darkVariant: { id: "y", blurhash: deepArray(20000) } })).toEqual(["darkVariant.blurhash: value [unprintable array] is not allowed"]);
+	});
+	it("guardBlockImages reports a deep value in a hero or feature image", () => {
+		const hero = { _type: "hero", _key: "h", title: "T", image: img({ meta: { storageKey: deepArray(20000) } }) };
+		const grid = { _type: "feature_grid", _key: "g", features: [{ title: "a", image: img({ dominantColor: deepObject(20000) }) }] };
+		expect(guardBlockImages([hero, grid], { hero: ["image"], feature_grid: ["features[].image"] })).toEqual([
+			"#0 hero image.meta.storageKey: value [unprintable array] is not allowed",
+			"#1 feature_grid features[0].image.dominantColor: value [unprintable object] is not allowed",
+		]);
+	});
+	it("guardPortableText reports a deep url, _key or href", () => {
+		expect(guardPortableText([{ _type: "button", _key: "k", url: deepArray(20000) }])).toEqual(["#0 button url: value [unprintable array] is not allowed"]);
+		expect(guardPortableText([{ _type: "callout", _key: deepObject(20000) }])).toEqual(["#0 callout _key: value [unprintable object] is not allowed"]);
+		expect(guardPortableText([para({ _key: deepArray(20000) })])).toEqual(["#0 block _key: value [unprintable array] is not allowed"]);
+		const link = para({ markDefs: [{ _type: "link", _key: "k1", href: deepArray(20000) }], children: [span("a", ["k1"])] });
+		expect(guardPortableText([link])).toEqual(["#0 block markDefs[0].href: value [unprintable array] is not allowed"]);
+	});
+	it("keeps a message short for a huge string and still prints a short value as before", () => {
+		const [problem] = guardImageValue({ id: "x", dominantColor: "a b".repeat(2_000_000) });
+		expect(problem.length).toBeLessThan(100);
+		expect(guardImageValue({ id: "x", dominantColor: "a b" })).toEqual(['dominantColor: value "a b" is not allowed']);
+		expect(guardImageValue({ id: "x", meta: { storageKey: { toString: 1 } } })).toEqual(['meta.storageKey: value {"toString":1} is not allowed']);
+	});
+});

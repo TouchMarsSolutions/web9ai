@@ -8,7 +8,7 @@ import { applySeed } from "emdash/seed";
 import { Kysely } from "kysely";
 import { afterAll, describe, expect, it } from "vitest";
 import { beforeSave } from "../../packages/web9-blocks/index.mjs";
-import { homePayload } from "./home-content.mjs";
+import { homePageChecks, homePayload } from "./home-content.mjs";
 
 describe("homePayload", () => {
 	it("links each locale's button to its own intro and fixes the Energe typo", () => {
@@ -22,6 +22,37 @@ describe("homePayload", () => {
 		for (const locale of ["en", "zh-CN"]) {
 			const { data } = homePayload(locale);
 			expect(await beforeSave({ collection: "pages", content: data })).toEqual(data);
+		}
+	});
+});
+
+// What `verify` expects of the two rendered home pages. href="/docs/intro" alone also matches the menu and the
+// footer, so the hero marker carries its link text, and the hreflang alternates must be the routes, not /pages/home.
+describe("homePageChecks", () => {
+	const link = (href, hreflang) => `<link rel="alternate" href="${href}" hreflang="${hreflang}">`;
+	it("ties each hero button's href to its label", () => {
+		const [en, zh] = homePageChecks();
+		expect(en.url).toBe("/");
+		expect(zh.url).toBe("/zh-CN/");
+		expect(en.present).toContain('href="/docs/intro">Magic Starts</a>');
+		expect(zh.present).toContain('href="/zh-CN/docs/intro">魔法启动</a>');
+		// no marker that the menu or footer links would satisfy on their own
+		for (const check of [en, zh]) expect(check.present).not.toContain('href="/docs/intro"');
+		expect(zh.present).not.toContain('href="/zh-CN/docs/intro"');
+	});
+	it("expects exactly the three home alternates and none at /pages/home", () => {
+		for (const check of homePageChecks()) {
+			expect(check.present).toEqual(
+				expect.arrayContaining([link("https://www.web9.ai/", "en"), link("https://www.web9.ai/zh-CN/", "zh-CN"), link("https://www.web9.ai/", "x-default")]),
+			);
+			expect(check.absent).toEqual(expect.arrayContaining(["/pages/home", "data-emdash-missing-block"]));
+		}
+		expect(homePageChecks()[0].absent).toContain("Energe");
+	});
+	it("takes the hero text from the payload, so a changed button cannot pass", () => {
+		for (const [check, locale] of [[homePageChecks()[0], "en"], [homePageChecks()[1], "zh-CN"]]) {
+			const hero = homePayload(locale).data.layout[0];
+			expect(check.present).toContain(`href="${hero.primary_href}">${hero.primary_label}</a>`);
 		}
 	});
 });
