@@ -10,6 +10,12 @@ export default defineConfig({
 	// Canonical origin for absolute URLs (RSS, OG, SEO). Never derive it from the request Host header.
 	site: "https://www.web9.ai",
 	output: "server",
+	// Old Docusaurus feeds. EmDash's redirect table cannot hold these: its middleware skips any path with
+	// a file extension (plan 2 Task 10).
+	redirects: {
+		"/blog/rss.xml": { status: 301, destination: "/rss.xml" },
+		"/blog/atom.xml": { status: 301, destination: "/rss.xml" },
+	},
 	i18n: {
 		defaultLocale: "en",
 		locales: ["en", "zh-CN"],

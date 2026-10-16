@@ -29,7 +29,7 @@ export function unwrapToolResult(name, res) {
 	}
 }
 
-function defaultToken() {
+export function defaultToken() {
 	if (process.env.EMDASH_TOKEN) return process.env.EMDASH_TOKEN;
 	return readFileSync(new URL("../../.local/dev-token", import.meta.url), "utf8").trim();
 }
