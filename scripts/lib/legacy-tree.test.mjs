@@ -1,10 +1,28 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { guardPortableText } from "../../packages/web9-blocks/lib/pt-guard.mjs";
 import { convertMdx } from "./mdx-to-pt.mjs";
 import { numberPrefix, readLegacyTree } from "./legacy-tree.mjs";
+
+/** Temp en/zh roots holding `{ "en/ai/x.md": "text" }` files, removed after the file's tests (call it inside a describe). */
+function fixture(files) {
+	const dir = mkdtempSync(path.join(tmpdir(), "legacy-tree-"));
+	afterAll(() => rmSync(dir, { recursive: true, force: true }));
+	for (const [rel, text] of Object.entries(files)) {
+		mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+		writeFileSync(path.join(dir, rel), text);
+	}
+	return { enRoot: path.join(dir, "en"), zhRoot: path.join(dir, "zh") };
+}
+const message = (fn) => {
+	try {
+		fn();
+	} catch (e) {
+		return e.message;
+	}
+};
 
 describe("numberPrefix", () => {
 	it.each([
@@ -56,31 +74,57 @@ describe("readLegacyTree on a small tree", () => {
 		expect(tree.docs.some((d) => d.rel.endsWith(".bak"))).toBe(false);
 	});
 	it("resolves links by URL, by file path and per locale", () => {
-		const b = by("en", "ai/05-cloud/02-b.mdx");
+		// its own tree: `unresolved` is per tree, so the other tests cannot leave entries behind
+		const own = readLegacyTree({ enRoot: path.join(dir, "en"), zhRoot: path.join(dir, "zh") });
+		const pick = (locale, rel) => own.docs.find((d) => d.locale === locale && d.rel === rel);
+		const b = pick("en", "ai/05-cloud/02-b.mdx");
 		// a relative URL resolves against the page URL /ai/cloud/b: /ai/cloud/a is not a page (a lives at /a-top)
-		expect(tree.resolveLink("./a", b)).toBe("./a");
-		expect(tree.unresolved).toEqual(["ai/05-cloud/02-b.mdx: ./a"]);
-		tree.unresolved.length = 0;
-		expect(tree.resolveLink("../07-misc/x.mdx#top", b)).toBe("/docs/x#top");
-		expect(tree.resolveLink("/a-top", b)).toBe("/docs/a-top");
-		expect(tree.resolveLink("/ai/cloud/b", by("zh-CN", "ai/05-cloud/02-b.mdx"))).toBe("/zh-CN/docs/b");
-		for (const href of ["https://x.example/a", "#anchor", "/img/a.png", "mailto:a@b.c"]) expect(tree.resolveLink(href, b)).toBe(href);
-		expect(tree.unresolved).toEqual([]);
+		expect(own.resolveLink("./a", b)).toBe("./a");
+		expect(own.unresolved).toEqual(["ai/05-cloud/02-b.mdx: ./a"]);
+		own.unresolved.length = 0;
+		expect(own.resolveLink("../07-misc/x.mdx#top", b)).toBe("/docs/x#top");
+		expect(own.resolveLink("/a-top", b)).toBe("/docs/a-top");
+		expect(own.resolveLink("/ai/cloud/b", pick("zh-CN", "ai/05-cloud/02-b.mdx"))).toBe("/zh-CN/docs/b");
+		for (const href of ["https://x.example/a", "#anchor", "/img/a.png", "mailto:a@b.c"]) expect(own.resolveLink(href, b)).toBe(href);
+		expect(own.unresolved).toEqual([]);
+	});
+});
+
+describe("readLegacyTree errors and slug context", () => {
+	const zhOnly = fixture({ "en/ai/intro.md": "# Intro\n", "zh/ai/only-zh.md": "# 只有中文\n" });
+	const nested = fixture({ "en/ai/05-cloud/sub/x.md": "# X\n" });
+	const duplicate = fixture({ "en/ai/05-cloud/01-a.mdx": "# A\n", "en/ai/05-cloud/a.mdx": "# A again\n" });
+	const context = fixture({
+		"en/ai/05-cloud/x.md": "# X\n",
+		"en/dev/05-cloud/x.md": "# X\n",
+		"en/ai/z.md": "# Z\n",
+		"en/dev/01-ai/z.md": "# Z\n",
+	});
+
+	it("rejects a zh-CN file that has no en original", () => {
+		expect(message(() => readLegacyTree(zhOnly))).toBe(`${zhOnly.zhRoot}/ai/only-zh.md has no en original; Docusaurus ignored it, so does the migration`);
+	});
+	it("rejects categories nested more than one level", () => {
+		expect(message(() => readLegacyTree(nested))).toBe("ai/05-cloud/sub/x.md: categories nested more than one level are not supported");
+	});
+	it("rejects a slug that is still a duplicate after the category and section prefixes", () => {
+		expect(message(() => readLegacyTree(duplicate))).toBe('slug "ai-cloud-a" is still not unique; rename a file or set a frontmatter slug');
+	});
+	it("adds category and section context to a colliding group, never to a unique slug", () => {
+		const slugs = readLegacyTree(context).docs.map((d) => `${d.rel}=${d.slug}`);
+		expect(slugs.sort()).toEqual(["ai/05-cloud/x.md=ai-cloud-x", "ai/z.md=ai-root-z", "dev/01-ai/z.md=dev-ai-z", "dev/05-cloud/x.md=dev-cloud-x"]);
 	});
 });
 
 describe("link fragments and queries", () => {
-	const dir = mkdtempSync(path.join(tmpdir(), "legacy-tree-"));
-	afterAll(() => rmSync(dir, { recursive: true, force: true }));
-	const write = (rel, text) => {
-		mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
-		writeFileSync(path.join(dir, rel), text);
-	};
-	write("en/ai/05-cloud/01-a.mdx", "# A\n");
-	write("en/ai/05-cloud/02-b.mdx", "# B\n");
-	write("en/ai/16-prompt/01-p.mdx", "---\nslug: guides\n---\n# P\n");
-	write("zh/ai/05-cloud/02-b.mdx", "# 乙\n");
-	const tree = readLegacyTree({ enRoot: path.join(dir, "en"), zhRoot: path.join(dir, "zh") });
+	const tree = readLegacyTree(
+		fixture({
+			"en/ai/05-cloud/01-a.mdx": "# A\n",
+			"en/ai/05-cloud/02-b.mdx": "# B\n",
+			"en/ai/16-prompt/01-p.mdx": "---\nslug: guides\n---\n# P\n",
+			"zh/ai/05-cloud/02-b.mdx": "# 乙\n",
+		}),
+	);
 	const b = tree.docs.find((d) => d.locale === "en" && d.slug === "b");
 	const zhB = tree.docs.find((d) => d.locale === "zh-CN" && d.slug === "b");
 
@@ -131,17 +175,48 @@ describe.skipIf(!existsSync("legacy/docs"))("readLegacyTree on legacy/", () => {
 		expect(zh.map((d) => d.slug).sort()).toEqual(["ai-product-ideas", "guide", "intro", "learn_ai_coding", "monster_api", "prompt-guides", "qblock", "replicate", "rundiffusion"]);
 		for (const d of zh) expect(en.find((e) => e.rel === d.rel)).toMatchObject({ slug: d.slug, sortOrder: d.sortOrder });
 	});
-	it("knows the old URLs, including absolute and relative frontmatter slugs and 01_3d", () => {
-		const old = Object.fromEntries(en.map((d) => [d.slug, d.oldUrl]));
-		expect(old).toMatchObject({
-			rundiffusion: "/rundiffusion",
-			qblock: "/ai/cloud/qblock",
-			"prompt-guides": "/ai/prompt/prompt-guides",
-			"ai-tools-adhoc": "/ai/usecase/ai-tools-adhoc",
-			"3d": "/ai/model/01_3d",
-			intro: "/ai/intro",
-			overview: "/dev/overview",
-		});
+	it("knows every old and new URL, including absolute and relative frontmatter slugs and 01_3d", () => {
+		// [rel, old URL, new URL]; verified against the live sitemaps. Task 10 builds its redirects from these.
+		const table = (docs) => docs.map((d) => [d.rel, d.oldUrl, d.newUrl]);
+		expect(table(en)).toEqual([
+			["ai/intro.md", "/ai/intro", "/docs/intro"],
+			["ai/88-usecase/00_guide.mdx", "/ai/usecase/guide", "/docs/guide"],
+			["ai/88-usecase/01_ai_hot_tools.mdx", "/ai/usecase/ai-tools-adhoc", "/docs/ai-tools-adhoc"], // relative frontmatter slug
+			["ai/88-usecase/01_tools-summary.mdx", "/ai/usecase/tools-summary", "/docs/tools-summary"],
+			["ai/99-article/ai-product-ideas.mdx", "/ai/article/ai-product-ideas", "/docs/ai-product-ideas"],
+			["ai/08-cloud/01-run_diffusion.mdx", "/rundiffusion", "/docs/rundiffusion"], // absolute frontmatter slug
+			["ai/08-cloud/02-replicate.mdx", "/replicate", "/docs/replicate"],
+			["ai/08-cloud/03-qblock.mdx", "/ai/cloud/qblock", "/docs/qblock"],
+			["ai/08-cloud/04-monster_api.mdx", "/ai/cloud/monster_api", "/docs/monster_api"],
+			["ai/08-cloud/05-lambda.mdx", "/ai/cloud/lambda", "/docs/lambda"],
+			["ai/08-cloud/06-javis.mdx", "/ai/cloud/javis", "/docs/javis"],
+			["ai/08-cloud/07-paperspace.mdx", "/ai/cloud/paperspace", "/docs/paperspace"],
+			["ai/08-cloud/08-latitude.mdx", "/ai/cloud/latitude", "/docs/latitude"],
+			["ai/08-cloud/09-baseten.mdx", "/ai/cloud/baseten", "/docs/baseten"],
+			["ai/08-cloud/10-banana.mdx", "/ai/cloud/banana", "/docs/banana"],
+			["ai/08-cloud/11-modal.mdx", "/ai/cloud/modal", "/docs/modal"],
+			["ai/08-cloud/12-datacrunch.mdx", "/ai/cloud/datacrunch", "/docs/datacrunch"],
+			["ai/08-cloud/13-ovhcloud.mdx", "/ai/cloud/ovhcloud", "/docs/ovhcloud"],
+			["ai/08-cloud/14-runpod.mdx", "/ai/cloud/runpod", "/docs/runpod"],
+			["ai/08-cloud/16-huggingface.mdx", "/ai/cloud/huggingface", "/docs/huggingface"],
+			["ai/08-cloud/88-fullstack.mdx", "/ai/cloud/fullstack", "/docs/fullstack"],
+			["ai/16-prompt/01-popular-prompt-guide.mdx", "/ai/prompt/prompt-guides", "/docs/prompt-guides"],
+			["ai/model/00_llm.mdx", "/ai/model/llm", "/docs/llm"],
+			["ai/model/01_3d.mdx", "/ai/model/01_3d", "/docs/3d"], // no number prefix: the old URL keeps 01_
+			["dev/00_overview.md", "/dev/overview", "/docs/overview"],
+			["dev/23_learn_ai_coding.mdx", "/dev/learn_ai_coding", "/docs/learn_ai_coding"],
+		]);
+		expect(table(zh)).toEqual([
+			["ai/intro.md", "/zh-CN/ai/intro", "/zh-CN/docs/intro"],
+			["ai/88-usecase/00_guide.mdx", "/zh-CN/ai/usecase/guide", "/zh-CN/docs/guide"],
+			["ai/99-article/ai-product-ideas.mdx", "/zh-CN/ai/article/ai-product-ideas", "/zh-CN/docs/ai-product-ideas"],
+			["ai/08-cloud/01-run_diffusion.mdx", "/zh-CN/rundiffusion", "/zh-CN/docs/rundiffusion"],
+			["ai/08-cloud/02-replicate.mdx", "/zh-CN/replicate", "/zh-CN/docs/replicate"],
+			["ai/08-cloud/03-qblock.mdx", "/zh-CN/ai/cloud/qblock", "/zh-CN/docs/qblock"],
+			["ai/08-cloud/04-monster_api.mdx", "/zh-CN/ai/cloud/monster_api", "/zh-CN/docs/monster_api"],
+			["ai/16-prompt/01-popular-prompt-guide.mdx", "/zh-CN/ai/prompt/prompt-guides", "/zh-CN/docs/prompt-guides"],
+			["dev/23_learn_ai_coding.mdx", "/zh-CN/dev/learn_ai_coding", "/zh-CN/docs/learn_ai_coding"],
+		]);
 		expect(new Set(en.map((d) => d.oldUrl)).size).toBe(en.length);
 	});
 	it("has the category labels, including the intended zh label", () => {
@@ -153,14 +228,29 @@ describe.skipIf(!existsSync("legacy/docs"))("readLegacyTree on legacy/", () => {
 			model: { label: "Model" },
 		});
 	});
-	it("resolves every internal link in the corpus", () => {
-		for (const d of tree.docs) {
-			const { data } = convertMdx(readFileSync(d.file, "utf8"), { path: d.file, slug: d.slug, rewriteHref: (h) => tree.resolveLink(h, d) });
+	it("resolves every internal link in the corpus, docs and posts, to the page the live site links to", () => {
+		// the links the converter rewrites (external links, anchors and images come back unchanged)
+		const rewrites = [];
+		const convert = (file, from) => {
+			const rewriteHref = (href) => {
+				const to = tree.resolveLink(href, from);
+				if (to !== href) rewrites.push(`${from.locale} ${from.rel}: ${href} -> ${to}`);
+				return to;
+			};
+			const { data } = convertMdx(readFileSync(file, "utf8"), { path: file, slug: from.slug ?? "post", rewriteHref });
 			expect(guardPortableText(data.body)).toEqual([]);
-		}
+		};
+		for (const d of tree.docs) convert(d.file, d);
+		for (const dir of readdirSync("legacy/blog")) convert(`legacy/blog/${dir}/index.mdx`, { rel: `blog/${dir}/index.mdx`, locale: "en" });
+		expect(rewrites).toEqual([
+			"en ai/88-usecase/00_guide.mdx: ../16-prompt/01-popular-prompt-guide.mdx -> /docs/prompt-guides",
+			"en ai/08-cloud/03-qblock.mdx: ./monster_api -> /docs/monster_api",
+			"en ai/08-cloud/04-monster_api.mdx: ./qblock -> /docs/qblock",
+			"zh-CN ai/88-usecase/00_guide.mdx: ../16-prompt/01-popular-prompt-guide.mdx -> /zh-CN/docs/prompt-guides",
+			"zh-CN ai/08-cloud/03-qblock.mdx: ./monster_api -> /zh-CN/docs/monster_api",
+			"zh-CN ai/08-cloud/04-monster_api.mdx: ./qblock -> /zh-CN/docs/qblock",
+			"en blog/20250518-ai-tools-adhoc/index.mdx: /ai/usecase/ai-tools-adhoc -> /docs/ai-tools-adhoc",
+		]);
 		expect(tree.unresolved).toEqual([]);
-		const qblock = tree.docs.find((d) => d.locale === "zh-CN" && d.slug === "monster_api");
-		expect(tree.resolveLink("./qblock", qblock)).toBe("/zh-CN/docs/qblock");
-		expect(tree.resolveLink("/ai/usecase/ai-tools-adhoc", { rel: "blog/x/index.mdx", locale: "en" })).toBe("/docs/ai-tools-adhoc");
 	});
 });

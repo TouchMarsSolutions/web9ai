@@ -32,6 +32,7 @@ function listDocs(root) {
 		.sort();
 }
 
+// Without a position an item sorts last; two of them give Infinity - Infinity = NaN (falsy), so the name decides.
 const sortItems = (items) =>
 	items.sort((a, b) => (a.position ?? Infinity) - (b.position ?? Infinity) || (a.source < b.source ? -1 : a.source > b.source ? 1 : 0));
 
