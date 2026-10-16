@@ -3255,8 +3255,8 @@ for pair in "legacy/docs/dev/23_learn_ai_coding.mdx probe-learn-ai-coding" "lega
   node -e 'const f=process.argv[1]; const p=JSON.parse(require("fs").readFileSync(f,"utf8")); p.locale="en"; p.status="published"; require("fs").writeFileSync(f, JSON.stringify(p));' ".local/$s.json"
   node scripts/mcp.mjs content_create @".local/$s.json" > /dev/null; echo "$s exit=$?"
 done
-node scripts/check-page.mjs http://localhost:4321/docs/probe-learn-ai-coding '<pre' 'src="/img/dev/23/' --absent '&lt;TabItem' --absent '&lt;Tabs'
-node scripts/check-page.mjs http://localhost:4321/docs/probe-guide 'youtube-nocookie.com/embed/LslC2nKEEGU' 'ai.com is no longer redirected' --absent ':::warning' --absent '&lt;YouTube'
+node scripts/check-page.mjs http://localhost:4321/docs/probe-learn-ai-coding '<pre' 'src="/img/dev/23/' --absent '&lt;TabItem' '&lt;Tabs'
+node scripts/check-page.mjs http://localhost:4321/docs/probe-guide 'youtube-nocookie.com/embed/LslC2nKEEGU' 'ai.com is no longer redirected' --absent ':::warning' '&lt;YouTube'
 node scripts/check-page.mjs http://localhost:4321/docs/probe-tools-summary 'data-w9-tools' 'Notion AI' 'src="/img/rag/notion.svg"' --absent 'tools-gallery'
 ```
 
@@ -3660,6 +3660,549 @@ Expected: PASS（`legacy-tree.test.mjs` 12 个用例，其中最后一组对真�
 ```bash
 git add scripts/lib/legacy-tree.mjs scripts/lib/legacy-tree.test.mjs docs/superpowers/specs/2026-10-15-emdash-migration-design.md
 git commit -m "feat(migrate): legacy docs inventory (sidebar order, categories, slugs, old URLs, link resolver)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
+```
+
+---
+
+### Task 9: 迁移 runner：docs、菜单、页面验证 🚦
+
+**模型：** standard
+
+spec §7 的 runner：遍历 legacy inventory（Task 8），用 converter（Task 6–7）生成 payload，走 MCP 写入，先 en 后 zh-CN（`translationOf` 关联），全部发布。重跑必须不产生任何写入（"unchanged"），这样在生产上也可以放心地重跑。
+
+依赖的 MCP 实测行为（Global Constraints 里已列出，这里再写一次，因为 runner 的逻辑就是按它们写的）：
+- `content_get {collection, id: slug, locale}` 找不到时抛错，信息是 `[NOT_FOUND] Content item not found: <slug>`（写计划时实测）；
+- `content_update` 永远写成草稿，已发布的条目要再调 `content_publish`；发布后 `draftRevisionId` 变成 `null`；
+- `translationOf` 要传 en 条目的 ULID，不是 slug；
+- 遇到 `ENTRY_LOCKED`（有人在后台编辑这条）就停，永远不传 `overrideLock`；
+- `menu_get` 的 item 用 `customUrl`，没有 target 时是 `null`（实测）；`menu_set_items` 整体替换。
+
+写计划时对当前 dev 库跑过只读的 `--dry-run`（只调用 `content_get`、`menu_get`）：34 个 "created"、1 个 "updated"（Plan 1 留下的 `ai-tools-adhoc`，diff 指向随机 key），菜单 "updated"。说明查找、比较、diff 路径都按预期工作；真正的写入在本 Task 的 🚦 里第一次发生。
+
+**Files:**
+- Create: `scripts/lib/sync.mjs`、`scripts/lib/sync.test.mjs`、`scripts/lib/docs-payloads.mjs`、`scripts/lib/docs-payloads.test.mjs`、`scripts/lib/verify-pages.mjs`、`scripts/lib/verify-pages.test.mjs`、`scripts/migrate.mjs`
+- Modify: spec §7
+
+**Interfaces:**
+- Consumes: Task 8 的 `readLegacyTree()`；Task 6–7 的 `convertMdx`；`scripts/lib/mcp.mjs` 的 `callTool`；`scripts/lib/markers.mjs` 的 `checkMarkers`
+- Produces:
+  - `upsertEntry(callTool, want, { dryRun }) → { action: "created" | "updated" | "published" | "unchanged", id, translationGroup, diff? }`，`want = { collection, slug, locale, status, data, translationOf?, translationGroup?, taxonomies?, publishedAt? }`：只比较 `want.data` 里的字段（hook 生成的 `search_text` 不比较）。Task 10、11 也用它。
+  - `upsertMenu(callTool, name, items, { dryRun }) → { action, diff? }`。
+  - `canonical(value)`、`firstDifference(a, b)`（`scripts/lib/sync.mjs`）。
+  - `docPayloads(tree) → [{ doc, want }]`（`scripts/lib/docs-payloads.mjs`）。
+  - `docPageChecks(payloads) → [{ url, present, absent }]`、`escapeHtml`、`FALLBACK_NOTICE`（`scripts/lib/verify-pages.mjs`）。
+  - CLI `node scripts/migrate.mjs <docs|menu|verify|all>... [--dry-run]`；`STEPS` 对象和 `WRITE_STEPS` 数组，Task 10、11 往里加步骤。
+
+- [ ] **Step 1: 写失败的测试**
+
+Create `scripts/lib/sync.test.mjs`（用一个按实测行为写的内存版 CMS 代替 MCP）：
+
+```js
+import { describe, expect, it } from "vitest";
+import { canonical, firstDifference, upsertEntry, upsertMenu } from "./sync.mjs";
+
+/** In-memory stand-in for the MCP content and menu tools, with the measured behaviour. */
+function fakeCms() {
+	const rows = [];
+	const calls = [];
+	let n = 0;
+	const find = (collection, id, locale) => rows.find((r) => r.collection === collection && (r.id === id || r.slug === id) && (!locale || r.locale === locale));
+	const view = (r) => ({ item: { ...r, data: structuredClone(r.data) }, _rev: `rev${r.rev}` });
+	let menu = { name: "primary", items: [{ label: "Blog", url: "/posts" }] };
+	const tools = {
+		content_get: ({ collection, id, locale }) => {
+			const r = find(collection, id, locale);
+			if (!r) throw new Error(`content_get: NOT_FOUND: no ${collection} item ${id}`);
+			return view(r);
+		},
+		content_create: ({ collection, slug, locale, status, data, translationOf }) => {
+			const id = `01ID${++n}`;
+			const group = translationOf ? find(collection, translationOf).translationGroup : id;
+			rows.push({ id, collection, slug, locale, status, data, translationGroup: group, draftRevisionId: null, rev: 1 });
+			return view(rows.at(-1));
+		},
+		content_update: ({ collection, id, data, _rev }) => {
+			const r = find(collection, id);
+			if (_rev !== `rev${r.rev}`) throw new Error("content_update: CONFLICT");
+			if (r.locked) throw new Error("content_update: ENTRY_LOCKED");
+			Object.assign(r, { data: { ...r.data, ...data }, draftRevisionId: `d${r.rev}`, rev: r.rev + 1 });
+			return view(r);
+		},
+		content_publish: ({ collection, id, _rev }) => {
+			const r = find(collection, id);
+			if (_rev !== `rev${r.rev}`) throw new Error("content_publish: CONFLICT");
+			Object.assign(r, { status: "published", draftRevisionId: null, rev: r.rev + 1 });
+			return view(r);
+		},
+		menu_get: () => structuredClone(menu),
+		menu_set_items: ({ items }) => {
+			menu = { name: "primary", items: items.map((i) => ({ label: i.label, url: i.customUrl, target: i.target })) };
+			return menu;
+		},
+	};
+	const callTool = async (name, args) => {
+		calls.push(name);
+		return tools[name](args);
+	};
+	return { rows, calls, callTool, writes: () => calls.filter((c) => !/_get$/.test(c)) };
+}
+
+const doc = (data, extra = {}) => ({ collection: "docs", slug: "intro", locale: "en", status: "published", data, ...extra });
+
+describe("upsertEntry", () => {
+	it("creates a missing entry as published, then leaves it alone", async () => {
+		const cms = fakeCms();
+		expect(await upsertEntry(cms.callTool, doc({ title: "Intro", body: [] }))).toMatchObject({ action: "created", id: "01ID1" });
+		expect(await upsertEntry(cms.callTool, doc({ title: "Intro", body: [] }))).toMatchObject({ action: "unchanged", id: "01ID1" });
+		expect(cms.writes()).toEqual(["content_create"]);
+	});
+	it("updates and publishes a changed entry, comparing only the wanted fields", async () => {
+		const cms = fakeCms();
+		await upsertEntry(cms.callTool, doc({ title: "Intro", body: [{ a: 1 }] }));
+		cms.rows[0].data.search_text = "generated by the hook";
+		const res = await upsertEntry(cms.callTool, doc({ title: "Intro", body: [{ a: 2 }] }));
+		expect(res).toMatchObject({ action: "updated", diff: expect.stringContaining("body[0].a") });
+		expect(cms.rows[0]).toMatchObject({ status: "published", draftRevisionId: null, data: { body: [{ a: 2 }] } });
+		expect(cms.writes()).toEqual(["content_create", "content_update", "content_publish"]);
+	});
+	it("publishes a draft left behind by an interrupted run", async () => {
+		const cms = fakeCms();
+		await upsertEntry(cms.callTool, doc({ title: "Intro" }));
+		cms.rows[0].draftRevisionId = "pending";
+		expect(await upsertEntry(cms.callTool, doc({ title: "Intro" }))).toMatchObject({ action: "published" });
+		expect(cms.writes().at(-1)).toBe("content_publish");
+	});
+	it("links a translation on create and checks the link afterwards", async () => {
+		const cms = fakeCms();
+		const en = await upsertEntry(cms.callTool, doc({ title: "Intro" }));
+		const zh = { ...doc({ title: "入门" }), locale: "zh-CN", translationOf: en.id, translationGroup: en.translationGroup };
+		expect(await upsertEntry(cms.callTool, zh)).toMatchObject({ action: "created", translationGroup: en.translationGroup });
+		expect(await upsertEntry(cms.callTool, zh)).toMatchObject({ action: "unchanged" });
+		cms.rows[1].translationGroup = "someone-else";
+		await expect(upsertEntry(cms.callTool, zh)).rejects.toThrow(/not linked to its en original/);
+	});
+	it("writes nothing in a dry run", async () => {
+		const cms = fakeCms();
+		expect(await upsertEntry(cms.callTool, doc({ title: "Intro" }), { dryRun: true })).toEqual({ action: "created", id: null });
+		await upsertEntry(cms.callTool, doc({ title: "Intro" }));
+		expect(await upsertEntry(cms.callTool, doc({ title: "Changed" }), { dryRun: true })).toMatchObject({ action: "updated" });
+		expect(cms.writes()).toEqual(["content_create"]);
+	});
+	it("stops on a lock and on errors other than not-found", async () => {
+		const cms = fakeCms();
+		await upsertEntry(cms.callTool, doc({ title: "Intro" }));
+		cms.rows[0].locked = true;
+		await expect(upsertEntry(cms.callTool, doc({ title: "Changed" }))).rejects.toThrow(/ENTRY_LOCKED.*never override/);
+		const broken = async () => {
+			throw new Error("MCP HTTP 401: unauthorized");
+		};
+		await expect(upsertEntry(broken, doc({ title: "Intro" }))).rejects.toThrow(/401/);
+	});
+});
+
+describe("upsertMenu", () => {
+	const items = [
+		{ label: "AI", type: "custom", customUrl: "/docs/intro" },
+		{ label: "GitHub", type: "custom", customUrl: "https://github.com/TouchMarsSolutions/web9ai", target: "_blank" },
+	];
+	it("replaces the items once, then reports unchanged", async () => {
+		const cms = fakeCms();
+		expect(await upsertMenu(cms.callTool, "primary", items)).toMatchObject({ action: "updated" });
+		expect(await upsertMenu(cms.callTool, "primary", items)).toEqual({ action: "unchanged" });
+		expect(cms.writes()).toEqual(["menu_set_items"]);
+	});
+});
+
+describe("canonical / firstDifference", () => {
+	it("ignores key order and names the first differing path", () => {
+		expect(canonical({ b: 1, a: [{ d: 1, c: 2 }] })).toBe(canonical({ a: [{ c: 2, d: 1 }], b: 1 }));
+		expect(firstDifference({ a: [1, { b: 2 }] }, { a: [1, { b: 3 }] })).toMatch(/^a\[1\]\.b: stored 2 \/ wanted 3$/);
+		expect(firstDifference({ a: 1 }, { a: 1 })).toBeNull();
+	});
+});
+```
+
+Create `scripts/lib/verify-pages.test.mjs`：
+
+```js
+import { describe, expect, it } from "vitest";
+import { FALLBACK_NOTICE, docPageChecks, escapeHtml } from "./verify-pages.mjs";
+
+const payload = (locale, slug, title) => ({ doc: { locale, slug }, want: { data: { title } } });
+
+describe("docPageChecks", () => {
+	it("checks en pages, zh-CN translations and zh-CN fallbacks", () => {
+		const checks = docPageChecks([payload("en", "intro", "Intro"), payload("en", "llm", "LLM & Co"), payload("zh-CN", "intro", "入门介绍")]);
+		expect(checks.map((c) => [c.url, c.present])).toEqual([
+			["/docs/intro", [">Intro</h1>"]],
+			["/zh-CN/docs/intro", [">入门介绍</h1>"]],
+			["/docs/llm", [">LLM &amp; Co</h1>"]],
+			["/zh-CN/docs/llm", [">LLM &amp; Co</h1>", FALLBACK_NOTICE]],
+		]);
+		expect(checks[1].absent).toContain(FALLBACK_NOTICE);
+		expect(checks[0].absent).toContain("ec:block");
+	});
+	it("escapes like Astro", () => {
+		expect(escapeHtml(`a<b>&"c'`)).toBe("a&lt;b&gt;&amp;&quot;c&#39;");
+	});
+});
+```
+
+Create `scripts/lib/docs-payloads.test.mjs`（读真实的 `legacy/`，删掉后跳过）：
+
+```js
+import { existsSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import { docPayloads } from "./docs-payloads.mjs";
+import { readLegacyTree } from "./legacy-tree.mjs";
+
+describe.skipIf(!existsSync("legacy/docs"))("docPayloads on legacy/", () => {
+	const payloads = docPayloads(readLegacyTree());
+	const find = (locale, slug) => payloads.find((p) => p.doc.locale === locale && p.doc.slug === slug).want;
+
+	it("has 26 en then 9 zh-CN published docs with the inventory's fields", () => {
+		expect(payloads.map((p) => p.want.locale)).toEqual([...Array(26).fill("en"), ...Array(9).fill("zh-CN")]);
+		expect(payloads.every((p) => p.want.status === "published" && p.want.collection === "docs")).toBe(true);
+		expect(find("en", "ai-tools-adhoc").data).toMatchObject({ title: "Adhoc GenAI Tools", section: "ai", category: "usecase", sort_order: 2002 });
+		expect(find("en", "overview").data).toMatchObject({ section: "dev", category: "general", sort_order: 1001000 });
+	});
+	it("rewrites internal links per locale", () => {
+		const hrefs = (want) => want.data.body.flatMap((b) => (b.markDefs ?? []).map((d) => d.href));
+		expect(hrefs(find("en", "monster_api"))).toContain("/docs/qblock");
+		expect(hrefs(find("zh-CN", "monster_api"))).toContain("/zh-CN/docs/qblock");
+		expect(JSON.stringify(find("en", "guide").data.body)).toContain("/docs/prompt-guides");
+	});
+});
+```
+
+- [ ] **Step 2: 跑测试，确认失败**
+
+Run: `npx vitest run scripts/lib/sync.test.mjs scripts/lib/verify-pages.test.mjs scripts/lib/docs-payloads.test.mjs`
+Expected: FAIL：三个模块都不存在。
+
+- [ ] **Step 3: 实现**
+
+Create `scripts/lib/sync.mjs`：
+
+```js
+// Idempotent writes for the migration runner (spec §7). Everything goes through an injected
+// callTool(name, args) (scripts/lib/mcp.mjs in real runs, a fake in tests).
+// Measured MCP behaviour this relies on (plan 2 Global Constraints): content_get takes a slug or ULID
+// plus locale and throws when nothing matches; content_update always writes a draft, so a published
+// entry needs content_publish afterwards; publishing clears draftRevisionId; translationOf takes the
+// en entry's ULID. On ENTRY_LOCKED the runner stops: it never passes overrideLock.
+
+/** JSON with object keys sorted, for comparing stored and wanted values. */
+export function canonical(value) {
+	return JSON.stringify(value, (_, v) =>
+		v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v,
+	);
+}
+
+/** Path of the first difference between two JSON values, for the runner's log ("body[3].asset.url"). */
+export function firstDifference(a, b, at = "") {
+	if (canonical(a) === canonical(b)) return null;
+	if (a && b && typeof a === "object" && typeof b === "object" && Array.isArray(a) === Array.isArray(b)) {
+		const keys = Array.isArray(a) ? [...Array(Math.max(a.length, b.length)).keys()] : [...new Set([...Object.keys(a), ...Object.keys(b)])].sort();
+		for (const k of keys) {
+			const d = firstDifference(a[k], b[k], Array.isArray(a) ? `${at}[${k}]` : at ? `${at}.${k}` : k);
+			if (d) return d;
+		}
+	}
+	return `${at || "(value)"}: stored ${JSON.stringify(a)?.slice(0, 80)} / wanted ${JSON.stringify(b)?.slice(0, 80)}`;
+}
+
+const isNotFound = (e) => /not[ _]?found/i.test(e?.message ?? "");
+
+async function getEntry(callTool, collection, slug, locale) {
+	try {
+		return await callTool("content_get", { collection, id: slug, locale });
+	} catch (e) {
+		if (isNotFound(e)) return null;
+		throw e;
+	}
+}
+
+async function write(callTool, name, args) {
+	try {
+		return await callTool(name, args);
+	} catch (e) {
+		if (/ENTRY_LOCKED/.test(e.message)) throw new Error(`${args.collection}/${args.id}: someone is editing this entry (ENTRY_LOCKED); stop and retry later, never override the lock`);
+		throw e;
+	}
+}
+
+/**
+ * Make one entry look like `want` = { collection, slug, locale, status: "published" | "draft", data,
+ * translationOf?, translationGroup?, taxonomies?, publishedAt? }. Only the keys in want.data are compared
+ * (search_text and other generated fields are left alone). translationOf (the en ULID) is used on create;
+ * translationGroup (the en entry's) checks an existing translation is linked. Returns { action: "created"
+ * | "updated" | "published" | "unchanged", id, translationGroup, diff? }; with dryRun nothing is written
+ * and id is null for a would-be create.
+ */
+export async function upsertEntry(callTool, want, { dryRun = false } = {}) {
+	const { collection, slug, locale, status, data } = want;
+	const found = await getEntry(callTool, collection, slug, locale);
+	if (!found) {
+		if (dryRun) return { action: "created", id: null };
+		const created = await write(callTool, "content_create", {
+			collection,
+			slug,
+			locale,
+			status,
+			data,
+			...(want.translationOf ? { translationOf: want.translationOf } : {}),
+			...(want.taxonomies ? { taxonomies: want.taxonomies } : {}),
+			...(want.publishedAt ? { publishedAt: want.publishedAt } : {}),
+		});
+		const createdItem = created.item ?? created;
+		return { action: "created", id: createdItem.id, translationGroup: createdItem.translationGroup };
+	}
+	const { item } = found;
+	if (want.translationGroup && item.translationGroup && item.translationGroup !== want.translationGroup) {
+		throw new Error(`${collection}/${slug} (${locale}) is not linked to its en original; delete it and run again`);
+	}
+	const stored = Object.fromEntries(Object.keys(data).map((k) => [k, item.data?.[k]]));
+	const diff = firstDifference(stored, data);
+	const pendingDraft = item.draftRevisionId != null;
+	const result = { id: item.id, translationGroup: item.translationGroup };
+	if (!diff && item.status === status && !(status === "published" && pendingDraft)) return { action: "unchanged", ...result };
+	if (dryRun) return { action: diff ? "updated" : "published", ...result, diff };
+	let rev = found._rev;
+	if (diff) {
+		const updated = await write(callTool, "content_update", {
+			collection,
+			id: item.id,
+			locale,
+			data,
+			_rev: rev,
+			...(want.taxonomies ? { taxonomies: want.taxonomies } : {}),
+		});
+		rev = updated._rev;
+	}
+	if (status === "published") await write(callTool, "content_publish", { collection, id: item.id, _rev: rev, ...(want.publishedAt ? { publishedAt: want.publishedAt } : {}) });
+	return { action: diff ? "updated" : "published", ...result, diff };
+}
+
+/** Comparable form of a menu item, from either menu_get output or menu_set_items input. */
+const menuItem = (i) => ({ label: i.label, url: i.customUrl ?? i.url ?? "", target: i.target || "" });
+
+/** Replace the menu's items when they differ. Returns { action: "updated" | "unchanged" }. */
+export async function upsertMenu(callTool, name, items, { dryRun = false } = {}) {
+	const current = await callTool("menu_get", { name });
+	const have = (current.items ?? current.menu?.items ?? []).map(menuItem);
+	if (canonical(have) === canonical(items.map(menuItem))) return { action: "unchanged" };
+	if (!dryRun) await callTool("menu_set_items", { name, items });
+	return { action: "updated", diff: firstDifference(have, items.map(menuItem)) };
+}
+```
+
+Create `scripts/lib/docs-payloads.mjs`：
+
+```js
+// The docs step of the migration runner: one upsert per legacy doc (spec §7), en first, then zh-CN.
+// The runner fills in translationOf / translationGroup for zh-CN once the en entry exists.
+import { readFileSync } from "node:fs";
+import { convertMdx } from "./mdx-to-pt.mjs";
+
+/** [{ doc, want }] for upsertEntry. Throws on unresolved internal links or duplicate slugs. */
+export function docPayloads(tree) {
+	const payloads = tree.docs.map((doc) => {
+		const { data } = convertMdx(readFileSync(doc.file, "utf8"), {
+			path: doc.file,
+			slug: doc.slug,
+			section: doc.section,
+			category: doc.category,
+			order: doc.sortOrder,
+			rewriteHref: (href) => tree.resolveLink(href, doc),
+		});
+		return { doc, want: { collection: "docs", slug: doc.slug, locale: doc.locale, status: "published", data } };
+	});
+	if (tree.unresolved.length) throw new Error(`unresolved internal links:\n  ${tree.unresolved.join("\n  ")}`);
+	for (const locale of ["en", "zh-CN"]) {
+		const slugs = payloads.filter((p) => p.doc.locale === locale).map((p) => p.doc.slug);
+		if (new Set(slugs).size !== slugs.length) throw new Error(`duplicate ${locale} doc slugs`);
+	}
+	return payloads;
+}
+```
+
+Create `scripts/lib/verify-pages.mjs`：
+
+```js
+// What the migrated doc pages must show (plan 2 Task 9 gate): every en doc, its zh-CN translation where
+// one exists, and the zh-CN fallback page (en content plus the "not translated" notice) where none does.
+
+/** Same escaping Astro applies to text expressions. */
+export const escapeHtml = (s) =>
+	String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
+export const FALLBACK_NOTICE = "本页还没有中文翻译";
+const LEFTOVERS = ["ec:block", "%%youtube", "%%callout", "&lt;Tabs", "&lt;TabItem", "&lt;YouTube", "::::"];
+
+/** [{ url, present, absent }] for every doc URL the new site serves. */
+export function docPageChecks(payloads) {
+	const zh = new Map(payloads.filter((p) => p.doc.locale === "zh-CN").map((p) => [p.doc.slug, p]));
+	return payloads
+		.filter((p) => p.doc.locale === "en")
+		.flatMap(({ doc, want }) => {
+			const translated = zh.get(doc.slug);
+			const h1 = (title) => `>${escapeHtml(title)}</h1>`;
+			return [
+				{ url: `/docs/${doc.slug}`, present: [h1(want.data.title)], absent: [...LEFTOVERS, FALLBACK_NOTICE] },
+				translated
+					? { url: `/zh-CN/docs/${doc.slug}`, present: [h1(translated.want.data.title)], absent: [...LEFTOVERS, FALLBACK_NOTICE] }
+					: { url: `/zh-CN/docs/${doc.slug}`, present: [h1(want.data.title), FALLBACK_NOTICE], absent: LEFTOVERS },
+			];
+		});
+}
+```
+
+Create `scripts/migrate.mjs`：
+
+```js
+#!/usr/bin/env node
+// Migration runner (spec §7): legacy Docusaurus content -> EmDash over MCP. Idempotent: a second run
+// reports "unchanged" for everything already in place and writes nothing.
+//
+//   node scripts/migrate.mjs <step>... [--dry-run]
+//   steps: docs, menu, verify (reads only), all (every write step, in order)
+// Env: EMDASH_URL (default http://localhost:4321), EMDASH_TOKEN (default: .local/dev-token).
+import { parseArgs } from "node:util";
+import { docPayloads } from "./lib/docs-payloads.mjs";
+import { readLegacyTree } from "./lib/legacy-tree.mjs";
+import { checkMarkers } from "./lib/markers.mjs";
+import { callTool } from "./lib/mcp.mjs";
+import { upsertEntry, upsertMenu } from "./lib/sync.mjs";
+import { docPageChecks } from "./lib/verify-pages.mjs";
+
+const { values, positionals } = parseArgs({ allowPositionals: true, options: { "dry-run": { type: "boolean", default: false } } });
+const dryRun = values["dry-run"];
+const site = process.env.EMDASH_URL ?? "http://localhost:4321";
+
+/** Header menu (one en menu; Base.astro adds /zh-CN to / and /docs/* on zh-CN pages). */
+const MENU = [
+	{ label: "AI", type: "custom", customUrl: "/docs/intro" },
+	{ label: "Dev", type: "custom", customUrl: "/docs/overview" },
+	{ label: "Blog", type: "custom", customUrl: "/posts" },
+	{ label: "GitHub", type: "custom", customUrl: "https://github.com/TouchMarsSolutions/web9ai", target: "_blank" },
+];
+
+const STEPS = {
+	async docs() {
+		const en = new Map();
+		const results = [];
+		for (const { doc, want } of docPayloads(readLegacyTree())) {
+			if (doc.locale !== "en") {
+				const original = en.get(doc.rel);
+				if (original?.id) Object.assign(want, { translationOf: original.id, translationGroup: original.translationGroup });
+			}
+			const res = await upsertEntry(callTool, want, { dryRun });
+			if (doc.locale === "en") en.set(doc.rel, res);
+			results.push({ name: `${doc.locale} ${doc.slug}`, ...res });
+		}
+		return results;
+	},
+	async menu() {
+		return [{ name: "primary", ...(await upsertMenu(callTool, "primary", MENU, { dryRun })) }];
+	},
+	async verify() {
+		const checks = docPageChecks(docPayloads(readLegacyTree()));
+		const failures = [];
+		for (const check of checks) {
+			const res = await fetch(new URL(check.url, site));
+			const { missing, unexpected } = checkMarkers(await res.text(), check);
+			if (res.status !== 200 || missing.length || unexpected.length) failures.push({ url: check.url, status: res.status, missing, unexpected });
+		}
+		for (const f of failures) console.error(`verify: ${JSON.stringify(f)}`);
+		console.log(`verify: ${checks.length - failures.length}/${checks.length} pages ok`);
+		if (failures.length) process.exitCode = 1;
+		return [];
+	},
+};
+const WRITE_STEPS = ["docs", "menu"];
+
+const steps = positionals.includes("all") ? WRITE_STEPS : positionals;
+if (!steps.length || steps.some((s) => !STEPS[s])) {
+	console.error(`usage: migrate.mjs <${[...Object.keys(STEPS), "all"].join("|")}>... [--dry-run]`);
+	process.exit(2);
+}
+for (const step of steps) {
+	const results = await STEPS[step]();
+	if (!results.length) continue;
+	const counts = {};
+	for (const r of results) {
+		counts[r.action] = (counts[r.action] ?? 0) + 1;
+		if (r.action !== "unchanged") console.log(`  ${step}: ${r.action} ${r.name}${r.diff ? `  (${r.diff})` : ""}`);
+	}
+	console.log(`${step}${dryRun ? " (dry run)" : ""}: ${Object.entries(counts).map(([a, n]) => `${a} ${n}`).join(", ")}`);
+}
+```
+
+- [ ] **Step 4: 跑测试，确认通过**
+
+Run: `npm test`
+Expected: PASS。
+
+- [ ] **Step 5: 🚦 本地迁移 docs 和菜单**
+
+库是 Task 1 重建的空库（Task 3、7 的探针都已删除）。dev 在运行。
+
+```bash
+cd /Users/john/git/web9ai
+node scripts/migrate.mjs docs menu --dry-run
+```
+
+Expected：`docs (dry run): created 35`、`menu (dry run): updated 1`（seed 里只有 Blog、GitHub 两项）。如果有 "updated"：库里还有探针或旧内容，先 `content_list` 看是什么，删掉再来。
+
+```bash
+node scripts/migrate.mjs docs menu
+```
+
+Expected：`docs: created 35`、`menu: updated 1`，exit 0。中途失败（例如 hook 拒绝了某篇）：看错误信息，修 converter（回到 Task 7 的测试补用例），然后直接重跑：已经写进去的条目会是 "unchanged"。
+
+**再跑一次，必须没有写入：**
+
+```bash
+node scripts/migrate.mjs docs menu
+```
+
+Expected：`docs: unchanged 35`、`menu: unchanged 1`。如果有 "updated"，日志里的 diff 路径会指出存储值和期望值的第一个差异：
+- 如果是 EmDash 在保存时给块加了字段或改了形状（例如 `image.asset` 多了 `_type`），在 `upsertEntry` 的比较里对那个字段做归一化（只为那个路径，加注释和测试用例），不要放宽成"忽略整个 body"；
+- 如果是 converter 两次输出不同：那是 Task 6 的确定性被破坏了，回去修。
+
+```bash
+node scripts/migrate.mjs verify
+```
+
+Expected：`verify: 52/52 pages ok`（26 个 en 页面；9 个 zh-CN 翻译页，没有 fallback 提示；17 个 zh-CN fallback 页，显示 en 内容和"本页还没有中文翻译"）。
+
+菜单和搜索：
+
+```bash
+node scripts/check-page.mjs http://localhost:4321/docs/intro 'href="/docs/overview"' 'href="/posts"' 'href="https://github.com/TouchMarsSolutions/web9ai"'
+node scripts/check-page.mjs http://localhost:4321/zh-CN/docs/intro 'href="/zh-CN/docs/intro"' 'href="/zh-CN/docs/overview"' 'href="/posts"'
+node scripts/mcp.mjs search '{"query":"Workflow Automation","collections":["docs"]}'
+```
+
+Expected：两个 `check-page` 通过；`search` 的结果里有 `tools-summary`（"Workflow Automation" 只出现在 tool_grid 的 tagline 里，靠 `search_text` 才能搜到）。
+
+最后用 CDP（page 8）看三页并截图：`/docs/intro`（侧边栏的分组顺序：ai / general、ai / usecase、ai / article、ai / cloud、ai / prompt、ai / model、dev / general），`/zh-CN/docs/guide`（中文内容、没有 fallback 提示），`/zh-CN/docs/lambda`（fallback 提示 + en 内容）。分组标题现在还是 `ai / usecase` 这种原始值，Task 12 换成显示名。
+
+- [ ] **Step 6: 更新 spec**
+
+§7 Runner 那一段的"幂等：……"换成：
+
+"幂等（计划 2 Task 9 实现：`scripts/migrate.mjs`）：按 slug + locale 用 `content_get` 查找；不存在就 `content_create`（直接 `status: "published"`，zh-CN 带 en 条目的 ULID 作为 `translationOf`）；存在就只比较 payload 里的字段，有差异才 `content_update`（它总是写草稿）再 `content_publish`；一样就不写。遇到 `ENTRY_LOCKED` 停下，不覆盖锁。第二次运行必须是全部 unchanged；`node scripts/migrate.mjs verify` 检查 52 个 doc URL。"
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add scripts/lib/sync.mjs scripts/lib/sync.test.mjs scripts/lib/docs-payloads.mjs scripts/lib/docs-payloads.test.mjs scripts/lib/verify-pages.mjs scripts/lib/verify-pages.test.mjs scripts/migrate.mjs docs/superpowers/specs/2026-10-15-emdash-migration-design.md
+git commit -m "feat(migrate): idempotent MCP runner for docs and the header menu, page verification
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
