@@ -1792,7 +1792,7 @@ Expected：`dark` 是 `rgb(13, 13, 13)`，`light` 是 `rgb(255, 255, 255)`，`we
 
 - `AGENTS.md` "Customisation" 一节里 "Colours are defined with `light-dark(<light>, <dark>)` …… There is no separate dark palette to maintain." 换成："Colours are plain values: light ones in `@theme static` in `src/styles/global.css`, dark ones in `:root.dark` and in `@media (prefers-color-scheme: dark) { :root:not(.light) }` right below it (keep the two dark blocks identical; a test checks it). Never use `light-dark()`: the production CSS minifier lowers it and the footer theme switcher stops working."
 - spec §11：
-  - "token 用的是 `light-dark()` ……" 和 "注意：生产构建 …… 修法是计划 2 的事项" 两个子条目换成一条："**已定（owner，2026-10-15，方案 B）**：token 用显式值，浅色在 `@theme static`，深色在 `:root.dark` 和 `@media (prefers-color-scheme: dark) { :root:not(.light) }`（不分层，所以覆盖 Tailwind 的 `@layer theme`）。不用 `light-dark()`：生产构建的 Lightning CSS 会把它降级成 `--lightningcss-light/-dark`，手动切换失效（计划 1 实测）。验收：公开 CSS 里 `--lightningcss-light` 为 0（计划 2 Task 5 的检查脚本强制）。"
+  - "token 用的是 `light-dark()` ……" 和 "注意：生产构建 …… 修法是计划 2 的事项" 两个子条目换成一条："**已定（owner，2026-10-15，方案 B）**：token 用显式值，浅色在 `@theme static`，深色在 `:root.dark` 和 `@media (prefers-color-scheme: dark) { :root:not(.light) }`（不分层，所以覆盖 Tailwind 的 `@layer theme`）。不用 `light-dark()`：生产构建的 Lightning CSS 会把它降级成 `--lightningcss-light/-dark`，手动切换失效（计划 1 实测）。验收：公开 CSS 里没有 `var(--lightningcss-light` / `var(--lightningcss-dark` 的使用（计划 2 Task 5 的检查脚本强制；Lightning CSS 会在每个 `color-scheme` 声明旁边自动加 `--lightningcss-light: ;` 这类定义，这些定义无害，不算）。"
   - 最后一条"分期"换成："分期（2026-10-15 修订）：计划 1 把 docs 页面和 web9 块改成 Tailwind；计划 2 只重写 `Base.astro`（页头、页脚、主题），`posts/[slug]` 只给正文容器加 `prose`；blog 列表和文章页的整体重写留给以后的样式计划，在此之前模板 blog 页面可能有 preflight 带来的细小样式差异。"
 
 - [ ] **Step 9: Commit**
@@ -1800,6 +1800,367 @@ Expected：`dark` 是 `rgb(13, 13, 13)`，`light` 是 `rgb(255, 255, 255)`，`we
 ```bash
 git add packages/web9-site/ src/styles/ src/layouts/Base.astro CLAUDE.md AGENTS.md docs/superpowers/specs/2026-10-15-emdash-migration-design.md
 git commit -m "feat(theme): explicit light/dark tokens (theme B), Base layout in Tailwind, WebMcpSearch, zh-CN menu links
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
+```
+
+---
+
+### Task 5: 构建后检查公开 CSS（`check-public-css`）⏹🚦
+
+**模型：** standard
+
+安全的第三层（spec §10）：公开页面加载的 CSS 里不能有能拼出全屏遮罩的 utility（`fixed`、`inset-*`、`z-*`、`*-screen`、视口单位）或 `position: fixed` 声明；同时强制方案 B 的验收（没有被降级的 `light-dark()`）。只读构建产物，不碰 dev server 和数据库。原型已在计划 1 的构建产物上跑过（调研 `p2-research-1-security.md` §4）。
+
+怎么区分公开 CSS 和后台 CSS：
+- Astro 的 SSR manifest 被打包进 `dist/server/chunks/*.mjs`，形如 `deserializeManifest({"rootDir":…,"routes":[{routeData, styles:[{type:"external",src}|{type:"inline",content}]}]})`。每个公开 page route（不在 `/_emdash` 下）加载的样式表都从这里来。
+- emdash 后台的样式表是一个 `?url` 导入，Rolldown 在它上面留了 `//#region node_modules/@emdash-cms/admin/dist/styles.css?url` 标记，按这个来源判定为"只在后台用"。
+- `dist/client` 里每个 CSS 文件都必须能归类：被公开 route 加载 / 和某个 inline 样式内容相同 / 后台 `?url`。归不了类就失败（fail closed）。Astro 内部结构变了、manifest 找不到，同样失败。
+
+计划 1 的构建产物实测：5 个 CSS 文件都能归类；`Base.*.css` 里有 11 条 `var(--lightningcss-light…)`（来自 `light-dark()` token），所以这个检查在 Task 4 之前的代码上**应当失败**，Task 4 之后应当通过。后台样式表里有 306 条，按来源排除。
+
+**Files:**
+- Create: `scripts/lib/public-css.mjs`、`scripts/lib/public-css.test.mjs`、`scripts/check-public-css.mjs`
+- Modify: `package.json`（`postcss` 加进 devDependencies，加 `postbuild`、`check:css` 两个 script）、`package-lock.json`
+
+**Interfaces:**
+- Consumes: Task 4 的方案 B token（没有它，检查失败）
+- Produces:
+  - `npm run build` 之后自动跑 `postbuild` → `node scripts/check-public-css.mjs`，失败就让整个 build 失败（计划 3 的 Workers Builds 也用 `npm run build`，所以部署同样被拦住）。
+  - `npm run check:css [-- distDir]`：单独跑检查。
+  - `scanSheet({ label, css }) → string[]`、`classifySheets({ manifest, urlImports, clientCss }) → { sheets, report, errors }`、`readServerBundle(sources: string[]) → { manifest, urlImports }`（`scripts/lib/public-css.mjs`）。
+
+- [ ] **Step 1: 写失败的测试**
+
+Create `scripts/lib/public-css.test.mjs`：
+
+```js
+import { describe, expect, it } from "vitest";
+import { classTokens, classifySheets, extractJsonObject, readServerBundle, scanSheet } from "./public-css.mjs";
+
+const sheet = (css) => scanSheet({ label: "t.css", css });
+
+describe("scanSheet", () => {
+	it.each([
+		[".fixed{position:fixed}", 2],
+		[".md\\:fixed{position:fixed}", 2],
+		[".inset-0{inset:0}", 1],
+		[".-inset-x-2{left:-.5rem}", 1],
+		[".z-50{z-index:50}", 1],
+		[".h-screen{height:100vh}", 1],
+		[".min-h-dvh{min-height:100dvh}", 1],
+		[".h-\\[80vh\\]{height:80vh}", 1],
+		[".emdash-modal{position:fixed;inset:0}", 1],
+		[".\\[position\\:fixed\\]{position:fixed}", 1],
+		[":root{--color-bg:var(--lightningcss-light,#fff)var(--lightningcss-dark,#000)}", 1],
+	])("flags %s", (css, n) => expect(sheet(css)).toHaveLength(n));
+	it.each([
+		[".text-brand{color:var(--color-brand)}"],
+		[".site-header{position:sticky;top:0;z-index:100}"],
+		[".site-main{min-height:calc(100vh - 364px)}"],
+		[".size-full{width:100%;height:100%}"],
+		[".max-w-\\[1200px\\]{max-width:1200px}"],
+		[":root{--lightningcss-light:initial;--lightningcss-dark: ;color-scheme:light}"],
+	])("allows %s", (css) => expect(sheet(css)).toEqual([]));
+});
+
+describe("classTokens", () => {
+	it("unescapes and drops variants", () => {
+		expect(classTokens(".sm\\:h-16 .aria-pressed\\:bg-bg:hover")).toEqual(["h-16", "bg-bg"]);
+	});
+});
+
+describe("extractJsonObject / readServerBundle", () => {
+	it("ignores braces inside strings", () => {
+		const src = 'x = f({"a":"}{","b":{"c":1}}); rest }';
+		expect(JSON.parse(extractJsonObject(src, src.indexOf("{")))).toEqual({ a: "}{", b: { c: 1 } });
+	});
+	it("finds the manifest and ?url regions", () => {
+		const src = [
+			'var _manifest = deserializeManifest({"rootDir":"file:///x/","routes":[]});',
+			"//#region node_modules/@emdash-cms/admin/dist/styles.css?url",
+			'var styles_default = "/_astro/styles.abc.css";',
+		].join("\n");
+		const { manifest, urlImports } = readServerBundle(["", src]);
+		expect(manifest.rootDir).toBe("file:///x/");
+		expect(urlImports).toEqual([{ source: "node_modules/@emdash-cms/admin/dist/styles.css", file: "_astro/styles.abc.css" }]);
+	});
+});
+
+describe("classifySheets", () => {
+	const route = (route, styles, type = "page") => ({ routeData: { type, route }, styles });
+	const manifest = {
+		routes: [
+			route("/", [{ type: "external", src: "_astro/Base.css" }, { type: "inline", content: ".a{}" }]),
+			route("/_emdash/admin/[...path]", [{ type: "inline", content: ".admin{position:fixed}" }]),
+			route("/api", [], "endpoint"),
+		],
+	};
+	const admin = { source: "node_modules/@emdash-cms/admin/dist/styles.css", file: "_astro/styles.css" };
+	it("classifies public, inlined duplicate and admin-only files", () => {
+		const clientCss = new Map([
+			["_astro/Base.css", ".b{}"],
+			["_astro/dup.css", ".a{}"],
+			["_astro/styles.css", ".x{position:fixed}"],
+		]);
+		const out = classifySheets({ manifest, urlImports: [admin], clientCss });
+		expect(out.errors).toEqual([]);
+		expect(out.report.map(([f, v]) => `${f} ${v.split(" ")[0]}`)).toEqual(["_astro/Base.css public", "_astro/dup.css public", "_astro/styles.css admin"]);
+		expect(out.sheets.map((s) => s.label)).toEqual(["_astro/Base.css", "inline style of /"]);
+	});
+	it("fails closed on an unknown file, a missing file and a missing manifest", () => {
+		const out = classifySheets({ manifest, urlImports: [], clientCss: new Map([["_astro/other.css", ".o{}"]]) });
+		expect(out.errors).toEqual([
+			"route / loads _astro/Base.css, which is not a file in dist/client",
+			"_astro/other.css: cannot tell whether public pages load it",
+		]);
+		expect(classifySheets({ manifest: null, urlImports: [], clientCss: new Map() }).errors).toHaveLength(1);
+	});
+	it("treats ?url CSS from anywhere but the admin package as public", () => {
+		const out = classifySheets({
+			manifest,
+			urlImports: [{ source: "node_modules/emdash/src/x.css", file: "_astro/x.css" }],
+			clientCss: new Map([["_astro/Base.css", ""], ["_astro/x.css", ".fixed{}"]]),
+		});
+		expect(out.sheets.map((s) => s.label)).toContain("_astro/x.css");
+	});
+});
+```
+
+- [ ] **Step 2: 跑测试，确认失败**
+
+Run: `npx vitest run scripts/lib/public-css.test.mjs`
+Expected: FAIL：`public-css.mjs` 不存在。
+
+- [ ] **Step 3: 实现**
+
+`postcss` 已经是间接依赖（8.5.30），改成直接的 devDependency：
+
+```bash
+npm install --save-dev 'postcss@^8.5.30'
+```
+
+Create `scripts/lib/public-css.mjs`：
+
+```js
+// Pure parts of scripts/check-public-css.mjs (spec §10). The check reads the build output only:
+// Astro's SSR manifest (embedded in dist/server as `deserializeManifest({...})`) lists the stylesheets
+// each route loads; Rolldown leaves a `//#region <source>.css?url` marker above every `?url` CSS import,
+// which is how the admin bundle's stylesheet is told apart from public ones. Anything else fails.
+import postcss from "postcss";
+
+/** The JSON object literal that starts at src[start] ("{"), string-aware. */
+export function extractJsonObject(src, start) {
+	let depth = 0;
+	let inString = false;
+	let escaped = false;
+	for (let i = start; i < src.length; i++) {
+		const c = src[i];
+		if (inString) {
+			if (escaped) escaped = false;
+			else if (c === "\\") escaped = true;
+			else if (c === '"') inString = false;
+			continue;
+		}
+		if (c === '"') inString = true;
+		else if (c === "{") depth++;
+		else if (c === "}" && --depth === 0) return src.slice(start, i + 1);
+	}
+	throw new Error("unbalanced JSON object literal");
+}
+
+const MANIFEST_MARK = 'deserializeManifest({"rootDir"';
+const URL_REGION = /\/\/#region ([^\n]+?\.css)\?url\nvar \w+ = "([^"]+)"/g;
+
+/** Reads the manifest and the `?url` CSS imports out of the server bundle's source files. */
+export function readServerBundle(sources) {
+	let manifest = null;
+	const urlImports = [];
+	for (const src of sources) {
+		const at = src.indexOf(MANIFEST_MARK);
+		if (!manifest && at >= 0) manifest = JSON.parse(extractJsonObject(src, src.indexOf("{", at)));
+		for (const m of src.matchAll(URL_REGION)) urlImports.push({ source: m[1], file: m[2].replace(/^\//, "") });
+	}
+	return { manifest, urlImports };
+}
+
+const isPublicPage = (r) => ["page", "fallback"].includes(r.routeData?.type) && !r.routeData.route.startsWith("/_emdash");
+const ADMIN_SOURCE = /^node_modules\/@emdash-cms\/admin\//;
+
+/**
+ * Sorts every CSS file in dist/client into public / inlined duplicate / admin-only, and collects the
+ * sheets public routes load. `clientCss` maps a path relative to dist/client ("_astro/x.css") to its text.
+ * Returns { sheets: [{ label, css }], report: [[file, verdict]], errors: [string] }.
+ */
+export function classifySheets({ manifest, urlImports, clientCss }) {
+	const errors = [];
+	if (!manifest?.routes?.length) return { sheets: [], report: [], errors: ["no Astro SSR manifest in dist/server (Astro internals changed?)"] };
+	const sheets = new Map();
+	const linked = new Set();
+	for (const r of manifest.routes.filter(isPublicPage)) {
+		for (const s of r.styles ?? []) {
+			if (s.type === "inline") {
+				sheets.set(`inline:${s.content}`, { label: `inline style of ${r.routeData.route}`, css: s.content });
+				continue;
+			}
+			const file = String(s.src).replace(/^\//, "");
+			if (!clientCss.has(file)) {
+				errors.push(`route ${r.routeData.route} loads ${s.src}, which is not a file in dist/client`);
+				continue;
+			}
+			linked.add(file);
+			sheets.set(`file:${file}`, { label: file, css: clientCss.get(file) });
+		}
+	}
+	const inlineBodies = new Set([...sheets.values()].filter((s) => !linked.has(s.label)).map((s) => s.css));
+	const report = [];
+	for (const [file, css] of [...clientCss].sort(([a], [b]) => a.localeCompare(b))) {
+		const via = urlImports.find((u) => u.file === file);
+		if (linked.has(file)) report.push([file, "public (loaded by a public route)"]);
+		else if (inlineBodies.has(css)) report.push([file, "public (same text is inlined into a public route)"]);
+		else if (via && ADMIN_SOURCE.test(via.source)) report.push([file, `admin only (${via.source}?url)`]);
+		else if (via) {
+			report.push([file, `public (?url import of ${via.source})`]);
+			sheets.set(`file:${file}`, { label: file, css });
+		} else {
+			report.push([file, "UNKNOWN"]);
+			errors.push(`${file}: cannot tell whether public pages load it`);
+		}
+	}
+	return { sheets: [...sheets.values()], report, errors };
+}
+
+/** Class-name patterns that let content build a page overlay (spec §10). */
+export const CLASS_DENY = [
+	[/^fixed$/, "position:fixed utility"],
+	[/^-?inset(?:-[xyse])?(?:-|$)/, "inset utility"],
+	[/^-?z-/, "z-index utility"],
+	[/-screen$/, "*-screen size utility"],
+	[/-[sld]?v[hw]$/, "viewport-unit size utility"],
+	[/\[[^\]]*\d(?:[sld]?v[hwib]|vmin|vmax)\b/, "arbitrary viewport-unit value"],
+];
+
+/** Class names in a selector, unescaped, without variant prefixes (`.md\:fixed` → "fixed"). */
+export function classTokens(selector) {
+	return [...selector.matchAll(/\.((?:\\.|[\w-])+)/g)].map((m) => m[1].replace(/\\(.)/g, "$1").split(":").pop());
+}
+
+/** Problems in one stylesheet: denied class names, position:fixed, and light-dark() lowered by the minifier. */
+export function scanSheet({ label, css }) {
+	const problems = [];
+	postcss.parse(css).walkRules((rule) => {
+		for (const selector of rule.selectors ?? []) {
+			for (const cls of classTokens(selector)) {
+				for (const [re, why] of CLASS_DENY) if (re.test(cls)) problems.push(`${label}: ${selector.slice(0, 100)} (${why})`);
+			}
+		}
+		rule.walkDecls((d) => {
+			if (d.prop === "position" && /^fixed\b/i.test(d.value)) problems.push(`${label}: ${rule.selector.slice(0, 100)} (position:fixed)`);
+			if (/var\(--lightningcss-(?:light|dark)\b/.test(d.value))
+				problems.push(`${label}: ${rule.selector.slice(0, 100)} uses ${d.prop} from a lowered light-dark() (theme B, spec §11)`);
+		});
+	});
+	return problems;
+}
+```
+
+Create `scripts/check-public-css.mjs`：
+
+```js
+#!/usr/bin/env node
+// Fails the build when CSS that public pages load could build a page overlay, uses a lowered
+// light-dark(), or when a CSS file in dist/client cannot be classified (spec §10, §11).
+//
+//   node scripts/check-public-css.mjs [distDir]      (runs after `npm run build` as `postbuild`)
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { classifySheets, readServerBundle, scanSheet } from "./lib/public-css.mjs";
+
+const dist = path.resolve(process.argv[2] ?? "dist");
+const walk = (dir, ext) =>
+	readdirSync(dir, { withFileTypes: true, recursive: true })
+		.filter((e) => e.isFile() && e.name.endsWith(ext))
+		.map((e) => path.join(e.parentPath, e.name));
+
+const { manifest, urlImports } = readServerBundle(walk(path.join(dist, "server"), ".mjs").map((f) => readFileSync(f, "utf8")));
+const clientDir = path.join(dist, "client");
+const clientCss = new Map(walk(clientDir, ".css").map((f) => [path.relative(clientDir, f).split(path.sep).join("/"), readFileSync(f, "utf8")]));
+const { sheets, report, errors } = classifySheets({ manifest, urlImports, clientCss });
+const problems = [...errors, ...sheets.flatMap(scanSheet)];
+
+for (const [file, verdict] of report) console.log(`${verdict === "UNKNOWN" ? "!!" : "ok"}  ${file}  ->  ${verdict}`);
+console.log(`scanned ${sheets.length} stylesheets`);
+if (problems.length) {
+	for (const p of problems) console.error(`check-public-css: ${p}`);
+	console.error(`check-public-css: FAILED (${problems.length} problem(s))`);
+	process.exit(1);
+}
+console.log("check-public-css: ok");
+```
+
+`package.json` 的 `scripts` 里，在 `"build"` 后面加两行：
+
+```json
+		"postbuild": "node scripts/check-public-css.mjs",
+		"check:css": "node scripts/check-public-css.mjs",
+```
+
+- [ ] **Step 4: 跑测试，确认通过**
+
+Run: `npm test`
+Expected: PASS（`public-css.test.mjs` 23 个用例）。
+
+- [ ] **Step 5: ⏹🚦 构建、类型检查、变异测试**
+
+dev server 必须先停（构建和 dev 共用 `.wrangler`、`dist`）：
+
+```bash
+cd /Users/john/git/web9ai
+npx astro dev stop
+npm run build 2>&1 | tail -12
+```
+
+Expected：build 成功，最后几行是 `check-public-css` 的报告：每个 CSS 文件一行 `ok …`，没有 `!!`，最后一行 `check-public-css: ok`。
+- 如果报 `uses --color-… from a lowered light-dark()`：Task 4 的 token 没改干净，回去修，不要放宽检查。
+- 如果报 `UNKNOWN`：先看那个文件是什么、谁加载它，在报告里写清楚；只有确认它不会被公开页面加载时，才在 `classifySheets` 里加一条有依据的归类规则（附注释说明来源）。
+
+```bash
+npm run typecheck 2>&1 | tail -5
+```
+
+Expected：`0 errors`（Tasks 1–4 改过的 `.astro` 文件都过类型检查）。
+
+变异测试（检查自己会不会失败）：把构建产物复制到 `.local/`（已被 git 忽略），制造三种问题，每种都必须让检查失败：
+
+```bash
+rm -rf .local/dist-mutant && cp -R dist .local/dist-mutant
+BASE_CSS=$(ls .local/dist-mutant/client/_astro/Base.*.css | head -1)
+cp "$BASE_CSS" .local/base.css.orig
+printf '\n.fixed{position:fixed}\n' >> "$BASE_CSS"
+node scripts/check-public-css.mjs .local/dist-mutant; echo "deny-class exit=$?"
+cp .local/base.css.orig "$BASE_CSS"
+printf '\n:root{--color-bg:var(--lightningcss-light,#fff) var(--lightningcss-dark,#000)}\n' >> "$BASE_CSS"
+node scripts/check-public-css.mjs .local/dist-mutant; echo "lowered-light-dark exit=$?"
+cp .local/base.css.orig "$BASE_CSS"
+printf '.x{color:red}\n' > .local/dist-mutant/client/_astro/rogue.css
+node scripts/check-public-css.mjs .local/dist-mutant; echo "unknown-file exit=$?"
+rm -rf .local/dist-mutant .local/base.css.orig
+```
+
+Expected：三次都是 `exit=1`，错误信息分别包含 `(position:fixed utility)` 和 `(position:fixed)`、`from a lowered light-dark()`、`_astro/rogue.css: cannot tell whether public pages load it`。任何一次 `exit=0`：检查有漏洞，停下来报告。
+
+重启 dev（数据库在 `.wrangler/state`，不受影响）：
+
+```bash
+npm run dev -- --port 4321
+```
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add scripts/lib/public-css.mjs scripts/lib/public-css.test.mjs scripts/check-public-css.mjs package.json package-lock.json
+git commit -m "feat(build): fail the build when public CSS can build overlays or uses a lowered light-dark()
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
