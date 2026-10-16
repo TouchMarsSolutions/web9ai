@@ -106,7 +106,7 @@
 | `packages/web9-blocks/lib/investment-warning.mjs` | 风险提示文字（`.astro` 和 Markdown 共用） | 13 |
 | `packages/web9-site/lib/llms.mjs` + test | `buildLlmsTxt()` | 13 |
 | `src/utils/ai-entry.ts`、`src/pages/llms.txt.ts`、`src/pages/zh-CN/llms.txt.ts`、`src/pages/docs/[slug].md.ts`、`src/pages/zh-CN/docs/[slug].md.ts` | 给 AI 读的入口 | 13 |
-| `packages/web9-blocks/astro/ToolGrid.astro`、`src/styles/global.css` | 样式小问题 | 14 |
+| `packages/web9-blocks/astro/ToolGrid.astro`、`packages/web9-blocks/lib/tool-grid.mjs` + test、`src/styles/global.css` | 样式小问题（logo 尺寸、行内 code） | 14 |
 | `package.json`、`.github/workflows/ci.yml` | 依赖清理；CI 加构建和 CSS 检查 | 14 |
 | spec、`CLAUDE.md`、`AGENTS.md` | 记录结论和规则 | 各任务 |
 
@@ -126,10 +126,10 @@
 | 8 | legacy 清单（sidebar 排序、旧 URL、slug、配对、链接解析）| 6 | standard | |
 | 9 | runner：docs + 菜单；本地全量迁移 | 3、7、8 | standard | 🚦 |
 | 10 | runner：posts + redirects；feed 重定向；posts `prose` | 9 | standard | 🚦 |
-| 11 | 首页（块渲染、路由、内容）| 1、9 | standard | |
-| 12 | `DocsPage`：分组显示名、canonical、对比度；`/pages/<missing>` | 9 | cheap | |
-| 13 | 给 AI 读的入口：`to-markdown`、`.md`、`llms.txt` | 9、12 | standard | |
-| 14 | 样式小问题、依赖清理、CI | 5 | cheap | ⏹ |
+| 11 | 首页（块渲染、路由、内容）| 1、4、10 | standard | |
+| 12 | `DocsPage`：分组显示名、canonical、对比度；`/pages/<missing>` | 4、8、11 | cheap | |
+| 13 | 给 AI 读的入口：`to-markdown`、`.md`、`llms.txt` | 7、12 | standard | |
+| 14 | 样式小问题、依赖清理、CI | 4、5 | cheap | ⏹ |
 | 15 | 全量验收 + 文档收尾 | 全部 | standard | ⏹ 🚦 |
 
 ---
@@ -6100,7 +6100,7 @@ CI 是 `actions/checkout` 的浅克隆（`posts.test.mjs` 读 git 历史的那�
 
 ```bash
 CI_DIR=$(mktemp -d)
-git clone --depth 1 --branch plan2 "file://$PWD" "$CI_DIR/web9ai"
+git clone --depth 1 --branch "$(git branch --show-current)" "file://$PWD" "$CI_DIR/web9ai"
 cd "$CI_DIR/web9ai"
 npm ci
 npx -y -p node@22 node --version
@@ -6134,11 +6134,9 @@ npx astro dev stop
 npm test
 npm run build
 npm run typecheck
-command grep -rn 'light-dark(' src packages --include='*.astro' --include='*.css' --include='*.mjs' --include='*.ts' | command grep -v '\.test\.mjs' ; echo "light-dark: $?"
-command grep -rnE '\bdark:' src packages/web9-blocks/astro ; echo "dark-variant: $?"
 ```
 
-Expected：`npm test` PASS；`npm run build` 成功并且 `check-public-css` PASS；`npm run typecheck` 0 errors；两个 `grep` 都没有输出，`$?` 是 `1`。
+Expected：`npm test` PASS（其中 Task 4 的主题测试保证站点 CSS 里没有 `light-dark(`）；`npm run build` 成功并且 `check-public-css` PASS（遮罩类 utility、被降级的 `light-dark()`）；`npm run typecheck` 0 errors。
 
 worker 体积（只在本地量，不调用 wrangler，不联网）：
 
@@ -6185,10 +6183,9 @@ fs.writeFileSync(".local/guard-final.json", JSON.stringify({ collection: "posts"
 '
 node scripts/mcp.mjs content_create @.local/guard-final.json; echo "exit=$?"
 node scripts/mcp.mjs content_list '{"collection":"posts"}' | command grep -c probe-guard-final
-node scripts/check-page.mjs http://localhost:4321/docs/tools-summary 'data-w9-tools' --absent 'class="fixed' 'inset-0' 'z-50'
 ```
 
-Expected：`content_create` 失败（exit 非 0），信息含 `Save rejected (spec §10)` 和 `htmlBlock`；`grep -c` 输出 `0`；`check-page` 通过。
+Expected：`content_create` 失败（exit 非 0），信息含 `Save rejected (spec §10)` 和 `htmlBlock`；`grep -c` 输出 `0`（什么都没写进去）。
 
 - [ ] **Step 4: 给 AI 读的入口和搜索**
 
