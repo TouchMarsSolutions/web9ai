@@ -24,12 +24,41 @@ export interface Doc {
   terms?: Record<string, TaxonomyTerm[]>;
 }
 
+export interface PageLayoutHeroV1Block {
+  _type: "hero";
+  _version: 1;
+  _key: string;
+  "title": string;
+  "tagline"?: string | null;
+  "image"?: { id: string; src?: string; alt?: string; width?: number; height?: number; filename?: string; mimeType?: string; blurhash?: string; dominantColor?: string; focalX?: number; focalY?: number; provider?: string; previewUrl?: string; meta?: Record<string, unknown>; darkVariant?: { id: string; src?: string; alt?: string; width?: number; height?: number; filename?: string; mimeType?: string; blurhash?: string; dominantColor?: string; focalX?: number; focalY?: number; provider?: string; previewUrl?: string; meta?: Record<string, unknown> } } | null;
+  "primary_label"?: string | null;
+  "primary_href"?: string | null;
+  "secondary_label"?: string | null;
+  "secondary_href"?: string | null;
+}
+
+export type PageLayoutHeroBlock = PageLayoutHeroV1Block;
+
+export interface PageLayoutFeatureGridV1Block {
+  _type: "feature_grid";
+  _version: 1;
+  _key: string;
+  "title"?: string | null;
+  "features"?: { "title": string; "description"?: string | null; "image"?: { id: string; src?: string; alt?: string; width?: number; height?: number; filename?: string; mimeType?: string; blurhash?: string; dominantColor?: string; focalX?: number; focalY?: number; provider?: string; previewUrl?: string; meta?: Record<string, unknown>; darkVariant?: { id: string; src?: string; alt?: string; width?: number; height?: number; filename?: string; mimeType?: string; blurhash?: string; dominantColor?: string; focalX?: number; focalY?: number; provider?: string; previewUrl?: string; meta?: Record<string, unknown> } } | null }[] | null;
+}
+
+export type PageLayoutFeatureGridBlock = PageLayoutFeatureGridV1Block;
+
+export type PageLayoutBlock = PageLayoutHeroBlock | PageLayoutFeatureGridBlock;
+
 export interface Page {
   id: string;
   slug: string | null;
   status: string;
   title: string;
   content?: PortableTextBlock[];
+  search_text?: string;
+  layout?: PageLayoutBlock[];
   createdAt: Date;
   updatedAt: Date;
   publishedAt: Date | null;
@@ -46,6 +75,7 @@ export interface Post {
   featured_image?: { id: string; src?: string; alt?: string; width?: number; height?: number; filename?: string; mimeType?: string; blurhash?: string; dominantColor?: string; focalX?: number; focalY?: number; provider?: string; previewUrl?: string; meta?: Record<string, unknown>; darkVariant?: { id: string; src?: string; alt?: string; width?: number; height?: number; filename?: string; mimeType?: string; blurhash?: string; dominantColor?: string; focalX?: number; focalY?: number; provider?: string; previewUrl?: string; meta?: Record<string, unknown> } };
   content?: PortableTextBlock[];
   excerpt?: string;
+  search_text?: string;
   createdAt: Date;
   updatedAt: Date;
   publishedAt: Date | null;

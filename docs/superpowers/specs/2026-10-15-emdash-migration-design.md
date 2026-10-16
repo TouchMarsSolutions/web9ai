@@ -35,8 +35,8 @@
 | Collection | 用途 | 字段 | 状态 |
 |---|---|---|---|
 | `docs` | AI / Dev 知识库 | `title`(string, searchable) · `description`(text) · `section`(select ai\|dev, 不可翻译) · `category`(string) · `sort_order`(integer, indexed, 不可翻译) · `body`(portableText, searchable) · `search_text`(text, searchable；由 `web9-blocks` 的 `content:beforeSave` hook 自动生成，不要手写)；supports drafts/revisions/preview/search/seo | **已定**，在 `seed/seed.json` 里定义（通过 MCP 建的 collection 没有全文搜索索引表） |
-| `posts` | Blog | 模板自带；Docusaurus tags 映射到 `tag` taxonomy | **已定** |
-| `pages` | 首页及落地页 | 加一个 `layout` 字段（`blocks` 类型），块类型包括 `hero`、`feature_grid`，以后可以继续加 | **已定**（owner 选择首页可在后台编辑） |
+| `posts` | Blog | 模板自带字段 + `search_text`（text, searchable，hook 生成）；Docusaurus tags 映射到 `tag` taxonomy，5 个 term 定义在 seed 里，由迁移 runner 的 `terms` 步骤写进库 | **已定** |
+| `pages` | 首页及落地页 | 字段 `title`、`content`、`search_text`、`layout`（`blocks`，`allowedTypes: hero, feature_grid`）；块类型由 seed 的 `blockTypes` 定义 | **已定**（owner 选择首页可在后台编辑） |
 
 - **已定的规则**：doc 正文一律用 `portableText` 字段加内联块，**不用 `blocks` 字段**。原因是 issue #3670 还没解决，`blocks` 字段不会进入全文搜索。`blocks` 只用于首页这类以排版为主的页面。
 - **建议**：URL 用 `/docs/{slug}` 和 `/zh-CN/docs/{slug}`。owner 已表示 URL 不重要。slug 全站唯一，转换脚本遇到重名时加前缀。
@@ -49,7 +49,7 @@
 | 布局层 | 侧边栏、TOC、语言切换、全屏 | 在 `src/` 里写普通 Astro 组件 |
 | 内联块（`@web9/blocks`） | 已实现：`callout`、`tabs`、`details`、`mermaid`、`tool_grid`、`investment_warning` | 在 `index.mjs` 加定义，在 `astro/` 加渲染组件，在 skill 里补 cookbook 条目，然后部署，**之后**内容才能使用 |
 | core 自带 | `image`、`code`、`table`、`embed`（YouTube/Vimeo）、`htmlBlock`、`break`、`gallery`、`columns`、`button` | 直接使用，不重复实现。**例外：`htmlBlock` 不要用**：core 的 sanitizer 保留 `class`/`id`/`data-*`，不是 class-safe（见 §10） |
-| 页面块（`pages.layout`） | `hero`、`feature_grid` | 通过 MCP 的 `schema_create_block_type` 定义块类型，在 `src/components/blocks/` 写渲染组件 |
+| 页面块（`pages.layout`） | `hero`、`feature_grid` | 在 `seed/seed.json` 的 `blockTypes` 里定义（新库首次启动时应用）；已经存在的库用 MCP `schema_create_block_type` 加上同样的定义，再 `schema_update_field` 把它加进 `pages.layout` 的 `allowedTypes`；在 `src/components/blocks/` 写渲染组件，在 `HomePage.astro` 的 components map 里登记 |
 
 - 一句话：**用组件写内容**在后台或 MCP 里完成；**新增一种组件**需要改代码并部署。
 - **已定的折中**：Block Kit 没有富文本类型的字段，repeater 里也不能放 `portableText`。所以 callout、tabs、details 的正文和工具介绍都存成 Markdown 字符串，由 `lib/markdown.mjs` 在服务端渲染（`marked`，支持 GFM、`:::tone title` 提示块、mermaid 代码块），再经过 `sanitize-html` 白名单过滤。代价是后台弹窗里看到的是 Markdown 原文，不是所见即所得。
@@ -90,7 +90,7 @@
 
   幂等：按 slug 查找已有条目，存在就用 `_rev` 调 `content_update`，不存在就 `content_create`。
 - Blog：用同一个转换脚本写入 `posts`，`draft: true` 的文章保持草稿状态。
-- 首页：通过 MCP 创建 `hero`、`feature_grid` 块类型，再写入 `pages/home`，内容来自旧首页的 hero 和 3 个 features。
+- 首页：块类型 `hero`、`feature_grid` 和 `pages.layout` 由 seed 定义（**已定**，计划 2 Task 1）；内容由 runner 写入 `pages/home`（en + zh-CN），来自旧首页的 hero 和 3 个 features。
 
 ## 8. AI 管理内容（目标 2）
 
@@ -124,7 +124,7 @@
   5. GitHub Pages 保留作为回退：回退靠的是 `gh-pages` 分支上**已经构建好的产物**（Pages 设置：source `gh-pages`，custom domain `www.web9.ai`），可以随时把 DNS 切回去。确认稳定后再关闭。旧站源码完整保存在 tag `docusaurus-final`，需要时从它重建；`legacy/` **不能**重新构建出线上站点（静态资源已经移到 `public/`），不要从它重新部署到 `gh-pages`。原来的 `static/CNAME` 和 `deploy.yml` 也放在 `legacy/static/` 和 `legacy/.github/workflows/`，只作记录，workflow 不会运行。
 - **待验证（切换后）**：Workers 的预览版本是否和生产共用 D1/R2 binding。如果共用，就加一个 staging environment，使用独立的 D1 和 R2，再开启分支预览。
 - **待验证**：D1 和 R2 是由 wrangler 在部署时自动创建，还是需要先手动创建。另外，adapter 还会注入 KV `SESSION` binding 和 `IMAGES` binding（`wrangler.jsonc` 里没有），`d1_databases` 里也还没有 `database_id`：首次部署前都要配置好或做出决定。
-- **首次启动**：EmDash 在空库第一次启动时自动应用一次 `seed/seed.json`（`applySeed`，`onConflict: "skip"`，之后不再应用，改 seed 也没用），写入 settings、collections、taxonomies、menus、widgetAreas；content 只在 setup 向导里选了才导入。所以 seed 只放 Web9.AI 自己的站点信息，不放模板 demo 内容；菜单只放稳定链接（Blog、GitHub），AI/Dev 入口由迁移 runner 建好 docs 后通过 MCP 加。上线后再改站点信息、菜单、widget，走后台或 MCP。
+- **首次启动**：EmDash 在空库第一次启动时自动应用一次 `seed/seed.json`（`applySeed`，`onConflict: "skip"`，之后不再应用，改 seed 也没用），写入 settings、collections、taxonomies、menus、widgetAreas；content 只在 setup 向导里选了才导入。所以 seed 只放 Web9.AI 自己的站点信息，不放模板 demo 内容；菜单只放稳定链接（Blog、GitHub），AI/Dev 入口由迁移 runner 建好 docs 后通过 MCP 加。上线后再改站点信息、菜单、widget，走后台或 MCP。计划 2 Task 1 起，seed 还包含块类型、`pages.layout`、`posts`/`pages` 的 `search_text`、5 个 tag term 和 `settings.url`。注意 `applySeed` 只在 `includeContent` 为 true 时写 taxonomy terms（运行时首次启动用的是 `onConflict: "skip"`、不带 `includeContent`；setup 向导取决于是否勾选导入内容），所以 terms 由迁移 runner 的 `terms` 步骤从 seed 补建（计划 2 Task 1 实测）。
 - 备份：首次部署前备份 `EMDASH_ENCRYPTION_KEY`；定时导出 D1，再定期通过 MCP `site_export` 做整站导出。
 - 缓存：v1 不配置。`Astro.cache` 的 warning 是预期内的。上线后先测性能，再按 EmDash 文档加 object cache。
 - 模板的 cron trigger（`* * * * *`，用于定时发布）每天约 1440 次调用，在免费额度之内。

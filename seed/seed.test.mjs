@@ -24,11 +24,36 @@ describe("seed/seed.json", () => {
 		expect(f.search_text).toMatchObject({ type: "text", searchable: true });
 	});
 	it("carries Web9.AI identity and no template demo content (applied once on first boot, spec §9)", () => {
-		expect(seed.settings).toEqual({ title: "Web9.AI", tagline: "square of web3 to the power of AI" });
+		expect(seed.settings).toEqual({ title: "Web9.AI", tagline: "square of web3 to the power of AI", url: "https://www.web9.ai" });
 		expect(seed.content).toBeUndefined();
 		expect(seed.bylines).toBeUndefined();
 		expect(seed.sections).toBeUndefined();
-		expect(seed.taxonomies.flatMap((t) => t.terms ?? [])).toEqual([]);
+		expect(seed.redirects).toBeUndefined();
+		expect(seed.taxonomies.find((t) => t.name === "category").terms).toEqual([]);
 		expect(JSON.stringify(seed)).not.toMatch(/My Blog|\/pages\/about|stray thought/);
+	});
+	it("seeds the legacy blog tags as en terms (spec §7)", () => {
+		const tag = seed.taxonomies.find((t) => t.name === "tag");
+		expect(tag.terms.map((t) => t.slug)).toEqual(["ai", "course", "workshop", "tools", "tiny-course"]);
+		expect(tag.terms.find((t) => t.slug === "ai").label).toBe("AI");
+	});
+	it("defines the home-page block types and pages.layout, and search_text on posts and pages (spec §2, §3, §4)", () => {
+		expect(seed.blockTypes.map((b) => b.slug)).toEqual(["hero", "feature_grid"]);
+		const fields = (slug) => seed.collections.find((c) => c.slug === slug).fields.map((f) => f.slug);
+		expect(fields("pages")).toEqual(["title", "content", "search_text", "layout"]);
+		expect(fields("posts")).toEqual(["title", "featured_image", "content", "excerpt", "search_text"]);
+		const pages = seed.collections.find((c) => c.slug === "pages");
+		expect(pages.fields.find((f) => f.slug === "layout")).toEqual({
+			slug: "layout",
+			label: "Layout",
+			type: "blocks",
+			validation: { allowedTypes: ["hero", "feature_grid"] },
+		});
+		for (const slug of ["posts", "pages"]) {
+			expect(seed.collections.find((c) => c.slug === slug).fields.find((f) => f.slug === "search_text")).toMatchObject({
+				type: "text",
+				searchable: true,
+			});
+		}
 	});
 });

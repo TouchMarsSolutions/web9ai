@@ -8,8 +8,107 @@
 	},
 	"settings": {
 		"title": "Web9.AI",
-		"tagline": "square of web3 to the power of AI"
+		"tagline": "square of web3 to the power of AI",
+		"url": "https://www.web9.ai"
 	},
+	"blockTypes": [
+		{
+			"slug": "hero",
+			"label": "Hero",
+			"description": "Page header: title, tagline, optional image and up to two buttons",
+			"category": "Web9",
+			"currentVersion": 1,
+			"versions": [
+				{
+					"version": 1,
+					"fields": [
+						{
+							"slug": "title",
+							"label": "Title",
+							"type": "string",
+							"required": true
+						},
+						{
+							"slug": "tagline",
+							"label": "Tagline",
+							"type": "text"
+						},
+						{
+							"slug": "image",
+							"label": "Image",
+							"type": "image"
+						},
+						{
+							"slug": "primary_label",
+							"label": "Primary button label",
+							"type": "string"
+						},
+						{
+							"slug": "primary_href",
+							"label": "Primary button link",
+							"type": "url"
+						},
+						{
+							"slug": "secondary_label",
+							"label": "Secondary button label",
+							"type": "string"
+						},
+						{
+							"slug": "secondary_href",
+							"label": "Secondary button link",
+							"type": "url"
+						}
+					]
+				}
+			]
+		},
+		{
+			"slug": "feature_grid",
+			"label": "Feature grid",
+			"description": "Row of features: title + description + image",
+			"category": "Web9",
+			"currentVersion": 1,
+			"versions": [
+				{
+					"version": 1,
+					"fields": [
+						{
+							"slug": "title",
+							"label": "Section title (optional)",
+							"type": "string"
+						},
+						{
+							"slug": "features",
+							"label": "Features",
+							"type": "repeater",
+							"validation": {
+								"minItems": 1,
+								"maxItems": 12,
+								"subFields": [
+									{
+										"slug": "title",
+										"label": "Title",
+										"type": "string",
+										"required": true
+									},
+									{
+										"slug": "description",
+										"label": "Description",
+										"type": "text"
+									},
+									{
+										"slug": "image",
+										"label": "Image",
+										"type": "image"
+									}
+								]
+							}
+						}
+					]
+				}
+			]
+		}
+	],
 	"collections": [
 		{
 			"slug": "posts",
@@ -48,6 +147,12 @@
 					"slug": "excerpt",
 					"label": "Excerpt",
 					"type": "text"
+				},
+				{
+					"slug": "search_text",
+					"label": "Search text (auto-generated, do not edit)",
+					"type": "text",
+					"searchable": true
 				}
 			]
 		},
@@ -76,6 +181,23 @@
 					"label": "Content",
 					"type": "portableText",
 					"searchable": true
+				},
+				{
+					"slug": "search_text",
+					"label": "Search text (auto-generated, do not edit)",
+					"type": "text",
+					"searchable": true
+				},
+				{
+					"slug": "layout",
+					"label": "Layout",
+					"type": "blocks",
+					"validation": {
+						"allowedTypes": [
+							"hero",
+							"feature_grid"
+						]
+					}
 				}
 			]
 		},
@@ -164,7 +286,28 @@
 			"collections": [
 				"posts"
 			],
-			"terms": []
+			"terms": [
+				{
+					"slug": "ai",
+					"label": "AI"
+				},
+				{
+					"slug": "course",
+					"label": "course"
+				},
+				{
+					"slug": "workshop",
+					"label": "workshop"
+				},
+				{
+					"slug": "tools",
+					"label": "tools"
+				},
+				{
+					"slug": "tiny-course",
+					"label": "tiny-course"
+				}
+			]
 		}
 	],
 	"menus": [
