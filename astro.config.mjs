@@ -15,6 +15,8 @@ export default defineConfig({
 	redirects: {
 		"/blog/rss.xml": { status: 301, destination: "/rss.xml" },
 		"/blog/atom.xml": { status: 301, destination: "/rss.xml" },
+		"/zh-CN/blog/rss.xml": { status: 301, destination: "/rss.xml" },
+		"/zh-CN/blog/atom.xml": { status: 301, destination: "/rss.xml" },
 	},
 	i18n: {
 		defaultLocale: "en",

@@ -3,6 +3,9 @@
 // The EmDash middleware matches exact sources first, then [param] patterns; it skips paths with a file
 // extension, so the feeds are redirected in astro.config.mjs instead.
 //
+// Category pages and feeds: the generated /category/<label>[-1] pages (en and /zh-CN) are plain rules; the
+// feed URLs (/blog/rss.xml, ...) are in astro.config.mjs because of the extension rule above.
+//
 // Fail closed, like the entries (scripts/lib/sync.mjs): a rule of the group that exists and differs from the
 // migration (another destination or type, or disabled) is something an admin changed, so syncRedirects stops
 // with [WOULD_OVERWRITE] unless `overwrite` is set. Rules outside the group are never read or touched.
@@ -32,12 +35,15 @@ export function legacyRedirects(tree) {
 		add(`${prefix}/blog/tags/[tag]`, "/tag/[tag]");
 		add(`${prefix}/blog/[slug]`, "/posts/[slug]");
 	}
-	// Generated category index pages. The three sidebars share one slugger, so the aiSidebar copies
-	// probably got a -1 suffix; a rule for a URL that never existed costs nothing.
+	// Generated category index pages, served under /zh-CN too (the locale is kept, like the docs). The three
+	// sidebars share one slugger, so the aiSidebar copies probably got a -1 suffix; a rule for a URL that never
+	// existed costs nothing.
 	for (const [dir, { label }] of Object.entries(tree.categories)) {
 		const first = en.filter((d) => d.category === dir).sort((a, b) => a.sortOrder - b.sortOrder)[0];
 		if (!first) throw new Error(`category ${dir} has no en docs`);
-		for (const suffix of ["", "-1"]) add(`/category/${labelSlug(label)}${suffix}`, first.newUrl);
+		for (const prefix of ["", "/zh-CN"]) {
+			for (const suffix of ["", "-1"]) add(`${prefix}/category/${labelSlug(label)}${suffix}`, `${prefix}${first.newUrl}`);
+		}
 	}
 	add("/pages/home", "/");
 
@@ -48,6 +54,25 @@ export function legacyRedirects(tree) {
 		seen.add(r.source);
 	}
 	return rules;
+}
+
+/**
+ * `request(method, path, body?)` for syncRedirects: calls the EmDash REST API with an admin token and returns
+ * the JSON `data` of the answer. Throws a clear error when the answer is not JSON (typically an auth redirect
+ * to a login page, which fetch follows) or reports a failure.
+ */
+export function restRequest(site, token) {
+	return async (method, path, body) => {
+		const res = await fetch(new URL(path, site), {
+			method,
+			headers: { Authorization: `Bearer ${token}`, ...(body ? { "Content-Type": "application/json" } : {}) },
+			body: body ? JSON.stringify(body) : undefined,
+		});
+		const json = await res.json().catch(() => undefined);
+		if (json === undefined) throw new Error(`redirects API: HTTP ${res.status}, not JSON (${res.headers.get("content-type") ?? "no content-type"})`);
+		if (!res.ok || json.success === false) throw new Error(`redirects API: ${method} ${path}: HTTP ${res.status} ${JSON.stringify(json.error ?? json).slice(0, 300)}`);
+		return json.data;
+	};
 }
 
 /** How a stored rule differs from the wanted one ("disabled, /old -> /new, type 302 -> 301"), or null when it is as wanted. */
@@ -67,7 +92,9 @@ export async function syncRedirects(request, rules, { dryRun = false, overwrite 
 	const have = new Map();
 	let cursor;
 	do {
-		const page = await request("GET", `/_emdash/api/redirects?group=${GROUP}&limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+		const listing = `/_emdash/api/redirects?group=${GROUP}&limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+		const page = await request("GET", listing);
+		if (!Array.isArray(page?.items)) throw new Error(`redirects API: GET ${listing} returned no items list: ${JSON.stringify(page)?.slice(0, 200)}`);
 		for (const r of page.items) have.set(r.source, r);
 		cursor = page.nextCursor;
 	} while (cursor);

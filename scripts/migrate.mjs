@@ -17,7 +17,7 @@ import { readLegacyTree } from "./lib/legacy-tree.mjs";
 import { checkMarkers } from "./lib/markers.mjs";
 import { callTool, defaultToken } from "./lib/mcp.mjs";
 import { postPayloads } from "./lib/posts.mjs";
-import { legacyRedirects, syncRedirects } from "./lib/redirects.mjs";
+import { legacyRedirects, restRequest, syncRedirects } from "./lib/redirects.mjs";
 import { upsertEntry, upsertMenu } from "./lib/sync.mjs";
 import { seedTerms, syncTerms } from "./lib/terms.mjs";
 import { docPageChecks } from "./lib/verify-pages.mjs";
@@ -45,19 +45,9 @@ const REDIRECT_SAMPLES = [
 	["/blog/tags/ai", "/tag/ai"],
 	["/blog/rss.xml", "/rss.xml"],
 	["/blog/atom.xml", "/rss.xml"],
+	["/zh-CN/blog/rss.xml", "/rss.xml"],
+	["/zh-CN/blog/atom.xml", "/rss.xml"],
 ];
-
-/** JSON `data` of an EmDash REST call made with the runner's token. */
-async function request(method, path, body) {
-	const res = await fetch(new URL(path, site), {
-		method,
-		headers: { Authorization: `Bearer ${defaultToken()}`, ...(body ? { "Content-Type": "application/json" } : {}) },
-		body: body ? JSON.stringify(body) : undefined,
-	});
-	const json = await res.json().catch(() => ({}));
-	if (!res.ok || json.success === false) throw new Error(`${method} ${path}: HTTP ${res.status} ${JSON.stringify(json.error ?? json).slice(0, 300)}`);
-	return json.data;
-}
 
 const STEPS = {
 	async docs() {
@@ -92,7 +82,7 @@ const STEPS = {
 		return results;
 	},
 	async redirects() {
-		return syncRedirects(request, legacyRedirects(readLegacyTree()), { dryRun, overwrite });
+		return syncRedirects(restRequest(site, defaultToken()), legacyRedirects(readLegacyTree()), { dryRun, overwrite });
 	},
 	async verify() {
 		const tree = readLegacyTree();

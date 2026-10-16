@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { readLegacyTree } from "./legacy-tree.mjs";
 import { convertPost, postPayloads } from "./posts.mjs";
 
@@ -44,10 +44,16 @@ const fullHistory = (() => {
 })();
 
 describe.skipIf(!existsSync("legacy/blog") || !fullHistory)("postPayloads on legacy/blog", () => {
-	const tree = readLegacyTree();
-	const payloads = postPayloads(tree);
+	// In beforeAll, not in the describe body: a skipped suite still runs its body while vitest collects tests,
+	// and in a shallow clone (CI) firstCommitDate throws.
+	let tree;
+	let payloads;
+	beforeAll(() => {
+		tree = readLegacyTree();
+		payloads = postPayloads(tree);
+	});
 	const want = (slug) => payloads.find((p) => p.want.slug === slug).want;
-	it("converts both posts with the dates Docusaurus showed", () => {
+	it("converts both posts with the dates of their first commits", () => {
 		expect(payloads.map((p) => p.want.slug)).toEqual(["ai-tiny-course", "ai-tools-adhoc"]);
 		expect(want("ai-tiny-course")).toMatchObject({ status: "draft", publishedAt: "2025-03-08T00:19:14Z", data: { excerpt: "跨越科技裂谷 | 成为穿越周期的AI达人" } });
 		expect(want("ai-tiny-course").data.content.map((b) => b._type)).toEqual(["image", "callout"]);

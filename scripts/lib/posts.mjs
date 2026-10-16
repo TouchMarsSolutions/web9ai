@@ -13,7 +13,7 @@ const plainText = (block) => (block.children ?? []).map((c) => c.text ?? "").joi
  * Upsert payload for one post. Docusaurus showed the text above `<!-- truncate -->` as the summary;
  * it becomes `excerpt` and leaves `content`, because the post page prints the excerpt under the title
  * and the content after it. `draft: true` posts were never built, so they stay drafts.
- * `publishedAt` is the date Docusaurus displayed (see firstCommitDate).
+ * `publishedAt` is the date the post was written (see firstCommitDate).
  */
 export function convertPost(src, { path, rewriteHref, publishedAt }) {
 	const full = mdxToBlocks(src, { path, rewriteHref });
@@ -40,9 +40,10 @@ export function convertPost(src, { path, rewriteHref, publishedAt }) {
 }
 
 /**
- * When Docusaurus dated a post: the folder names (20250307-...) have no separators, so Docusaurus 3
- * ignored them and used the file's first git commit. Needs the full history: a shallow clone (CI) has
- * only the last commit, so this refuses to guess there.
+ * The date a post was written: the file's first git commit. (The folder names, 20250307-..., have no
+ * separators, so Docusaurus 3 ignored them, and the live site showed the build date, so the old displayed
+ * date is not the one to copy.) Needs the full history: a shallow clone (CI) has only the last commit, so
+ * this refuses to guess there.
  */
 export function firstCommitDate(file) {
 	const shallow = execFileSync("git", ["rev-parse", "--is-shallow-repository"], { encoding: "utf8" }).trim();

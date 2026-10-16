@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { readLegacyTree } from "./legacy-tree.mjs";
-import { GROUP, legacyRedirects, syncRedirects } from "./redirects.mjs";
+import { GROUP, legacyRedirects, restRequest, syncRedirects } from "./redirects.mjs";
 
 const fakeTree = {
 	docs: [
@@ -29,6 +29,9 @@ describe("legacyRedirects", () => {
 			"/category/cloud": "/docs/a",
 			"/category/cloud-1": "/docs/a",
 			"/category/use-case": "/docs/x",
+			"/zh-CN/category/cloud": "/zh-CN/docs/a",
+			"/zh-CN/category/cloud-1": "/zh-CN/docs/a",
+			"/zh-CN/category/use-case": "/zh-CN/docs/x",
 			"/pages/home": "/",
 		});
 		expect(legacyRedirects(tree).every((r) => r.type === 301 && r.groupName === GROUP)).toBe(true);
@@ -40,10 +43,15 @@ describe("legacyRedirects", () => {
 });
 
 describe.skipIf(!existsSync("legacy/docs"))("legacyRedirects on legacy/", () => {
-	const rules = legacyRedirects(readLegacyTree());
-	const map = Object.fromEntries(rules.map((r) => [r.source, r.destination]));
-	it("has 52 doc rules, 10 blog rules, 10 category rules and /pages/home", () => {
-		expect(rules).toHaveLength(73);
+	// beforeAll, not the describe body: a skipped suite's body still runs at collection (legacy/ goes away after cutover).
+	let rules;
+	let map;
+	beforeAll(() => {
+		rules = legacyRedirects(readLegacyTree());
+		map = Object.fromEntries(rules.map((r) => [r.source, r.destination]));
+	});
+	it("has 52 doc rules, 10 blog rules, 20 category rules (en and zh-CN) and /pages/home", () => {
+		expect(rules).toHaveLength(83);
 		expect(map).toMatchObject({
 			"/rundiffusion": "/docs/rundiffusion",
 			"/ai/model/01_3d": "/docs/3d",
@@ -54,6 +62,9 @@ describe.skipIf(!existsSync("legacy/docs"))("legacyRedirects on legacy/", () => 
 			"/category/prompt-engineering": "/docs/prompt-guides",
 			"/category/articles": "/docs/ai-product-ideas",
 			"/category/cloud": "/docs/rundiffusion",
+			"/zh-CN/category/cloud": "/zh-CN/docs/rundiffusion",
+			"/zh-CN/category/cloud-1": "/zh-CN/docs/rundiffusion",
+			"/zh-CN/category/use-case": "/zh-CN/docs/guide",
 		});
 	});
 });
@@ -153,5 +164,43 @@ describe("syncRedirects", () => {
 		expect(JSON.stringify(api.rows.slice(0, 2))).toBe(before);
 		expect(api.writes()).toEqual(["POST /_emdash/api/redirects"]);
 		expect(api.calls[0]).toBe("GET /_emdash/api/redirects");
+	});
+});
+
+describe("restRequest", () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+	const stub = (response) => {
+		const fetch = vi.fn(async () => response);
+		vi.stubGlobal("fetch", fetch);
+		return fetch;
+	};
+	const json = (body, init = {}) => new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" }, ...init });
+
+	it("sends the token and a JSON body to the site and returns the data of the answer", async () => {
+		const fetch = stub(json({ success: true, data: { id: "r1" } }));
+		expect(await restRequest("http://site.test", "tok")("POST", "/_emdash/api/redirects", { source: "/a" })).toEqual({ id: "r1" });
+		const [url, init] = fetch.mock.calls[0];
+		expect(String(url)).toBe("http://site.test/_emdash/api/redirects");
+		expect(init).toMatchObject({ method: "POST", body: '{"source":"/a"}', headers: { Authorization: "Bearer tok", "Content-Type": "application/json" } });
+	});
+	it("throws a clear error when the answer is not JSON (an auth redirect to a login page)", async () => {
+		stub(new Response("<html>Sign in</html>", { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } }));
+		await expect(restRequest("http://site.test", "tok")("GET", "/_emdash/api/redirects")).rejects.toThrow("redirects API: HTTP 200, not JSON (text/html; charset=utf-8)");
+	});
+	it("names a missing content type", async () => {
+		stub(new Response(null, { status: 204 }));
+		await expect(restRequest("http://site.test", "tok")("GET", "/x")).rejects.toThrow("redirects API: HTTP 204, not JSON (no content-type)");
+	});
+	it("throws the API's error with the request on a failure", async () => {
+		stub(json({ success: false, error: { code: "CONFLICT", message: 'A redirect from "/a" already exists' } }, { status: 409 }));
+		await expect(restRequest("http://site.test", "tok")("POST", "/_emdash/api/redirects", {})).rejects.toThrow(/^redirects API: POST \/_emdash\/api\/redirects: HTTP 409 .*CONFLICT/);
+	});
+});
+
+describe("syncRedirects on an unexpected answer", () => {
+	it("says what came back instead of failing on a missing items list", async () => {
+		await expect(syncRedirects(async () => ({}), [])).rejects.toThrow(/^redirects API: GET \/_emdash\/api\/redirects\?group=legacy-docusaurus.* returned no items list/);
 	});
 });
