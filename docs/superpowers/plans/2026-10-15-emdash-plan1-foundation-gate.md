@@ -1879,13 +1879,13 @@ Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
 4. **模板页面改成 Tailwind**：`Base.astro`、blog 列表、文章页；去掉 `tokens.css` 里剩下的 token。
 5. **给 AI 读的入口**：`/llms.txt`；可选 `/docs/{slug}.md`；在布局里加 core 的 `WebMcpSearch`（spec §4 建议）。
 6. **部署**：
-   - 在 Workers Builds 连接仓库，生产分支用 `emdash`；
+   - 在 Workers Builds 连接仓库，生产分支用 `main`（PR #2 已在计划 1 结束时合并，见 spec §9）；
    - 确认 D1 和 R2 是由 wrangler 自动创建，还是需要先手动创建；
    - 首次部署前备份 `EMDASH_ENCRYPTION_KEY`；
    - 在 `*.workers.dev` 上验证；
    - 对生产跑迁移；
-   - 合并到 `main`，生产分支改成 `main`，绑定 `www.web9.ai`；
-   - 确认预览环境是否和生产共用 binding。
+   - 绑定 `www.web9.ai`；
+   - 确认预览环境是否和生产共用 binding：计划 2 在 `main` 之外的分支上开发，连上 Workers Builds 之后，这些分支的构建是否会碰生产 D1/R2，要在第一次推这类分支之前确认。
 7. **AI 账号**：owner 在后台邀请一个 Editor 账号，用 passkey 注册，再创建 PAT（spec §8）。
 
 ### 计划 1 遗留，计划 2 必须处理

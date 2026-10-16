@@ -2,7 +2,7 @@
 # Kept as the record of how the Docusaurus site was published to the gh-pages branch (GitHub Pages,
 # custom domain www.web9.ai). legacy/ cannot rebuild the live site: its static assets moved to public/.
 # The fallback during the EmDash cutover is the already-built gh-pages branch (spec §9), never a rebuild
-# from legacy/. A deploy without static/CNAME in the output would unbind www.web9.ai from Pages.
+# from legacy/. The complete Docusaurus source is the tag docusaurus-final. A deploy without static/CNAME in the output would unbind www.web9.ai from Pages.
 name: Deploy to GitHub Pages
 
 on:
