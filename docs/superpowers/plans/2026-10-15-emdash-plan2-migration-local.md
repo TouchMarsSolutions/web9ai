@@ -2617,3 +2617,673 @@ Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
 ```
 
 ---
+
+### Task 7: converter II：图片、YouTube、tools-gallery、details 里的 Tabs、列表续号 🚦
+
+**模型：** most capable
+
+Task 6 之后，转换结果里还剩以下问题（调研 `p2-research-5-legacy.md` §5、§6，加上写计划时实测发现的两类）：
+- **14 个 `htmlBlock`**：`<MDXTemplate>` 2、`<YouTube>` 1、tools-gallery 的 9 段 HTML（8 个分类 + `<style>`）、`<AlignedText>` 2。Task 3 的 hook 会拒绝 `htmlBlock`，所以这些页面现在根本存不进去。
+- **变成可见文字或直接消失的 JSX**：`<TwitterFollowButton>`（6 个 en cloud 文档）；10 个 `<YouTube>` 里 4 个在列表项里被丢掉、3 个变成字面 JSX 文字；en/zh `23_learn_ai_coding` 的两个 `<details>` 里包着 `<Tabs>`，JSX 原样进了 Markdown 正文，代码块被打碎。
+- **prose 里的图片被压成 alt 文字**：`inlineToSpans` 把 image token 换成了 alt 文本（36 张，主要是 `dev/23_learn_ai_coding` 的代码截图）。
+- 实测新发现：**缩进在列表项里的 admonition**（`  :::tip`，en/zh `00_guide`、`dev/00_overview`，共 6 处）变成列表项里的字面文字 `:::tip …`。
+- 实测新发现：把图片、视频、callout 插到有序列表中间后，后半段会从 1 重新编号。EmDash 支持续号：同一个 `listId` 的有序列表段连续计数，`listStart` 是基数（`emdash/src/content/portable-text-lists.ts`，`OrderedList.astro` 输出 `<ol start>`）。用 EmDash 自己的 `buildPortableTextListTree` 验证过：`1. Copilot / :::tip / 2. Cursor` 渲染成两段，`start` 分别是 1 和 2。
+
+映射规则（spec §7 会补上）：
+
+| legacy | 新内容 |
+|---|---|
+| prose 里的 `![alt](url)`、`<Image img={X}>`、`<XSvg/>`、`<img>`（包括外面套一层带 style 的 `<div>`） | core `image` 块 `{ asset: { _ref: "", url }, alt }`，放在原来所在的段落 / 列表项之后。core `Image.astro` 在没有 provider、没有宽高时直接输出 `<img src=url>` |
+| prose 里的 `<YouTube youTubeId skipTo>` | core `embed` `{ url: "https://www.youtube.com/watch?v=ID[&t=Ns]" }`（Task 3 的 `Embed.astro` 渲染成 youtube-nocookie iframe，`t=` 变成 `?start=`） |
+| callout / details / tabs 正文里的 `<YouTube>` | Markdown 链接 `[YouTube](…)`（Markdown 正文里放不了块） |
+| `<div className="tools-gallery">` | 每个 `tool-category` 一个 `tool_grid`（`title` = `<h3>`，`name` = `<span>`，`url` = `href`，`tagline` = `title` 属性，`logo` = 图片 import，`logo_size: 100`），共 8 个、27 个工具；`<style>` 丢弃 |
+| `<details>` 里的 `<Tabs>` | 每个 tab 变成 `**label**` + 去掉缩进的内容（只有一个 tab 时不加 label），代码块完整保留 |
+| 缩进在列表项里的 `:::tone` | 列表项之后的 `callout` |
+| `<MDXTemplate>`、`<AlignedText>`（它唯一的用法包着一段引用，引用本身保留）、`<TwitterFollowButton>`（旁边的 Twitter 链接保留） | 去掉标签，保留内容 |
+| 有序列表 | 每一项带 `listId`（每个列表一个，`<slug>:list-<n>`）和 `listStart`（该项自己的编号） |
+| 其他 prose 里的 raw HTML | **报错**（`unsupported HTML in prose`），不再生成 `htmlBlock` |
+
+实测结果（原型在 37 个文件上：26 en + 9 zh-CN docs + 2 posts）：没有报错，0 个 `htmlBlock`；Task 3 的 `guardPortableText` 全部通过；正文里没有残留的 JSX 和 `%%` 占位符；`embed` 8 个（10 个 YouTube 里 2 个在 tab 正文里变成链接），`tool_grid` 16 个，`image` 39 个。hot-tools 页面仍然是 51 个块。
+
+**Files:**
+- Create: `scripts/lib/mdx-jsx.mjs`、`scripts/lib/mdx-jsx.test.mjs`、`scripts/lib/legacy-convert.test.mjs`
+- Modify: `scripts/lib/mdx-to-pt.mjs`、`scripts/lib/mdx-to-pt.test.mjs`、spec §6、§7
+
+**Interfaces:**
+- Consumes: Task 6 的 `mdxToBlocks`；Task 3 的 `guardPortableText`（`packages/web9-blocks/lib/pt-guard.mjs`，gate 测试用）和 `Embed.astro`
+- Produces:
+  - `dropWrappers(body)`、`youtubeToTokens(body) → { body, videos }`、`youtubeUrl({ id, start })`、`parseToolsGallery(html, img) → [{ title, tools }]`、`imgAttributes(tag) → { src, alt }`（`scripts/lib/mdx-jsx.mjs`）。
+  - `mdxToBlocks` 的输出里新增 `image`、`embed` 块和列表项的 `listId`/`listStart`；遇到没有规则的 HTML 抛错。
+  - `scripts/lib/legacy-convert.test.mjs`：迁移 gate，`legacy/` 存在时才跑（计划 3 删 `legacy/` 时一起删）。
+
+- [ ] **Step 1: 🚦 先在 workerd 里确认 image 块、embed 和列表续号的渲染**
+
+转换规则依赖三个渲染假设：core `image` 块用 `asset.url` 直接输出 `<img>`（`_ref` 为空也能保存）；Task 3 的 embed 覆盖；`listId` + `listStart` 让有序列表续号。先用一篇手写的探针文档实测（dev 在运行）：
+
+```bash
+cd /Users/john/git/web9ai
+node -e '
+const span = (k, text) => ({ _type: "span", _key: k, text, marks: [] });
+const block = (k, text, extra = {}) => ({ _type: "block", _key: k, style: "normal", markDefs: [], children: [span(k + "s", text)], ...extra });
+const item = (k, text, n) => block(k, text, { listItem: "number", level: 1, listId: "probe-media:list-0", listStart: n });
+const body = [
+  block("p1", "probe-media-text"),
+  { _type: "image", _key: "i1", asset: { _ref: "", url: "/img/ai.svg" }, alt: "probe-alt" },
+  { _type: "embed", _key: "e1", url: "https://www.youtube.com/watch?v=xul4nDHvxgg&t=644s" },
+  item("l1", "first", 1),
+  { _type: "callout", _key: "c1", tone: "tip", title: "", body: "between" },
+  item("l2", "second", 2),
+];
+require("fs").writeFileSync(".local/probe-media.json", JSON.stringify({ collection: "docs", slug: "probe-media", locale: "en", status: "published",
+  data: { title: "probe media", section: "ai", category: "probe", sort_order: 999999, body } }));
+'
+node scripts/mcp.mjs content_create @.local/probe-media.json > /dev/null; echo "exit=$?"
+node scripts/check-page.mjs http://localhost:4321/docs/probe-media 'src="/img/ai.svg"' 'alt="probe-alt"' "youtube-nocookie.com/embed/xul4nDHvxgg?start=644" '<ol start="2"' "between"
+```
+
+Expected：`exit=0`，`check-page` 通过。
+- 如果 `content_create` 因为 `_ref: ""` 失败：把规则改成 `_ref` 填 URL 本身（`asset: { _ref: url, url }`，`Image.astro` 优先用 `url`），converter 的 `mediaBlocks` 和本 Task 的测试一起改，并在报告里写明。
+- 如果没有 `<ol start="2"`：续号的假设不成立，停下来报告（不影响其他规则，但列表编号会在图片后重新开始）。
+- 其他不符：停下来报告。
+
+清理：
+
+```bash
+node scripts/mcp.mjs content_delete '{"collection":"docs","id":"probe-media"}' && node scripts/mcp.mjs content_permanent_delete '{"collection":"docs","id":"probe-media"}'
+node scripts/mcp.mjs content_list '{"collection":"docs"}'
+```
+
+Expected：列表为空（`content_permanent_delete` 要 ULID 的话，先 `content_list_trashed` 取 id）。
+
+- [ ] **Step 2: 写失败的测试**
+
+Create `scripts/lib/mdx-jsx.test.mjs`：
+
+```js
+import { describe, expect, it } from "vitest";
+import { dropWrappers, imgAttributes, parseToolsGallery, youtubeToTokens, youtubeUrl } from "./mdx-jsx.mjs";
+
+describe("dropWrappers", () => {
+	it("drops wrapper tags and widgets, keeps their children", () => {
+		const src = [
+			"<MDXTemplate> ",
+			"[Twitter](https://twitter.com/x) <TwitterFollowButton username=\"x\" size=\"large\" />",
+			'<AlignedText align="right">',
+			"> quote",
+			"</AlignedText>",
+			"</MDXTemplate>",
+			"<style>",
+			"{`",
+			"  .tools-gallery { margin-top: 2rem; }",
+			"`}",
+			"</style> ",
+		].join("\n");
+		expect(dropWrappers(src).split("\n").filter((l) => l.trim())).toEqual(["[Twitter](https://twitter.com/x)", "> quote"]);
+	});
+});
+
+describe("youtubeToTokens", () => {
+	it("replaces single- and multi-line YouTube tags with numbered tokens", () => {
+		const src = '<YouTube youTubeId="SKS-URw9a18" />\n- item\n      <YouTube youTubeId="xul4nDHvxgg" skipTo={{\n    h: 0,\n    m: 10,\n    s: 44\n  }} />\n';
+		const { body, videos } = youtubeToTokens(src);
+		expect(body).toBe("%%youtube:0%%\n- item\n      %%youtube:1%%\n");
+		expect(videos).toEqual([
+			{ id: "SKS-URw9a18", start: 0 },
+			{ id: "xul4nDHvxgg", start: 644 },
+		]);
+		expect(youtubeUrl(videos[1])).toBe("https://www.youtube.com/watch?v=xul4nDHvxgg&t=644s");
+		expect(youtubeUrl(videos[0])).toBe("https://www.youtube.com/watch?v=SKS-URw9a18");
+	});
+	it("fails on a YouTube tag without a valid id", () => {
+		expect(() => youtubeToTokens('<YouTube youTubeId="short" />')).toThrow(/valid youTubeId/);
+	});
+});
+
+describe("parseToolsGallery", () => {
+	it("turns each tool-category into a title and its tools", () => {
+		const html = `
+  <div className="tool-category">
+    <h3>AI Agents</h3>
+    <div className="tools-grid">
+      <a href="https://www.coze.com/" target="_blank" title="AI Agent">
+        <Image img={CozeStore} className="tool-image" />
+        <span>Coze</span>
+      </a>
+    </div>
+  </div>
+  <div className="tool-category">
+    <h3>Knowledge Base | RAG</h3>
+    <div className="tools-grid">
+      <a href="https://www.notion.so/product/ai" target="_blank" title="笔记之王">
+        <div className="svg-container">
+          <NotionSvg width="100" height="100" />
+        </div>
+        <span>Notion AI</span>
+      </a>
+    </div>
+  </div>`;
+		const img = (name) => ({ CozeStore: "/img/coze/coze_store.png", NotionSvg: "/img/rag/notion.svg" })[name] ?? "";
+		expect(parseToolsGallery(html, img)).toEqual([
+			{ title: "AI Agents", tools: [{ name: "Coze", tagline: "AI Agent", logo: "/img/coze/coze_store.png", url: "https://www.coze.com/", featured: false }] },
+			{
+				title: "Knowledge Base | RAG",
+				tools: [{ name: "Notion AI", tagline: "笔记之王", logo: "/img/rag/notion.svg", url: "https://www.notion.so/product/ai", featured: false }],
+			},
+		]);
+	});
+});
+
+describe("imgAttributes", () => {
+	it("reads src and alt", () => {
+		expect(imgAttributes('<img src="/img/a.svg" alt="A" width="100">')).toEqual({ src: "/img/a.svg", alt: "A" });
+	});
+});
+```
+
+`scripts/lib/mdx-to-pt.test.mjs`：应用下面的 diff（`git apply`），在文件末尾加一组 `convertMdx: legacy JSX (Task 7)` 测试：
+
+```diff
+--- a/scripts/lib/mdx-to-pt.test.mjs
++++ b/scripts/lib/mdx-to-pt.test.mjs
+@@ -124,3 +124,92 @@
+ 		expect(keys(mdxToBlocks(src, { path: "a/other.mdx" }).blocks)).not.toEqual(first);
+ 	});
+ });
++
++describe("convertMdx: legacy JSX (Task 7)", () => {
++	const body = (src) => convertMdx(src, { path: "a/b.mdx" }).data.body;
++	const shape = (blocks) => blocks.map((b) => (b._type === "block" ? `${b.listItem ?? b.style}:${b.children.map((c) => c.text).join("").trim()}` : b._type));
++	it("turns prose images into image blocks after their text block", () => {
++		const src = "import logo from '/img/logo.png';\nimport ASvg from '/img/a.svg';\n\nText ![x](/img/x.png) more\n\n<Image img={logo} />\n\n<ASvg width={100} />\n";
++		const blocks = body(src);
++		expect(shape(blocks)).toEqual(["normal:Text  more", "image", "image", "image"]);
++		expect(blocks.filter((b) => b._type === "image").map((b) => b.asset.url)).toEqual(["/img/x.png", "/img/logo.png", "/img/a.svg"]);
++		expect(blocks[1]).toMatchObject({ asset: { _ref: "", url: "/img/x.png" }, alt: "x" });
++	});
++	it("keeps the image out of a styled wrapper div", () => {
++		const src = "import PosterSvg from '/img/p.svg';\n\n<div style={{textAlign: 'center'}}>\n  <PosterSvg style={{maxWidth: '100%'}}/>\n</div>\n";
++		expect(body(src)).toMatchObject([{ _type: "image", asset: { url: "/img/p.svg" }, alt: "PosterSvg" }]);
++	});
++	it("turns YouTube into an embed in prose and a link inside a block body", () => {
++		const src = [
++			'<YouTube youTubeId="SKS-URw9a18" />',
++			"",
++			"- item one",
++			'      <YouTube youTubeId="LslC2nKEEGU" />',
++			"- item two",
++			"",
++			":::tip T",
++			'<YouTube youTubeId="trXPfpV5iRQ" />',
++			":::",
++		].join("\n");
++		const blocks = body(src);
++		expect(shape(blocks)).toEqual(["embed", "bullet:item one", "embed", "bullet:item two", "callout"]);
++		expect(blocks[0].url).toBe("https://www.youtube.com/watch?v=SKS-URw9a18");
++		expect(blocks[4].body).toBe("[YouTube](https://www.youtube.com/watch?v=trXPfpV5iRQ)");
++	});
++	it("moves an admonition inside a list item to a callout after the item, numbering continues", () => {
++		const blocks = body("1. Copilot\n   :::tip\n   Future\n   :::\n2. Cursor\n");
++		expect(shape(blocks)).toEqual(["number:Copilot", "callout", "number:Cursor"]);
++		expect(blocks[1]).toMatchObject({ tone: "tip", body: "Future" });
++		expect([blocks[0].listStart, blocks[2].listStart]).toEqual([1, 2]);
++		expect(blocks[0].listId).toBe(blocks[2].listId);
++	});
++	it("flattens Tabs inside details into bold labels and code fences", () => {
++		const src = [
++			"<details>",
++			"<summary>Code</summary>",
++			"  <Tabs>",
++			'    <TabItem value="java" label="Java">',
++			"    ```java",
++			"    class A {}",
++			"    ```",
++			"    </TabItem>",
++			'    <TabItem value="py" label="Python">',
++			"    ```python",
++			"    a = 1",
++			"    ```",
++			"    </TabItem>",
++			"  </Tabs>",
++			"</details>",
++		].join("\n");
++		const [details] = body(src);
++		expect(details).toMatchObject({ _type: "details", summary: "Code" });
++		expect(details.body).toBe("**Java**\n\n```java\nclass A {}\n```\n\n**Python**\n\n```python\na = 1\n```");
++	});
++	it("turns the tools gallery into one tool_grid per category and drops its style", () => {
++		const src = [
++			"import Zapier from '/img/zapier/zapier_apps.png';",
++			"",
++			'<div className="tools-gallery">',
++			'  <div className="tool-category">',
++			"    <h3>AI Agents</h3>",
++			'    <a href="https://zapier.com/" target="_blank" title="Workflow Automation">',
++			'      <Image img={Zapier} className="tool-image" />',
++			"      <span>Zapier</span>",
++			"    </a>",
++			"  </div>",
++			"</div>",
++			"",
++			"<style>",
++			"{`",
++			"  .tools-gallery { margin-top: 2rem; }",
++			"`}",
++			"</style>",
++		].join("\n");
++		expect(body(src)).toMatchObject([
++			{ _type: "tool_grid", title: "AI Agents", logo_size: 100, tools: [{ name: "Zapier", logo: "/img/zapier/zapier_apps.png", tagline: "Workflow Automation" }] },
++		]);
++	});
++	it("fails on raw HTML it has no rule for", () => {
++		expect(() => body('<iframe src="https://x.example"></iframe>\n')).toThrow(/unsupported HTML in prose/);
++	});
++});
+```
+
+Create `scripts/lib/legacy-convert.test.mjs`（迁移 gate）：
+
+```js
+// Gate for the migration (plan 2 Task 7): every legacy doc and post converts without errors, into blocks the
+// save hook accepts (packages/web9-blocks/lib/pt-guard.mjs), with no MDX left over as visible text.
+// Runs only while legacy/ exists; plan 3 deletes both together.
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+import { guardPortableText } from "../../packages/web9-blocks/lib/pt-guard.mjs";
+import { mdxToBlocks } from "./mdx-to-pt.mjs";
+
+const ROOTS = ["legacy/docs", "legacy/i18n/zh-CN/docusaurus-plugin-content-docs/current", "legacy/blog"];
+const walk = (dir) =>
+	readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+		e.isDirectory() ? walk(path.join(dir, e.name)) : /\.mdx?$/.test(e.name) ? [path.join(dir, e.name)] : [],
+	);
+
+/** Every string in a block except code and Mermaid source, where JSX-like text is legitimate. */
+function strings(value, key = "", out = []) {
+	if (typeof value === "string") {
+		if (key !== "code") out.push(value);
+	} else if (Array.isArray(value)) value.forEach((v) => strings(v, key, out));
+	else if (value && typeof value === "object") for (const [k, v] of Object.entries(value)) strings(v, k, out);
+	return out;
+}
+const LEFTOVER = [/<[A-Z][A-Za-z]*\b/, /<\/?(?:Tabs|TabItem|details|summary|style)\b/, /%%(?:youtube|callout):/, /::::/];
+// Markdown bodies render `:::tone` at the start of a line (markdown.mjs); prose text and indented ones do not.
+const leftoverFor = (block) => (block._type === "block" ? [...LEFTOVER, /:::/] : [...LEFTOVER, /^[ \t]+:::/m]);
+
+describe.skipIf(!existsSync("legacy/docs"))("legacy content converts cleanly", () => {
+	const files = ROOTS.flatMap(walk);
+	const results = files.map((file) => ({ file, ...mdxToBlocks(readFileSync(file, "utf8"), { path: file }) }));
+	const count = (type) => results.reduce((n, r) => n + r.blocks.filter((b) => b._type === type).length, 0);
+
+	it("finds 26 en docs, 9 zh-CN docs and 2 posts", () => {
+		expect(files.map((f) => ROOTS.find((r) => f.startsWith(r)))).toEqual([...Array(26).fill(ROOTS[0]), ...Array(9).fill(ROOTS[1]), ...Array(2).fill(ROOTS[2])]);
+	});
+	it("emits no htmlBlock and only blocks the save hook accepts", () => {
+		expect(count("htmlBlock")).toBe(0);
+		expect(results.flatMap((r) => guardPortableText(r.blocks).map((p) => `${r.file}: ${p}`))).toEqual([]);
+	});
+	it("leaves no MDX in visible text", () => {
+		const found = results.flatMap(({ file, blocks }) =>
+			blocks.flatMap((b, i) =>
+				b._type === "mermaid" ? [] : strings(b).flatMap((s) => leftoverFor(b).filter((re) => re.test(s)).map((re) => `${file} #${i} ${b._type}: ${re}`)),
+			),
+		);
+		expect(found).toEqual([]);
+	});
+	it("keeps the known media and widget counts", () => {
+		// 10 YouTube tags: 8 in prose become embeds, 2 inside tab bodies become links (en 00_guide)
+		expect(count("embed")).toBe(8);
+		// 8 tool tables in 01_ai_hot_tools + 8 gallery categories in 01_tools-summary (27 tools)
+		expect(count("tool_grid")).toBe(16);
+		expect(count("image")).toBe(39);
+	});
+});
+```
+
+- [ ] **Step 3: 跑测试，确认失败**
+
+Run: `npx vitest run scripts/lib/`
+Expected: FAIL：`mdx-jsx.mjs` 不存在；`legacy-convert.test.mjs` 报 `htmlBlock` 14 个、guard 问题和残留 JSX。
+
+- [ ] **Step 4: 实现**
+
+Create `scripts/lib/mdx-jsx.mjs`：
+
+```js
+// String passes over the MDX body for the legacy JSX that has no block of its own
+// (research p2-research-5-legacy.md §5d). They run before the line scanner in mdx-to-pt.mjs.
+
+/** Wrappers and widgets that carry no content of their own: the tags go, their children stay. */
+export function dropWrappers(body) {
+	return (
+		body
+			.replace(/^[ \t]*<\/?MDXTemplate>[ \t]*$/gm, "") // mdx-embed context provider
+			.replace(/^[ \t]*<\/?AlignedText\b[^>]*>[ \t]*$/gm, "") // its only use wraps a quote, which stays a blockquote
+			.replace(/[ \t]*<TwitterFollowButton\b[^>]*\/>/g, "") // always right after a Twitter link, which stays
+			.replace(/<style>\s*\{?`[\s\S]*?`\}?\s*<\/style>/g, "") // page-local CSS of the tools gallery
+	);
+}
+
+/**
+ * `<YouTube youTubeId="ID" skipTo={{ h, m, s }} />` (may span lines) -> `%%youtube:N%%`, a one-line token
+ * with no Markdown meaning. `videos[N]` holds { id, start }. The scanner turns tokens in prose into embed
+ * blocks and tokens in Markdown bodies (callout, details, tabs) into links.
+ */
+export function youtubeToTokens(body) {
+	const videos = [];
+	const out = body.replace(/<YouTube\b([\s\S]*?)\/>/g, (all, attrs) => {
+		const id = /youTubeId=["']([\w-]{11})["']/.exec(attrs)?.[1];
+		if (!id) throw new Error(`YouTube without a valid youTubeId: ${all.slice(0, 80)}`);
+		const part = (unit) => Number(new RegExp(`\\b${unit}:\\s*(\\d+)`).exec(attrs)?.[1] ?? 0);
+		videos.push({ id, start: part("h") * 3600 + part("m") * 60 + part("s") });
+		return `%%youtube:${videos.length - 1}%%`;
+	});
+	return { body: out, videos };
+}
+
+export const YOUTUBE_TOKEN = /%%youtube:(\d+)%%/g;
+
+export const youtubeUrl = ({ id, start }) => `https://www.youtube.com/watch?v=${id}${start ? `&t=${start}s` : ""}`;
+
+/**
+ * The tools gallery (`<div className="tools-gallery">`, only in 88-usecase/01_tools-summary.mdx) -> one entry
+ * per `tool-category`: { title: <h3>, tools: [{ name: <span>, url: href, tagline: title attribute, logo }] }.
+ * `img(name)` resolves an image import (`<Image img={X}>` or `<XSvg … />`) to its URL.
+ */
+export function parseToolsGallery(html, img) {
+	return html
+		.split(/<div className="tool-category">/)
+		.slice(1)
+		.map((category) => ({
+			title: /<h3>([\s\S]*?)<\/h3>/.exec(category)?.[1].trim() ?? "",
+			tools: [...category.matchAll(/<a\s+([^>]*)>([\s\S]*?)<\/a>/g)].map(([, attrs, inner]) => ({
+				name: /<span>([\s\S]*?)<\/span>/.exec(inner)?.[1].trim() ?? "",
+				tagline: /title="([^"]*)"/.exec(attrs)?.[1] ?? "",
+				logo: img(/<Image\s+img=\{(\w+)\}/.exec(inner)?.[1] ?? /<(\w+(?:Svg|Png))\b/.exec(inner)?.[1] ?? ""),
+				url: /href="([^"]+)"/.exec(attrs)?.[1] ?? "",
+				featured: false,
+			})),
+		}));
+}
+
+/** src/alt/width/height of an `<img …>` tag. */
+export function imgAttributes(tag) {
+	const attr = (name) => new RegExp(`\\b${name}="([^"]*)"`).exec(tag)?.[1];
+	return { src: attr("src") ?? "", alt: attr("alt") ?? "" };
+}
+```
+
+`scripts/lib/mdx-to-pt.mjs`：应用下面的 diff（`git apply`，基于 Task 6 之后的版本）。改动点：文件头的映射表；导入 `mdx-jsx.mjs`；扫描前跑 `dropWrappers` 和 `youtubeToTokens`；`bodyMarkdown`（块正文里的视频变链接）；`media` 收集器和 `mediaBlocks()`（图片、视频、列表项里的 callout 在段落 / 列表项之后输出）；`listToBlocks` 的 `listId`/`listStart`；block 级 HTML 只接受图片，其他抛错；`tabsToMarkdown`；tools-gallery 分支；缩进 admonition 分支：
+
+```diff
+--- a/scripts/lib/mdx-to-pt.mjs
++++ b/scripts/lib/mdx-to-pt.mjs
+@@ -8,13 +8,20 @@
+ //   ```mermaid                      -> mermaid
+ //   <InvestmentWarning />           -> investment_warning
+ //   tables with logos/images        -> tool_grid; text-only tables -> core `table`
++//   <div className="tools-gallery"> -> one tool_grid per category
++//   <YouTube youTubeId>             -> core `embed` (prose) or a Markdown link (inside a block body)
++//   images in prose                 -> core `image` blocks after the text block they were in
++//   <Tabs> inside <details>         -> bold tab labels + the tab bodies, in the details Markdown
++//   <MDXTemplate>, <AlignedText>, <TwitterFollowButton>, <style> -> dropped (children kept)
+ //   everything else (prose)         -> standard Portable Text via the marked lexer
++// Any other raw HTML in prose is an error: the site rejects htmlBlock on save (spec §10).
+ //
+ // Output is deterministic: block keys come from the slug and the traversal order (fnv1a), so the
+ // same source always gives the same JSON and the migration runner can skip unchanged entries.
+ 
+ import { marked } from "marked";
+ import { parseFrontmatter } from "./frontmatter.mjs";
++import { YOUTUBE_TOKEN, dropWrappers, imgAttributes, parseToolsGallery, youtubeToTokens, youtubeUrl } from "./mdx-jsx.mjs";
+ 
+ /** 32-bit FNV-1a; no dependencies, same result in Node and workerd. */
+ export function fnv1a(str) {
+@@ -129,6 +136,9 @@
+ 	});
+ 	body = body.replace(/^import\s+.*$/gm, "");
+ 	const img = (name) => images[name] ?? "";
++	body = dropWrappers(body);
++	const { body: withTokens, videos } = youtubeToTokens(body);
++	body = withTokens;
+ 
+ 	/** Rewrite MDX/JSX inline constructs into plain Markdown/HTML. */
+ 	function mdxToMarkdown(text) {
+@@ -148,6 +158,17 @@
+ 		return rewriteLinks(markdown, rewriteHref);
+ 	}
+ 
++	/** Markdown for a block body (callout, details, tabs): videos become links, there is no block to put them in. */
++	const bodyMarkdown = (text) => mdxToMarkdown(text).replace(YOUTUBE_TOKEN, (_, n) => `[YouTube](${youtubeUrl(videos[n])})`);
++
++	/** Docusaurus Tabs inside Markdown: each tab becomes `**label**` + its dedented content (no label for a single tab). */
++	function tabsToMarkdown(text) {
++		return text.replace(/^[ \t]*<Tabs\b[\s\S]*?^[ \t]*<\/Tabs>[ \t]*$/gm, (jsx) => {
++			const { tabs } = parseTabs(jsx);
++			return tabs.map((t) => `${tabs.length > 1 ? `**${t.label}**\n\n` : ""}${dedent(t.content)}`).join("\n\n");
++		});
++	}
++
+ 	function dedent(text) {
+ 		const lines = text.replace(/\t/g, "  ").split("\n");
+ 		const indents = lines.filter((l) => l.trim()).map((l) => l.match(/^ */)[0].length);
+@@ -156,9 +177,29 @@
+ 	}
+ 
+ 	// ---------------------------------------------------------------- Markdown -> Portable Text
++	// Portable Text has no inline images or videos: inlineToSpans collects them here and they are emitted
++	// as blocks right after the text block (or list item) they were in.
++	// Indented admonitions inside list items (`  :::tip`) take the same route: callouts after the item.
++	const media = [];
++	const nestedCallouts = [];
++	const mediaBlocks = () =>
++		media.splice(0).map((m) => {
++			if (m.video) return { _type: "embed", _key: key(), url: youtubeUrl(m.video) };
++			if (m.callout) return { _type: "callout", _key: key(), ...m.callout };
++			return { _type: "image", _key: key(), asset: { _ref: "", url: m.src }, alt: m.alt };
++		});
++	const hasText = (block) => block.children.some((c) => c.text.trim());
++
+ 	function inlineToSpans(tokens = [], markDefs, marks = []) {
+ 		const spans = [];
+ 		const push = (text, m = marks) => text && spans.push({ _type: "span", _key: key(), text, marks: [...m] });
++		const pushText = (text) =>
++			text.split(/(%%(?:youtube|callout):\d+%%)/).forEach((part) => {
++				const token = /^%%(youtube|callout):(\d+)%%$/.exec(part);
++				if (token?.[1] === "youtube") media.push({ video: videos[token[2]] });
++				else if (token) media.push({ callout: nestedCallouts[token[2]] });
++				else push(part);
++			});
+ 		for (const t of tokens) {
+ 			switch (t.type) {
+ 				case "strong":
+@@ -183,14 +224,16 @@
+ 					push("\n");
+ 					break;
+ 				case "html":
+-					push(/^<br\s*\/?>$/i.test(t.raw.trim()) ? "\n" : t.raw);
++					if (/^<br\s*\/?>$/i.test(t.raw.trim())) push("\n");
++					else if (/^<img\s/i.test(t.raw.trim())) media.push(imgAttributes(t.raw));
++					else push(t.raw);
+ 					break;
+ 				case "image":
+-					push(t.text || "image");
++					media.push({ src: t.href, alt: t.text ?? "" });
+ 					break;
+ 				case "text":
+ 					if (t.tokens?.length) spans.push(...inlineToSpans(t.tokens, markDefs, marks));
+-					else push(t.text);
++					else pushText(t.text);
+ 					break;
+ 				default:
+ 					push(t.raw ?? "");
+@@ -206,13 +249,22 @@
+ 		return { _type: "block", _key: key(), style: "normal", markDefs, children, ...extra };
+ 	};
+ 
++	// Numbered items carry listId + listStart (their own number) so a list split by an image, video or
++	// callout keeps counting instead of restarting at 1 (emdash/src/content/portable-text-lists.ts).
++	let listSeq = 0;
+ 	function listToBlocks(list, level = 1) {
+ 		const out = [];
+-		for (const item of list.items) {
++		const listId = list.ordered ? `${slug}:list-${listSeq++}` : undefined;
++		const start = Number(list.start) || 1;
++		for (const [n, item] of list.items.entries()) {
++			const extra = list.ordered ? { listItem: "number", level, listId, listStart: start + n } : { listItem: "bullet", level };
+ 			for (const t of item.tokens) {
+ 				if (t.type === "list") out.push(...listToBlocks(t, level + 1));
+-				else if (t.type === "text" || t.type === "paragraph")
+-					out.push(textBlock(t.tokens ?? [t], { listItem: list.ordered ? "number" : "bullet", level }));
++				else if (t.type === "text" || t.type === "paragraph") {
++					const block = textBlock(t.tokens ?? [t], extra);
++					if (hasText(block) || !media.length) out.push(block);
++					out.push(...mediaBlocks());
++				}
+ 			}
+ 		}
+ 		return out;
+@@ -241,9 +293,11 @@
+ 				case "heading":
+ 					blocks.push(textBlock(t.tokens, { style: `h${t.depth}` }));
+ 					break;
+-				case "paragraph":
+-					blocks.push(textBlock(t.tokens));
++				case "paragraph": {
++					const block = textBlock(t.tokens);
++					if (hasText(block) || !media.length) blocks.push(block);
+ 					break;
++				}
+ 				case "list":
+ 					blocks.push(...listToBlocks(t));
+ 					break;
+@@ -259,14 +313,21 @@
+ 				case "table":
+ 					blocks.push(tableToCoreTable(t));
+ 					break;
+-				case "html":
+-					if (t.raw.trim()) blocks.push({ _type: "htmlBlock", _key: key(), html: t.raw.trim() });
++				case "html": {
++					// Only images (possibly in a styled wrapper div) are allowed; anything else needs a converter rule.
++					const html = t.raw.trim();
++					const tags = html.match(/<img\s[^>]*>/gi) ?? [];
++					const rest = html.replace(/<img\s[^>]*>/gi, "").replace(/<\/?(?:div|p|center)\b[^>]*>/gi, "").replace(/<br\s*\/?>/gi, "");
++					if (rest.trim()) throw new Error(`${path}: unsupported HTML in prose: ${html.slice(0, 120)}`);
++					for (const tag of tags) media.push(imgAttributes(tag));
+ 					break;
++				}
+ 				case "space":
+ 					break;
+ 				default:
+ 					console.error(`[convert] unhandled markdown token: ${t.type}`);
+ 			}
++			blocks.push(...mediaBlocks());
+ 		}
+ 		return blocks;
+ 	}
+@@ -354,14 +415,14 @@
+ 			flush();
+ 			const [inner, end] = collectUntil(i + 1, /^:{3,4}(?:\w+.*)?\s*$/);
+ 			i = /^::::\s*$/.test(lines[end] ?? "") ? end : end - 1;
+-			blocks.push({ _type: "callout", _key: key(), tone: m[1], title: m[2].trim(), body: mdxToMarkdown(dedent(inner.join("\n"))) });
++			blocks.push({ _type: "callout", _key: key(), tone: m[1], title: m[2].trim(), body: bodyMarkdown(dedent(inner.join("\n"))) });
+ 		} else if (/^::::\s*$/.test(line)) {
+ 			// closing line of a 4-colon admonition whose nested callout was emitted separately
+ 		} else if ((m = line.match(/^:::(\w+)[ \t]*(.*)$/))) {
+ 			flush();
+ 			const [inner, end] = collectUntil(i + 1, /^:::\s*$/);
+ 			i = end;
+-			blocks.push({ _type: "callout", _key: key(), tone: m[1], title: m[2].trim(), body: mdxToMarkdown(dedent(inner.join("\n"))) });
++			blocks.push({ _type: "callout", _key: key(), tone: m[1], title: m[2].trim(), body: bodyMarkdown(dedent(inner.join("\n"))) });
+ 		} else if (/^\s*<details>/.test(line)) {
+ 			flush();
+ 			const [inner, end] = collectUntil(i + 1, /^\s*<\/details>/);
+@@ -369,7 +430,15 @@
+ 			const joined = inner.join("\n");
+ 			const summary = joined.match(/<summary>([\s\S]*?)<\/summary>/)?.[1].trim() ?? "Details";
+ 			const rest = joined.replace(/<summary>[\s\S]*?<\/summary>/, "").replace(/^\s*<\/?div>\s*$/gm, "");
+-			blocks.push({ _type: "details", _key: key(), summary, body: mdxToMarkdown(dedent(rest)) });
++			// A details body is Markdown, so Tabs inside it become bold labels followed by each tab's content
++			blocks.push({ _type: "details", _key: key(), summary, body: bodyMarkdown(tabsToMarkdown(dedent(rest))) });
++		} else if (/^\s*<div className="tools-gallery">/.test(line)) {
++			flush();
++			const [inner, end] = collectUntil(i + 1, /^<\/div>\s*$/);
++			i = end;
++			for (const { title, tools } of parseToolsGallery(inner.join("\n"), img)) {
++				blocks.push({ _type: "tool_grid", _key: key(), title, tools, logo_size: 100 });
++			}
+ 		} else if (/^\s*<FullscreenWrapper>/.test(line)) {
+ 			fullscreen = true;
+ 		} else if (/^\s*<\/FullscreenWrapper>/.test(line)) {
+@@ -382,7 +451,7 @@
+ 			blocks.push({
+ 				_type: "tabs",
+ 				_key: key(),
+-				tabs: tabs.map((t) => ({ label: t.label, body: mdxToMarkdown(dedent(t.content)) })),
++				tabs: tabs.map((t) => ({ label: t.label, body: bodyMarkdown(dedent(t.content)) })),
+ 				default_tab: defaultIndex + 1,
+ 				fullscreen,
+ 			});
+@@ -404,6 +473,12 @@
+ 			const [inner, end] = collectUntil(i, /^(?!\s*\|)/);
+ 			i = end - 1;
+ 			blocks.push(tableToBlock(inner));
++		} else if ((m = line.match(/^(\s+):::(\w+)[ \t]*(.*)$/))) {
++			// Indented admonition (inside a list item): becomes a callout right after that item
++			const [inner, end] = collectUntil(i + 1, /^\s*:::\s*$/);
++			i = end;
++			nestedCallouts.push({ tone: m[2], title: m[3].trim(), body: bodyMarkdown(dedent(inner.join("\n"))) });
++			prose.push(`${m[1]}%%callout:${nestedCallouts.length - 1}%%`);
+ 		} else {
+ 			prose.push(line);
+ 		}
+```
+
+- [ ] **Step 5: 跑测试，确认通过**
+
+Run: `npm test`
+Expected: PASS（包括 `legacy-convert.test.mjs` 的 4 个用例；hot-tools golden test 不变，51 个块）。
+
+- [ ] **Step 6: 🚦 抽查渲染**
+
+把三个最复杂的页面转出来，用探针 slug 发布，看页面（dev 在运行）：
+
+```bash
+for pair in "legacy/docs/dev/23_learn_ai_coding.mdx probe-learn-ai-coding" "legacy/docs/ai/88-usecase/00_guide.mdx probe-guide" "legacy/docs/ai/88-usecase/01_tools-summary.mdx probe-tools-summary"; do
+  f=${pair% *}; s=${pair#* }
+  node scripts/convert-mdx.mjs "$f" --slug "$s" --category probe --order 999999 > ".local/$s.json"
+  node -e 'const f=process.argv[1]; const p=JSON.parse(require("fs").readFileSync(f,"utf8")); p.locale="en"; p.status="published"; require("fs").writeFileSync(f, JSON.stringify(p));' ".local/$s.json"
+  node scripts/mcp.mjs content_create @".local/$s.json" > /dev/null; echo "$s exit=$?"
+done
+node scripts/check-page.mjs http://localhost:4321/docs/probe-learn-ai-coding '<pre' 'src="/img/dev/23/' --absent '&lt;TabItem' --absent '&lt;Tabs'
+node scripts/check-page.mjs http://localhost:4321/docs/probe-guide 'youtube-nocookie.com/embed/LslC2nKEEGU' 'ai.com is no longer redirected' --absent ':::warning' --absent '&lt;YouTube'
+node scripts/check-page.mjs http://localhost:4321/docs/probe-tools-summary 'data-w9-tools' 'Notion AI' 'src="/img/rag/notion.svg"' --absent 'tools-gallery'
+```
+
+Expected：三个 `exit=0`，三个 `check-page` 通过。再用 CDP（page 8）`navigate_page` 到这三个页面各 `take_screenshot` 一次，确认：`learn-ai-coding` 的 details 展开后是带语言标签的代码块；`guide` 的视频是播放器、列表编号连续；`tools-summary` 是 8 组卡片。
+
+清理（三篇探针都删掉）：
+
+```bash
+for s in probe-learn-ai-coding probe-guide probe-tools-summary; do node scripts/mcp.mjs content_delete "{\"collection\":\"docs\",\"id\":\"$s\"}" && node scripts/mcp.mjs content_permanent_delete "{\"collection\":\"docs\",\"id\":\"$s\"}"; done
+node scripts/mcp.mjs content_list '{"collection":"docs"}'
+```
+
+Expected：列表为空。
+
+- [ ] **Step 7: 更新 spec**
+
+- §6 第一条后面加："prose 里的图片迁移成 core `image` 块，`asset.url` 直接是 `/img/...`（`_ref` 为空），不进媒体库（计划 2 Task 7）。12 张外链图片（cloudinary、lambdalabs 等）保持外链，风险不变。"
+- §7 在"正式使用前要修两个问题"的列表后面加一条："**计划 2 补齐的转换规则（Task 6–7）**：key 由 slug 和遍历顺序决定（FNV-1a），输出可重复；标题 = frontmatter `title` ?? 第一个 H1，第一个 H1 总是从正文删掉；InvestmentWarning 的语言看 import；4 冒号 admonition 拆成两个 callout；图片 → core `image`；YouTube → core `embed`（块正文里是链接）；tools-gallery → `tool_grid`；details 里的 Tabs → 粗体标签 + 代码块；列表项里的 admonition → 该项之后的 callout；有序列表带 `listId`/`listStart` 续号；`MDXTemplate`、`AlignedText`、`TwitterFollowButton`、`<style>` 去掉标签；其他 raw HTML 直接报错，转换器不再产出 `htmlBlock`。gate：`scripts/lib/legacy-convert.test.mjs`。"
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add scripts/lib/mdx-jsx.mjs scripts/lib/mdx-jsx.test.mjs scripts/lib/legacy-convert.test.mjs scripts/lib/mdx-to-pt.mjs scripts/lib/mdx-to-pt.test.mjs docs/superpowers/specs/2026-10-15-emdash-migration-design.md
+git commit -m "feat(convert): images, YouTube embeds, tools gallery, tabs in details, nested admonitions, list numbering; no more htmlBlock
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
+```
+
+---
