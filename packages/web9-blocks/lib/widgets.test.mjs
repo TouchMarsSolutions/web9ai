@@ -62,9 +62,73 @@ describe("widgetAreaIsSafe", () => {
 		expect(widgetAreaIsSafe({ widgets: [null] })).toBe(false);
 	});
 	it("rejects a menu widget whose menuName is not a string", () => {
-		for (const menuName of [undefined, null, 5, ["primary"], {}]) expect(widgetAreaIsSafe({ widgets: [{ id: "m", type: "menu", menuName }] })).toBe(false);
+		for (const menuName of [5, ["primary"], {}, true]) expect(widgetAreaIsSafe({ widgets: [{ id: "m", type: "menu", menuName }] })).toBe(false);
 	});
 	it("fails the whole area when one widget is bad among good ones", () => {
 		expect(widgetAreaIsSafe({ widgets: [...area("sidebar").widgets, { id: "x", type: "component", componentId: "constructor" }] })).toBe(false);
+	});
+	it("allows a menu widget without a menuName (the admin palette creates it that way)", () => {
+		expect(widgetAreaIsSafe({ widgets: [{ id: "m", type: "menu" }] })).toBe(true);
+		expect(widgetAreaIsSafe({ widgets: [{ id: "m", type: "menu", menuName: null }] })).toBe(true);
+	});
+	it("allows only blocks in a content widget, each passing the block rules", () => {
+		const link = { _type: "block", _key: "l", style: "normal", markDefs: [{ _type: "link", _key: "k1", href: "https://example.com" }], children: [{ _type: "span", _key: "s", text: "a", marks: ["k1"] }] };
+		expect(widgetAreaIsSafe(withContent([paragraph, link]))).toBe(true);
+		for (const node of [
+			{ _type: "buttons", _key: "b", buttons: null },
+			{ _type: "tabs", _key: "t", tabs: [null] },
+			{ _type: "callout", _key: "c", tone: "tip", title: "t", body: "b" },
+			{ _type: "tool_grid", _key: "g", tools: [] },
+			{ _type: "image", _key: "i", asset: { _ref: "x" } },
+			{ _type: "code", _key: "k", language: "js", code: "x" },
+			{ _type: "table", _key: "t", rows: [] },
+			{ _type: "break", _key: "b" },
+			{ _type: "constructor", markDefs: [null] },
+			{ _key: "x", markDefs: [null] },
+			null,
+			"text",
+		]) {
+			expect(widgetAreaIsSafe(withContent([paragraph, node]))).toBe(false);
+		}
+		expect(widgetAreaIsSafe(withContent([{ ...paragraph, style: "constructor" }]))).toBe(false);
+	});
+	it("checks componentProps against the props each core component declares", () => {
+		const component = (componentId, componentProps) => ({ widgets: [{ id: "c", type: "component", componentId, componentProps }] });
+		expect(widgetAreaIsSafe(component("core:recent-posts", { urlTemplate: 5 }))).toBe(false);
+		expect(widgetAreaIsSafe(component("core:recent-posts", { count: 5, showDate: true }))).toBe(true);
+		expect(widgetAreaIsSafe(component("core:recent-posts", { count: 5, showThumbnails: true, showDate: false, urlTemplate: "/blog/:slug" }))).toBe(true);
+		expect(widgetAreaIsSafe(component("core:recent-posts", "x"))).toBe(false);
+		expect(widgetAreaIsSafe(component("core:recent-posts", ["x"]))).toBe(false);
+		expect(widgetAreaIsSafe(component("core:recent-posts", { count: "5" }))).toBe(false);
+		expect(widgetAreaIsSafe(component("core:recent-posts", { showDate: "yes" }))).toBe(false);
+		expect(widgetAreaIsSafe(component("core:recent-posts", { count: null }))).toBe(false);
+		expect(widgetAreaIsSafe(component("core:recent-posts", { count: 2.5 }))).toBe(false);
+		expect(widgetAreaIsSafe(component("core:recent-posts", { count: 0 }))).toBe(false);
+		expect(widgetAreaIsSafe(component("core:recent-posts", { count: 101 }))).toBe(false);
+		expect(widgetAreaIsSafe(component("core:categories", { showCount: 1 }))).toBe(false);
+		expect(widgetAreaIsSafe(component("core:categories", { showCount: true, hierarchical: false }))).toBe(true);
+		expect(widgetAreaIsSafe(component("core:tags", { limit: Number.NaN }))).toBe(false);
+		expect(widgetAreaIsSafe(component("core:tags", { showCount: true, limit: 20 }))).toBe(true);
+		expect(widgetAreaIsSafe(component("core:search", { placeholder: 5 }))).toBe(false);
+		expect(widgetAreaIsSafe(component("core:search", { placeholder: "Find" }))).toBe(true);
+		expect(widgetAreaIsSafe(component("core:archives", { type: "weekly" }))).toBe(false);
+		expect(widgetAreaIsSafe(component("core:archives", { type: "constructor" }))).toBe(false);
+		expect(widgetAreaIsSafe(component("core:archives", { type: "yearly", limit: 6 }))).toBe(true);
+	});
+	it("ignores unknown props and absent componentProps", () => {
+		const component = (componentProps) => ({ widgets: [{ id: "c", type: "component", componentId: "core:search", componentProps }] });
+		expect(widgetAreaIsSafe(component(undefined))).toBe(true);
+		expect(widgetAreaIsSafe(component(null))).toBe(true);
+		expect(widgetAreaIsSafe(component({}))).toBe(true);
+		expect(widgetAreaIsSafe(component({ somethingElse: { nested: [1] } }))).toBe(true);
+	});
+	it("fails closed instead of throwing", () => {
+		const marks = Array(125000).fill(0);
+		const huge = { _type: "block", _key: "p", style: "normal", markDefs: [], children: [{ _type: "span", _key: "s", text: "a", marks }] };
+		let result;
+		expect(() => (result = widgetAreaIsSafe(withContent([huge])))).not.toThrow();
+		expect(result).toBe(false);
+		expect(widgetAreaIsSafe({ get widgets() { throw new Error("boom"); } })).toBe(false);
+		expect(widgetAreaIsSafe({ widgets: "not an array" })).toBe(false);
 	});
 });

@@ -15,6 +15,12 @@
 // `type` map is empty: a non-block node there is hidden at best, a prototype key crashes. It may hold
 // blocks only, and each is checked like a top-level block (a fixed depth: container -> block -> span).
 // Table cells are normalized by core (normalizePortableTextTable): spans only, decorator or link marks.
+// Output is bounded: collecting stops after MAX_PROBLEMS (plain pushes, never spreads of a long list, which
+// throw RangeError past ~120k items) and ends with MORE, so a hostile value cannot make the guard throw.
+// sanitizeHref (emdash utils/url.ts) throws on a non-string, so every field a core or web9 renderer passes to
+// it must be a string when present: link markDef href (marks/Link.astro:21), button.url (Button.astro:21),
+// buttons[].url (Buttons.astro maps Button), file.url (File.astro:21), embed.url (astro/Embed.astro),
+// tool_grid tools[].url and tools[].logo (astro/ToolGrid.astro:29, :34).
 // Image values (an `image` field, `darkVariant`, PT image and gallery images) are checked for the colour and
 // blurhash fields that core renderers paste into style or decode: a blurhash that does not decode throws.
 import { blurhashToImageCssString } from "@unpic/placeholder";
@@ -40,6 +46,25 @@ const validBlurhash = (v) => {
 	}
 };
 const COLOR_OK = matches(COLOR);
+const STRING = (v) => typeof v === "string";
+
+const MAX_PROBLEMS = 50;
+const MORE = "…and more";
+
+/** Keeps the first MAX_PROBLEMS problems. `full` turns true once one was left out, so loops can stop early. */
+function collector() {
+	const list = [];
+	return {
+		full: false,
+		add(problem) {
+			if (list.length < MAX_PROBLEMS) list.push(problem);
+			else this.full = true;
+		},
+		done() {
+			return this.full ? [...list, MORE] : list;
+		},
+	};
+}
 
 /** Field checks per allowed _type. Paths use `a.b` for nesting and `list[].field` for arrays. */
 const RULES = {
@@ -47,7 +72,7 @@ const RULES = {
 	blockquoteGroup: {},
 	break: {},
 	table: {},
-	file: {},
+	file: { url: STRING },
 	pullquote: {},
 	video: {},
 	image: {
@@ -66,15 +91,15 @@ const RULES = {
 	},
 	columns: { "columns[].width": matches(LENGTH) },
 	cover: { minHeight: matches(MIN_HEIGHT), overlayColor: matches(COLOR), overlayOpacity: numberIn(0, 1), alignment: oneOf("left", "center", "right") },
-	button: { style: BUTTON_STYLE },
-	buttons: { layout: oneOf("horizontal", "vertical"), "buttons[].style": BUTTON_STYLE },
+	button: { style: BUTTON_STYLE, url: STRING },
+	buttons: { layout: oneOf("horizontal", "vertical"), "buttons[].style": BUTTON_STYLE, "buttons[].url": STRING },
 	code: { language: matches(LANGUAGE) },
-	embed: { html: (v) => v === "" }, // web9's Embed renders from url only
+	embed: { html: (v) => v === "", url: STRING }, // web9's Embed renders from url only
 	callout: {},
 	tabs: {},
 	details: {},
 	mermaid: {},
-	tool_grid: { logo_size: numberIn(16, 300) },
+	tool_grid: { logo_size: numberIn(16, 300), "tools[].url": STRING, "tools[].logo": STRING },
 	investment_warning: { lang: oneOf("zh", "en") },
 };
 
@@ -98,15 +123,14 @@ function valuesAt(node, path) {
 	return current.filter((v) => v !== undefined && v !== null);
 }
 
-/** Problems for one node: `path: value ... is not allowed` per failing value. */
-function checkRules(node, rules, prefix = "") {
-	const problems = [];
+/** Adds `path: value ... is not allowed` to `out` per failing value of one node. */
+function checkRules(node, rules, prefix, out) {
 	for (const [path, ok] of Object.entries(rules)) {
 		for (const v of valuesAt(node, path)) {
-			if (!ok(v)) problems.push(`${prefix}${path}: value ${JSON.stringify(v).slice(0, 60)} is not allowed`);
+			if (out.full) return;
+			if (!ok(v)) out.add(`${prefix}${path}: value ${JSON.stringify(v).slice(0, 60)} is not allowed`);
 		}
 	}
-	return problems;
 }
 
 const show = (v) => JSON.stringify(v)?.slice(0, 60) ?? String(v);
@@ -121,37 +145,46 @@ const DECORATORS = new Set(["strong", "em", "underline", "strike-through", "subs
 const MAX_LIST_LEVEL = 20;
 
 /** Block children are rendered as custom types, so anything but a plain span is a way past the type check. */
-function checkBlock(node, where) {
-	const problems = [];
-	if (node.style != null && !BLOCK_STYLES.has(node.style)) problems.push(notAllowed(where, "style", node.style));
-	if (node.listItem != null && !LIST_ITEMS.has(node.listItem)) problems.push(notAllowed(where, "listItem", node.listItem));
-	if (node.level != null && !integerIn(1, MAX_LIST_LEVEL)(node.level)) problems.push(notAllowed(where, "level", node.level));
+function checkBlock(node, where, out) {
+	if (node.style != null && !BLOCK_STYLES.has(node.style)) out.add(notAllowed(where, "style", node.style));
+	if (node.listItem != null && !LIST_ITEMS.has(node.listItem)) out.add(notAllowed(where, "listItem", node.listItem));
+	if (node.level != null && !integerIn(1, MAX_LIST_LEVEL)(node.level)) out.add(notAllowed(where, "level", node.level));
 
 	// The only annotation core renders is link. Keys are what span marks point at: no inherited names.
 	const keys = new Set();
-	if (node.markDefs != null && !Array.isArray(node.markDefs)) problems.push(`${where} markDefs: must be an array`);
+	if (node.markDefs != null && !Array.isArray(node.markDefs)) out.add(`${where} markDefs: must be an array`);
 	else {
-		(node.markDefs ?? []).forEach((def, k) => {
-			if (def?._type !== "link") problems.push(notAllowed(where, `markDefs[${k}]._type`, def?._type));
+		const defs = node.markDefs ?? [];
+		for (let k = 0; k < defs.length && !out.full; k++) {
+			const def = defs[k];
+			if (def?._type !== "link") out.add(notAllowed(where, `markDefs[${k}]._type`, def?._type));
+			else if (typeof def.href !== "string") out.add(notAllowed(where, `markDefs[${k}].href`, def.href));
 			const key = def?._key;
-			if (typeof key !== "string" || !key || key in Object.prototype) problems.push(notAllowed(where, `markDefs[${k}]._key`, key));
+			if (typeof key !== "string" || !key || key in Object.prototype) out.add(notAllowed(where, `markDefs[${k}]._key`, key));
 			else keys.add(key);
-		});
+		}
 	}
 
-	if (node.children === undefined) return problems;
-	if (!Array.isArray(node.children)) return [...problems, `${where} children: must be an array of spans`];
-	node.children.forEach((child, j) => {
+	if (node.children === undefined) return;
+	if (!Array.isArray(node.children)) return out.add(`${where} children: must be an array of spans`);
+	for (let j = 0; j < node.children.length && !out.full; j++) {
+		const child = node.children[j];
 		const type = typeof child?._type === "string" ? child._type : "(no _type)";
-		if (type !== "span") return problems.push(`${where} children[${j}] ${type}: only spans are allowed inside a block`);
-		if (child.children !== undefined && child.children !== null) problems.push(`${where} children[${j}] span: a span must not have children`);
-		if (child.marks == null) return;
-		if (!Array.isArray(child.marks)) return problems.push(`${where} children[${j}].marks: must be an array`);
-		for (const mark of child.marks) {
-			if (typeof mark !== "string" || !(DECORATORS.has(mark) || keys.has(mark))) problems.push(notAllowed(where, `children[${j}].marks`, mark));
+		if (type !== "span") {
+			out.add(`${where} children[${j}] ${type}: only spans are allowed inside a block`);
+			continue;
 		}
-	});
-	return problems;
+		if (child.children !== undefined && child.children !== null) out.add(`${where} children[${j}] span: a span must not have children`);
+		if (child.marks == null) continue;
+		if (!Array.isArray(child.marks)) {
+			out.add(`${where} children[${j}].marks: must be an array`);
+			continue;
+		}
+		for (let m = 0; m < child.marks.length && !out.full; m++) {
+			const mark = child.marks[m];
+			if (typeof mark !== "string" || !(DECORATORS.has(mark) || keys.has(mark))) out.add(notAllowed(where, `children[${j}].marks`, mark));
+		}
+	}
 }
 
 /** Portable Text arrays inside containers: [path, value] pairs, e.g. ["columns[1].content", [...]]. */
@@ -163,50 +196,53 @@ function containerLists(node, type) {
 }
 
 /** Columns.astro maps `columns` and reads column.width, so a non-array or a null column throws. */
-function checkColumns(node, i) {
-	if (node.columns == null) return [];
-	if (!Array.isArray(node.columns)) return [`#${i} columns columns: must be an array of columns`];
-	return node.columns.flatMap((column, k) => (column && typeof column === "object" && !Array.isArray(column) ? [] : [`#${i} columns columns[${k}]: must be an object`]));
+function checkColumns(node, i, out) {
+	if (node.columns == null) return;
+	if (!Array.isArray(node.columns)) return out.add(`#${i} columns columns: must be an array of columns`);
+	for (let k = 0; k < node.columns.length && !out.full; k++) {
+		const column = node.columns[k];
+		if (!column || typeof column !== "object" || Array.isArray(column)) out.add(`#${i} columns columns[${k}]: must be an object`);
+	}
 }
 
-function checkContainers(node, type, i) {
-	const problems = [];
+function checkContainers(node, type, i, out) {
 	for (const [path, list] of containerLists(node, type)) {
 		if (list == null) continue;
 		if (!Array.isArray(list)) {
-			problems.push(`#${i} ${type} ${path}: must be an array`);
+			out.add(`#${i} ${type} ${path}: must be an array`);
 			continue;
 		}
-		list.forEach((child, k) => {
+		for (let k = 0; k < list.length && !out.full; k++) {
+			const child = list[k];
 			const childType = typeof child?._type === "string" ? child._type : "(no _type)";
-			if (childType !== "block") problems.push(`#${i} ${type} ${path}[${k}] ${childType}: only blocks are allowed in container content`);
-			else problems.push(...checkBlock(child, `#${i} ${type} ${path}[${k}] block`));
-		});
+			if (childType !== "block") out.add(`#${i} ${type} ${path}[${k}] ${childType}: only blocks are allowed in container content`);
+			else checkBlock(child, `#${i} ${type} ${path}[${k}] block`, out);
+		}
 	}
-	return problems;
 }
 
 export function guardPortableText(value) {
 	if (!Array.isArray(value)) return [];
-	const problems = [];
-	value.forEach((node, i) => {
+	const out = collector();
+	for (let i = 0; i < value.length && !out.full; i++) {
+		const node = value[i];
 		const type = typeof node?._type === "string" ? node._type : "(no _type)";
 		if (Object.hasOwn(FORBIDDEN, type)) {
-			problems.push(`#${i} ${type}: ${FORBIDDEN[type]}`);
-			return;
+			out.add(`#${i} ${type}: ${FORBIDDEN[type]}`);
+			continue;
 		}
 		if (!Object.hasOwn(RULES, type)) {
-			problems.push(`#${i} ${type}: unknown block type`);
-			return;
+			out.add(`#${i} ${type}: unknown block type`);
+			continue;
 		}
 		// astro-portabletext treats any node with a children array as a block and renders those children inline
-		if (type === "block") problems.push(...checkBlock(node, `#${i} block`));
-		else if (node.children !== undefined && node.children !== null) problems.push(`#${i} ${type} children: only a block may have children`);
-		if (type === "columns") problems.push(...checkColumns(node, i));
-		problems.push(...checkContainers(node, type, i));
-		problems.push(...checkRules(node, RULES[type], `#${i} ${type} `));
-	});
-	return problems;
+		if (type === "block") checkBlock(node, `#${i} block`, out);
+		else if (node.children !== undefined && node.children !== null) out.add(`#${i} ${type} children: only a block may have children`);
+		if (type === "columns") checkColumns(node, i, out);
+		checkContainers(node, type, i, out);
+		checkRules(node, RULES[type], `#${i} ${type} `, out);
+	}
+	return out.done();
 }
 
 /** Colour and placeholder fields of a media value (the `image` field, which also carries `darkVariant`). */
@@ -223,5 +259,7 @@ const IMAGE_VALUE_RULES = {
 
 /** @param {unknown} value an `image` field value; returns problems, empty means OK */
 export function guardImageValue(value) {
-	return checkRules(value, IMAGE_VALUE_RULES);
+	const out = collector();
+	checkRules(value, IMAGE_VALUE_RULES, "", out);
+	return out.done();
 }

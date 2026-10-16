@@ -8,8 +8,10 @@ interface Props {
 	node: { _type: "embed"; _key: string; url?: string; caption?: string };
 }
 const { node } = Astro.props;
-const src = embedSrc(node?.url);
-const href = node?.url ? sanitizeHref(node.url) : "#";
+// sanitizeHref throws on a non-string; the save guard rejects those, this covers rows that bypassed it
+const url = typeof node?.url === "string" ? node.url : "";
+const src = embedSrc(url);
+const href = url ? sanitizeHref(url) : "#";
 const caption = typeof node?.caption === "string" ? node.caption : "";
 ---
 
@@ -31,7 +33,7 @@ const caption = typeof node?.caption === "string" ? node.caption : "";
 		</figure>
 	) : href !== "#" ? (
 		<p class="my-4">
-			<a href={href} rel="noopener noreferrer" target="_blank">{caption || node.url}</a>
+			<a href={href} rel="noopener noreferrer" target="_blank">{caption || url}</a>
 		</p>
 	) : null
 }

@@ -11,8 +11,14 @@ interface Props {
 	class?: string;
 }
 const { name, class: className } = Astro.props;
-const safe = widgetAreaIsSafe(await getWidgetArea(name));
-if (!safe) console.warn(`[web9-blocks] widget area "${name}" holds content the save guard would reject; not rendered`);
+// Any throw (the check, or reading the area) counts as unsafe: this runs on every page
+let safe = false;
+try {
+	safe = widgetAreaIsSafe(await getWidgetArea(name));
+	if (!safe) console.warn(`[web9-blocks] widget area "${name}" holds content the save guard would reject; not rendered`);
+} catch (error) {
+	console.warn(`[web9-blocks] widget area "${name}" could not be checked; not rendered`, error);
+}
 ---
 
 {safe && <WidgetArea name={name} class={className} />}

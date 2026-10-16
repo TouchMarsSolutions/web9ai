@@ -347,3 +347,74 @@ describe("guardPortableText: converter output", () => {
 		expect(guardPortableText(blocks)).toEqual([]);
 	});
 });
+
+describe("guardPortableText: bounded output", () => {
+	const MORE = "…and more";
+	it("does not throw on a span with 125k bad marks and returns at most 50 problems plus a final entry", () => {
+		const blocks = [para({ children: [span("a", Array(125000).fill(0))] })];
+		let problems;
+		expect(() => (problems = guardPortableText(blocks))).not.toThrow();
+		expect(problems).toHaveLength(51);
+		expect(problems[0]).toBe(notAllowed("#0 block", "children[0].marks", 0));
+		expect(problems[50]).toBe(MORE);
+	});
+	it("does not throw on 200k bad children", () => {
+		const blocks = [para({ children: Array.from({ length: 200000 }, () => ({ _type: "cover", _key: "c" })) })];
+		let problems;
+		expect(() => (problems = guardPortableText(blocks))).not.toThrow();
+		expect(problems.length).toBeLessThanOrEqual(51);
+		expect(problems.at(-1)).toBe(MORE);
+	});
+	it("does not throw on 200k bad top-level nodes, markDefs, container blocks or gallery images", () => {
+		const bad = (n, make) => Array.from({ length: n }, make);
+		for (const blocks of [
+			bad(200000, () => ({ _type: "marquee" })),
+			[para({ markDefs: bad(200000, () => ({ _type: "x" })) })],
+			[{ _type: "cover", _key: "c", content: bad(200000, () => ({ _type: "iframe" })) }],
+			[{ _type: "gallery", _key: "g", images: bad(200000, () => ({ blurhash: 1 })) }],
+		]) {
+			let problems;
+			expect(() => (problems = guardPortableText(blocks))).not.toThrow();
+			expect(problems.length).toBeLessThanOrEqual(51);
+			expect(problems.at(-1)).toBe(MORE);
+		}
+	});
+	it("adds the final entry only when problems were left out", () => {
+		const nodes = (n) => Array.from({ length: n }, () => ({ _type: "marquee" }));
+		expect(guardPortableText(nodes(50))).toHaveLength(50);
+		expect(guardPortableText(nodes(50)).includes(MORE)).toBe(false);
+		const fifty1 = guardPortableText(nodes(51));
+		expect(fifty1).toHaveLength(51);
+		expect(fifty1[50]).toBe(MORE);
+	});
+	it("bounds guardImageValue too", () => {
+		expect(guardImageValue({ id: "x", meta: { dominantColor: "x y" } })).toHaveLength(1);
+	});
+});
+
+describe("guardPortableText: string urls (sanitizeHref throws on non-strings)", () => {
+	const one = (node) => guardPortableText([node]);
+	it("requires a string href on a link markDef (marks/Link.astro:21)", () => {
+		const link = (href) => para({ markDefs: [{ _type: "link", _key: "k1", href }], children: [span("a", ["k1"])] });
+		expect(one(link(5))).toEqual([notAllowed("#0 block", "markDefs[0].href", 5)]);
+		expect(one(link({}))).toEqual([notAllowed("#0 block", "markDefs[0].href", {})]);
+		expect(one(link(undefined))).toEqual(["#0 block markDefs[0].href: value undefined is not allowed"]);
+		expect(one(link(["https://example.com"]))).toEqual([notAllowed("#0 block", "markDefs[0].href", ["https://example.com"])]);
+		expect(one(link("https://example.com"))).toEqual([]);
+		expect(one(link(""))).toEqual([]);
+	});
+	it("requires url to be a string when present on button, buttons[], file and embed", () => {
+		expect(one({ _type: "button", _key: "b", url: 5 })).toEqual(["#0 button url: value 5 is not allowed"]);
+		expect(one({ _type: "buttons", _key: "b", buttons: [{ url: "https://example.com" }, { url: {} }] })).toEqual(["#0 buttons buttons[].url: value {} is not allowed"]);
+		expect(one({ _type: "file", _key: "f", url: 5 })).toEqual(["#0 file url: value 5 is not allowed"]);
+		expect(one({ _type: "embed", _key: "e", url: ["x"] })).toEqual(['#0 embed url: value ["x"] is not allowed']);
+		for (const node of [{ _type: "button" }, { _type: "buttons", buttons: [{}] }, { _type: "file" }, { _type: "embed" }]) expect(one(node)).toEqual([]);
+		for (const node of [{ _type: "button", url: "/a" }, { _type: "file", url: "https://example.com/a.pdf" }, { _type: "embed", url: "https://youtu.be/SKS-URw9a18" }]) expect(one(node)).toEqual([]);
+	});
+	it("requires tools[].url and tools[].logo to be strings when present on tool_grid (ToolGrid.astro:29, :34)", () => {
+		expect(one({ _type: "tool_grid", _key: "g", tools: [{ name: "a", url: 5, logo: {} }, { name: "b", url: "https://example.com", logo: "/img/a.png" }, { name: "c" }] })).toEqual([
+			"#0 tool_grid tools[].url: value 5 is not allowed",
+			"#0 tool_grid tools[].logo: value {} is not allowed",
+		]);
+	});
+});
