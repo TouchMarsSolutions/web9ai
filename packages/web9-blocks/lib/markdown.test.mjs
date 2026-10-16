@@ -58,13 +58,14 @@ describe("renderMarkdown sanitizer", () => {
 	it("drops protocol-relative URLs", () => {
 		expect(renderMarkdown('<div style="background: //evil.example/t.gif">x</div>')).toBe("<div>x</div>");
 	});
-	it("keeps rgb()/hsl()/gradients/calc()/min()", () => {
+	it("keeps rgb() and gradients, drops calc() and min()", () => {
 		expect(renderMarkdown('<div style="color: rgb(10, 20, 30); background: radial-gradient(circle, rgba(255,255,255,.4), transparent)">x</div>')).toBe(
 			'<div style="color:rgb(10, 20, 30);background:radial-gradient(circle, rgba(255,255,255,.4), transparent)">x</div>',
 		);
-		expect(renderMarkdown('<div style="width: calc(100% - 20px); max-width: min(100%, 600px)">x</div>')).toBe(
-			'<div style="width:calc(100% - 20px);max-width:min(100%, 600px)">x</div>',
-		);
+		expect(renderMarkdown('<div style="width: calc(100% - 20px); max-width: min(100%, 600px)">x</div>')).toBe("<div>x</div>");
+	});
+	it("drops exponent lengths and calc() that would paint past the page", () => {
+		expect(renderMarkdown('<div style="box-shadow:0 0 0 1e4px red;margin:calc(0px - 1e4px)">x</div>')).toBe("<div>x</div>");
 	});
 	it("drops full-page box-shadow spreads and viewport units", () => {
 		expect(renderMarkdown('<div style="box-shadow: 0 0 0 9999px red">x</div>')).toBe("<div>x</div>");
