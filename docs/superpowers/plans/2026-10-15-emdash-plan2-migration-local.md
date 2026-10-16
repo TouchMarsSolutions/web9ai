@@ -5238,3 +5238,228 @@ Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
 ```
 
 ---
+
+### Task 12: `DocsPage`：侧栏分组显示名、canonical、对比度；`/pages/<不存在>` 返回 404
+
+**模型：** cheap
+
+Task 8 的取舍是 `category` 存目录名，显示名由站点代码映射。现在侧栏的分组标题还是原始值（`ai / usecase`）。另外两个小问题：
+- fallback 页面（`/zh-CN/docs/lambda` 显示 en 内容）没有 canonical，搜索引擎会把它当成一个独立的页面；
+- 分组标题用的 `text-muted`（浅色 `#8b8b8b` 配白底约 3.5:1）对 12px 的字不够，换成 `text-text-secondary`（`#525252`，约 7.8:1）。
+
+`/pages/[slug]` 找不到页面时现在是 `Astro.redirect("/404")`（302 到一个 200 的页面）；改成和 docs 路由一样的 `Astro.rewrite("/404")`，直接返回 404。
+
+写计划时把下面的 `DocsPage` 改动临时放进 dev 跑过：`/docs/ai-tools-adhoc` 的 canonical 是 `https://www.web9.ai/docs/ai-tools-adhoc`；fallback 页 `/zh-CN/docs/ai-tools-adhoc` 的 canonical 也指向 en URL；有翻译的 `/zh-CN/docs/ai-e2e` 指向自己；zh-CN 侧栏里 usecase 显示"神兵利器"。
+
+**Files:**
+- Create: `packages/web9-site/lib/docs-nav.mjs`、`packages/web9-site/lib/docs-nav.test.mjs`
+- Modify: `src/components/DocsPage.astro`、`src/pages/pages/[slug].astro`、spec §2
+
+**Interfaces:**
+- Consumes: Task 4 的 `Base.astro` `canonical` prop；Task 8 的 `readLegacyTree().categories`（只在测试里，对照显示名）。
+- Produces: `groupDocs(entries, locale) → [{ key, label, items }]`、`groupLabel(section, category, locale)`、`SECTION_LABELS`、`CATEGORY_LABELS`（`packages/web9-site/lib/docs-nav.mjs`）。
+
+- [ ] **Step 1: 写失败的测试**
+
+Create `packages/web9-site/lib/docs-nav.test.mjs`：
+
+```js
+import { existsSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import { readLegacyTree } from "../../../scripts/lib/legacy-tree.mjs";
+import { CATEGORY_LABELS, SECTION_LABELS, groupDocs, groupLabel } from "./docs-nav.mjs";
+
+const doc = (slug, section, category, sort_order) => ({ data: { slug, section, category, sort_order } });
+
+describe("groupDocs", () => {
+	it("orders by sort_order and labels sections and categories per locale", () => {
+		const entries = [doc("overview", "dev", "general", 1001000), doc("guide", "ai", "usecase", 2001), doc("intro", "ai", "general", 1000), doc("tools", "ai", "usecase", 2002)];
+		expect(groupDocs(entries, "en").map((g) => [g.label, g.items.map((e) => e.data.slug)])).toEqual([
+			["AI", ["intro"]],
+			["Use Case", ["guide", "tools"]],
+			["Dev", ["overview"]],
+		]);
+		expect(groupDocs(entries, "zh-CN")[1].label).toBe("神兵利器");
+	});
+	it("falls back to the stored value and to the en label", () => {
+		expect(groupLabel("ai", "cloud", "zh-CN")).toBe("Cloud");
+		expect(groupLabel("ops", "general", "en")).toBe("ops");
+		expect(groupLabel("ai", "new-thing", "en")).toBe("new-thing");
+		expect(groupDocs([{ data: { slug: "x" } }], "en")[0]).toMatchObject({ key: "ai/general", label: "AI" });
+	});
+});
+
+describe.skipIf(!existsSync("legacy/docs"))("labels match the legacy inventory", () => {
+	const tree = readLegacyTree();
+	it("has every category label the old sidebar showed, in both locales", () => {
+		expect(Object.keys(CATEGORY_LABELS).sort()).toEqual(Object.keys(tree.categories).sort());
+		for (const [dir, { label, zhLabel }] of Object.entries(tree.categories)) {
+			expect(CATEGORY_LABELS[dir].en).toBe(label);
+			expect(CATEGORY_LABELS[dir]["zh-CN"]).toBe(zhLabel);
+		}
+		expect(Object.keys(SECTION_LABELS).sort()).toEqual([...new Set(tree.docs.map((d) => d.section))].sort());
+	});
+});
+```
+
+- [ ] **Step 2: 跑测试，确认失败**
+
+Run: `npx vitest run packages/web9-site/lib/docs-nav.test.mjs`
+Expected: FAIL：`docs-nav.mjs` 不存在。
+
+- [ ] **Step 3: 实现**
+
+Create `packages/web9-site/lib/docs-nav.mjs`：
+
+```js
+// Docs sidebar groups (spec §2): section -> category, in sort_order. `category` is stored as the legacy
+// folder name (plan 2 rulings); these are the labels the old sidebar showed, from legacy _category_.yml
+// (docs-nav.test.mjs checks them against the inventory while legacy/ exists).
+export const SECTION_LABELS = { ai: "AI", dev: "Dev" };
+export const CATEGORY_LABELS = {
+	usecase: { en: "Use Case", "zh-CN": "神兵利器" },
+	article: { en: "Articles" },
+	cloud: { en: "Cloud" },
+	prompt: { en: "Prompt Engineering" },
+	model: { en: "Model" },
+};
+
+/** Group heading: the section name for docs at the section root, else the category name. Unknown values show as stored. */
+export function groupLabel(section, category, locale) {
+	if (!category || category === "general") return SECTION_LABELS[section] ?? section;
+	const labels = CATEGORY_LABELS[category];
+	return labels?.[locale] ?? labels?.en ?? category;
+}
+
+/** [{ key, label, items }]: entries sorted by sort_order, grouped in order of first appearance. */
+export function groupDocs(entries, locale) {
+	const groups = new Map();
+	for (const e of [...entries].sort((a, b) => (a.data.sort_order ?? 0) - (b.data.sort_order ?? 0))) {
+		const section = e.data.section ?? "ai";
+		const category = e.data.category ?? "general";
+		const key = `${section}/${category}`;
+		if (!groups.has(key)) groups.set(key, { key, label: groupLabel(section, category, locale), items: [] });
+		groups.get(key).items.push(e);
+	}
+	return [...groups.values()];
+}
+```
+
+- [ ] **Step 4: 跑测试，确认通过**
+
+Run: `npx vitest run packages/web9-site/lib/docs-nav.test.mjs`
+Expected: PASS（3 个测试）。
+
+- [ ] **Step 5: 改 `DocsPage` 和 `/pages/[slug]`**
+
+```diff
+diff --git a/src/components/DocsPage.astro b/src/components/DocsPage.astro
+--- a/src/components/DocsPage.astro
++++ b/src/components/DocsPage.astro
+@@ -1,6 +1,7 @@
+ ---
+ import { getEmDashCollection, getTranslations } from "emdash";
+ import { PortableText } from "emdash/ui";
++import { groupDocs } from "../../packages/web9-site/lib/docs-nav.mjs";
+ import Base from "../layouts/Base.astro";
+ 
+ interface Props {
+@@ -13,19 +14,17 @@ const prefix = locale === "en" ? "" : `/${locale}`;
+ 
+ // Sidebar: every en doc, with this locale's translation swapped in where one exists (an untranslated
+ // doc is still reachable under this locale's prefix through the fallback route), plus docs that exist
+-// only in this locale; grouped section -> category, ordered by sort_order.
++// only in this locale; grouped section -> category, ordered by sort_order, with the old sidebar's labels.
+ const byGroup = new Map();
+ for (const l of new Set(["en", locale])) {
+ 	const { entries: list } = await getEmDashCollection("docs", { locale: l, limit: 500 });
+ 	// translationGroup is on every entry at runtime but not in the generated Doc type
+ 	for (const e of list) byGroup.set((e.data as { translationGroup?: string | null }).translationGroup ?? e.data.id, e);
+ }
+-const entries: any[] = [...byGroup.values()];
+-const groups = new Map<string, typeof entries>();
+-for (const e of [...entries].sort((a, b) => (a.data.sort_order ?? 0) - (b.data.sort_order ?? 0))) {
+-	const key = `${e.data.section ?? "ai"} / ${e.data.category ?? "general"}`;
+-	groups.set(key, [...(groups.get(key) ?? []), e]);
+-}
++const groups: { key: string; label: string; items: any[] }[] = groupDocs([...byGroup.values()], locale);
++// A fallback page shows the en text, so search engines are pointed at the en URL.
++const canonicalLocale = fallbackLocale ?? locale;
++const canonical = new URL(`${canonicalLocale === "en" ? "" : `/${canonicalLocale}`}/docs/${doc.data.slug}`, Astro.site).href;
+ 
+ const translations = (await getTranslations("docs", doc.data.id)).translations?.filter(
+ 	(t) => t.status === "published",
+@@ -45,13 +44,13 @@ const notTranslated: Record<string, string> = {
+ };
+ ---
+ 
+-<Base title={doc.data.title} description={doc.data.description} content={{ collection: "docs", id: doc.data.id, slug: doc.data.slug }}>
++<Base title={doc.data.title} description={doc.data.description} canonical={canonical} content={{ collection: "docs", id: doc.data.id, slug: doc.data.slug }}>
+ 	<div class="mx-auto my-8 grid max-w-[1200px] grid-cols-1 gap-10 px-4 md:grid-cols-[240px_minmax(0,1fr)]">
+ 		<nav class="text-[0.92rem] md:sticky md:top-4 md:self-start" aria-label="Docs">
+ 			{
+-				[...groups].map(([group, items]) => (
++				groups.map(({ label, items }) => (
+ 					<div>
+-						<p class="mt-4 mb-1.5 text-xs tracking-wider text-muted uppercase">{group}</p>
++						<p class="mt-4 mb-1.5 text-xs tracking-wider text-text-secondary uppercase">{label}</p>
+ 						<ul class="m-0 list-none p-0">
+ 							{items.map((e) => (
+ 								<li>
+```
+
+```diff
+diff --git a/src/pages/pages/[slug].astro b/src/pages/pages/[slug].astro
+--- a/src/pages/pages/[slug].astro
++++ b/src/pages/pages/[slug].astro
+@@ -13,13 +13,13 @@ const SITE_ORIGIN = (Astro.site ?? new URL("https://www.web9.ai")).origin;
+ const slug = decodeSlug(Astro.params.slug);
+ 
+ if (!slug) {
+-	return Astro.redirect("/404");
++	return Astro.rewrite("/404");
+ }
+ 
+ const { entry: page, cacheHint } = await getEmDashEntry("pages", slug);
+ 
+ if (!page) {
+-	return Astro.redirect("/404");
++	return Astro.rewrite("/404");
+ }
+ 
+ if (Astro.cache?.enabled) Astro.cache.set(cacheHint);
+```
+
+两个 diff 用 `git apply` 应用（基于计划 1 结束时的文件，计划 2 之前的任务都没有改它们）。
+
+- [ ] **Step 6: 检查**
+
+```bash
+cd /Users/john/git/web9ai
+npm test
+node scripts/check-page.mjs http://localhost:4321/docs/intro 'uppercase">AI<' 'uppercase">Use Case<' 'uppercase">Cloud<' 'uppercase">Dev<' 'rel="canonical" href="https://www.web9.ai/docs/intro"' --absent 'ai / usecase' 'text-muted uppercase'
+node scripts/check-page.mjs http://localhost:4321/zh-CN/docs/guide 'uppercase">神兵利器<' 'rel="canonical" href="https://www.web9.ai/zh-CN/docs/guide"'
+node scripts/check-page.mjs http://localhost:4321/zh-CN/docs/lambda '本页还没有中文翻译' 'rel="canonical" href="https://www.web9.ai/docs/lambda"'
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:4321/pages/no-such-page
+node scripts/migrate.mjs verify
+```
+
+Expected：`npm test` PASS；三个 `check-page` 通过；`/pages/no-such-page` 是 `404`；`verify` 仍是 `54/54 pages ok`、`74/74 redirects ok`。
+
+用 CDP（page 8）打开 `/docs/intro` 截图：侧栏分组依次是 AI、Use Case、Articles、Cloud、Prompt Engineering、Model、Dev。
+
+- [ ] **Step 7: 更新 spec**
+
+§2 里 Task 8 加的 "**已定（计划 2 Task 8）**：`category` 存目录名……" 那条末尾加一句："显示名在 `packages/web9-site/lib/docs-nav.mjs`（计划 2 Task 12），根目录的文档组显示 section 名（AI / Dev）。fallback 页面的 canonical 指向 en URL。"
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add packages/web9-site/lib/docs-nav.mjs packages/web9-site/lib/docs-nav.test.mjs src/components/DocsPage.astro 'src/pages/pages/[slug].astro' docs/superpowers/specs/2026-10-15-emdash-migration-design.md
+git commit -m "feat(docs): sidebar labels, canonical (fallback pages point at en), readable group headings; 404 for missing pages
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_011CM2M8CtmWZL78rmqfc7gB"
+```
+
+---
