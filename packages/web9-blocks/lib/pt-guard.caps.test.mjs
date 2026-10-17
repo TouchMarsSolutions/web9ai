@@ -161,6 +161,71 @@ describe("guardPortableText: markDefs over the whole value (the toolkit runs mar
 	});
 });
 
+describe("guardPortableText: raw table rows (core maps every row before it falls back to a 1×1 grid)", () => {
+	// 500 rows without cells: core lays out one empty cell, after it has keyed and copied all 500 rows.
+	const hollow = () => table(Array.from({ length: 500 }, emptyRow));
+	it("charges a table of cell-less rows one slot per row", () => {
+		expect(guardPortableText(Array.from({ length: 40 }, hollow))).toEqual([]);
+		expect(guardPortableText(Array.from({ length: 41 }, hollow))).toEqual(["at most 20000 table cells are allowed in total (counting cells spanned by another)"]);
+	});
+});
+
+describe("guardPortableText: fields of table records (core's safeFields tests and copies every key)", () => {
+	// Pads a record with x0, x1, ... (names core keeps) up to `n` own keys.
+	const wide = (record, n) => {
+		const out = { ...record };
+		for (let i = 0; Object.keys(out).length < n; i++) out[`x${i}`] = 0;
+		return out;
+	};
+	const link = () => ({ _type: "link", _key: `m${keys++}`, href: "/x" });
+	it("allows at most 32 fields on a cell", () => {
+		expect(guardPortableText([table([row([wide(cell([span()]), 32)])])])).toEqual([]);
+		expect(guardPortableText([table([row([cell([]), wide(cell([span()]), 33)])])])).toEqual(["#0 table rows[0].cells[1]: at most 32 fields are allowed"]);
+	});
+	it("allows at most 32 fields on a row and on the table, rows or not", () => {
+		expect(guardPortableText([table([wide(row([cell([])]), 32)])])).toEqual([]);
+		expect(guardPortableText([table([row([cell([])]), wide(row([cell([])]), 33)])])).toEqual(["#0 table rows[1]: at most 32 fields are allowed"]);
+		expect(guardPortableText([wide(table([row([cell([])])]), 32)])).toEqual([]);
+		expect(guardPortableText([wide(table([row([cell([])])]), 33)])).toEqual(["#0 table: at most 32 fields are allowed"]);
+		expect(guardPortableText([wide({ _type: "table", _key: "t" }, 33)])).toEqual(["#0 table: at most 32 fields are allowed"]);
+	});
+	it("allows at most 32 fields on a table or cell markDef", () => {
+		const withCellDefs = (def) => table([row([{ ...cell([]), markDefs: [link(), def] }])]);
+		expect(guardPortableText([withCellDefs(wide(link(), 32))])).toEqual([]);
+		expect(guardPortableText([withCellDefs(wide(link(), 33))])).toEqual(["#0 table rows[0].cells[0] markDefs[1]: at most 32 fields are allowed"]);
+		expect(guardPortableText([{ ...table([row([cell([])])]), markDefs: [wide(link(), 32)] }])).toEqual([]);
+		expect(guardPortableText([{ ...table([row([cell([])])]), markDefs: [link(), wide(link(), 33)] }])).toEqual(["#0 table markDefs[1]: at most 32 fields are allowed"]);
+	});
+});
+
+describe("guardPortableText: line breaks in span text (the toolkit splits and splices per newline)", () => {
+	const lines = (n) => "x\n".repeat(n);
+	// No `marks` key: the line check must not depend on it.
+	const bare = (text) => ({ _type: "span", _key: `s${keys++}`, text });
+	const TOTAL = ["at most 5000 line breaks are allowed in total"];
+	it("allows at most 1000 line breaks in a span", () => {
+		expect(guardPortableText([para([span(lines(1000))])])).toEqual([]);
+		expect(guardPortableText([para([span("a"), span(lines(1001))])])).toEqual(["#0 block children[1].text: at most 1000 line breaks are allowed"]);
+		expect(guardPortableText([para([bare(lines(1000))])])).toEqual([]);
+		expect(guardPortableText([para([bare(lines(1001))])])).toEqual(["#0 block children[0].text: at most 1000 line breaks are allowed"]);
+	});
+	it("allows at most 5000 line breaks in total, across spans and blocks", () => {
+		const five = Array.from({ length: 5 }, () => para([bare(lines(500)), span(lines(500))]));
+		expect(guardPortableText(five)).toEqual([]);
+		expect(guardPortableText([...five, para([span("a"), bare("\n")])])).toEqual(TOTAL);
+		expect(guardPortableText([...five, { _type: "cover", _key: "v", content: [para([bare("\n")])] }])).toEqual(TOTAL);
+	});
+	it("counts line breaks in table cells the same way", () => {
+		expect(guardPortableText([table([row([cell([span("a"), bare(lines(1001))])])])])).toEqual(["#0 table rows[0].cells[0] content[1].text: at most 1000 line breaks are allowed"]);
+		const four = Array.from({ length: 4 }, () => para([span(lines(1000))]));
+		expect(guardPortableText([...four, table([row([cell([bare(lines(999)), span("\n")])])])])).toEqual([]);
+		expect(guardPortableText([...four, table([row([cell([bare(lines(1000)), span("\n")])])])])).toEqual(TOTAL);
+	});
+	it("leaves text that is not a string alone", () => {
+		expect(guardPortableText([para([{ ...span(), text: 5 }, { ...span(), text: ["\n"] }])])).toEqual([]);
+	});
+});
+
 describe("guardPortableText: block shapes that crash their renderer (spec 2026-10-17 §3.6)", () => {
 	it("requires buttons, tabs and tools to be arrays of objects", () => {
 		for (const [type, field] of [["buttons", "buttons"], ["tabs", "tabs"], ["tool_grid", "tools"]]) {

@@ -24,17 +24,20 @@
 // fills (width × height) is capped at MAX_CELLS, and the spans it renders, padding included, are counted on that grid.
 // The normalizer de-duplicates keys with a linear suffix scan per key (reserveKey), so repeated keys cost quadratic time
 // at render: a table whose own, row or cell `_key`s repeat is rejected, and that check runs before the normalizer.
+// The normalizer also copies the table, each row, each cell and each table or cell markDef through safeFields, which runs
+// a regex over every own key, so each of those records holds at most MAX_RECORD_KEYS fields (checked before it runs).
 // Totals over the whole value (spec 2026-10-17 §3.6): render CPU grows with every span and, most, with every mark
 // (plan 2 measured 0.3 s for one block of 1000 spans × 20 marks), so a value holds at most MAX_NODES top-level nodes,
 // MAX_SPANS spans and MAX_TOTAL_MARKS marks, counting blocks, container blocks and table cells (on the normalized
 // grid). Two more totals bound what a per-block or per-table cap cannot. Core's normalizer and Table.astro do work per
 // grid slot of every table, however few cells are written (one cell of colspan 100 × rowspan 20 fills 2000 slots and is
-// one span), so a value holds at most MAX_GRID_SLOTS slots. And @portabletext/toolkit builds marks with markDefs.find per
-// mark (dist/index.js:65), so render cost is marks × markDefs per block: a value holds at most MAX_MARK_DEFS markDefs
-// (blocks, tables and table cells), counted before they are walked or normalized. Past a total the walk stops with that
-// one problem. Lists that a renderer maps (buttons.buttons, tabs.tabs,
-// tool_grid.tools) must be arrays of objects within a size cap, and their text fields strings: a null item or a number
-// tagline throws at render time, and so does `buttons: null` (core's Buttons.astro defaults only undefined).
+// one span), so a value holds at most MAX_GRID_SLOTS slots; a table whose rows hold no cells is laid out as one cell, but
+// only after every raw row is keyed and copied, so a table is charged max(grid slots, raw rows). And
+// @portabletext/toolkit builds marks with markDefs.find per mark (dist/index.js:65), so render cost is marks × markDefs
+// per block: a value holds at most MAX_MARK_DEFS markDefs (blocks, tables and table cells), counted before they are
+// walked or normalized. Past a total the walk stops with that one problem. Lists that a renderer maps (buttons.buttons,
+// tabs.tabs, tool_grid.tools) must be arrays of objects within a size cap, and their text fields strings: a null item or
+// a number tagline throws at render time, and so does `buttons: null` (core's Buttons.astro defaults only undefined).
 // Output is bounded: collecting stops after MAX_PROBLEMS (plain pushes, never spreads of a long list, which
 // throw RangeError past ~120k items) and ends with MORE, so a hostile value cannot make the guard throw.
 // Messages print a value through show(): JSON.stringify overflows the stack on a value nested a few thousand levels
@@ -54,9 +57,11 @@
 // Size caps, because the renderers are not linear in them: @portabletext/toolkit's buildMarksTree nests one
 // component per mark (3000 marks on a span overflow the stack), and its sortMarksByOccurences is O(n²) in a
 // block's children (20k spans = 12 s of CPU). So a span has at most MAX_MARKS marks and a block at most
-// MAX_CHILDREN children. `_key` reaches template strings (`${_key}-group` in emdash
-// portable-text-blockquote-group.ts:60), which throw for an object without a callable toString, so a `_key`
-// must be a string when present on every node checked here.
+// MAX_CHILDREN children. buildMarksTree also splits span text on "\n" and splices a "\n" node back in per line from the
+// tail (astro-portabletext's copy, dist/index.js:92), quadratic per span (80k line breaks = 1.6 s), so a span holds at
+// most MAX_SPAN_LINES line breaks and a value at most MAX_TOTAL_LINES (blocks, container blocks and table cells).
+// `_key` reaches template strings (`${_key}-group` in emdash portable-text-blockquote-group.ts:60), which throw for an
+// object without a callable toString, so a `_key` must be a string when present on every node checked here.
 // Ordered-list continuity (emdash content/portable-text-lists.ts): `listId` is only ever a Map key or part of a
 // JSON string there (no plain-object lookup, so prototype names are harmless), and `listStart` becomes the
 // `<ol start>` of OrderedList.astro. Both are bounded when present: listId a string of at most MAX_LIST_ID
@@ -101,6 +106,7 @@ function collector() {
 		marks: 0,
 		slots: 0,
 		markDefs: 0,
+		lines: 0,
 		added: 0,
 		add(problem) {
 			this.added++;
@@ -118,17 +124,19 @@ function collector() {
 	};
 }
 
-/** Adds spans, marks, table grid slots and markDefs to the value's totals; past one, stops the walk with its problem. */
-function count(out, { spans = 0, marks = 0, slots = 0, markDefs = 0 }) {
+/** Adds spans, marks, table grid slots, markDefs and line breaks to the value's totals; past one, stops the walk with its problem. */
+function count(out, { spans = 0, marks = 0, slots = 0, markDefs = 0, lines = 0 }) {
 	if (out.full) return;
 	out.spans += spans;
 	out.marks += marks;
 	out.slots += slots;
 	out.markDefs += markDefs;
+	out.lines += lines;
 	if (out.spans > MAX_SPANS) out.stop(`at most ${MAX_SPANS} spans are allowed in total`);
 	else if (out.marks > MAX_TOTAL_MARKS) out.stop(`at most ${MAX_TOTAL_MARKS} marks are allowed in total`);
 	else if (out.slots > MAX_GRID_SLOTS) out.stop(`at most ${MAX_GRID_SLOTS} table cells are allowed in total (counting cells spanned by another)`);
 	else if (out.markDefs > MAX_MARK_DEFS) out.stop(`at most ${MAX_MARK_DEFS} markDefs are allowed in total`);
+	else if (out.lines > MAX_TOTAL_LINES) out.stop(`at most ${MAX_TOTAL_LINES} line breaks are allowed in total`);
 }
 
 /** Field checks per allowed _type. Paths use `a.b` for nesting and `list[].field` for arrays. */
@@ -234,6 +242,9 @@ const MAX_GRID_SLOTS = 20000;
 const MAX_MARK_DEFS = 5000;
 const MAX_ROWS = 500;
 const MAX_CELLS = 2000;
+const MAX_RECORD_KEYS = 32;
+const MAX_SPAN_LINES = 1000;
+const MAX_TOTAL_LINES = 5000;
 /**
  * Lists a renderer maps: [field, max items, string fields of an item, boolean fields of an item, null allowed].
  * url/logo are in RULES. Core's Buttons.astro defaults the list only for undefined (`const { buttons = [] } = node`),
@@ -248,6 +259,25 @@ const LISTS = {
 /** `_key` may be absent (undefined or null); when present it must be a string. */
 function checkKey(node, where, field, out) {
 	if (node._key != null && typeof node._key !== "string") out.add(notAllowed(where, field, node._key));
+}
+
+/** Line breaks in `text`, counted with indexOf (no split) and only up to `max` + 1, enough to tell it is past the cap. */
+function lineBreaks(text, max) {
+	let n = 0;
+	for (let at = text.indexOf("\n"); at !== -1 && n <= max; at = text.indexOf("\n", at + 1)) n++;
+	return n;
+}
+
+/**
+ * The toolkit splits a span's text on "\n" and splices a "\n" node back in per line from the tail, which is quadratic
+ * per span: past MAX_SPAN_LINES a span is a problem, otherwise its line breaks count toward MAX_TOTAL_LINES. Only string
+ * text counts (the toolkit renders anything else as a node, not as lines).
+ */
+function checkLines(span, at, out) {
+	if (typeof span.text !== "string") return;
+	const lines = lineBreaks(span.text, MAX_SPAN_LINES);
+	if (lines > MAX_SPAN_LINES) out.add(`${at}.text: at most ${MAX_SPAN_LINES} line breaks are allowed`);
+	else count(out, { lines });
 }
 
 /** Block children are rendered as custom types, so anything but a plain span is a way past the type check. */
@@ -289,6 +319,8 @@ function checkBlock(node, where, out) {
 		}
 		checkKey(child, where, `children[${j}]._key`, out);
 		if (child.children !== undefined && child.children !== null) out.add(`${where} children[${j}] span: a span must not have children`);
+		checkLines(child, `${where} children[${j}]`, out);
+		if (out.full) break;
 		if (child.marks == null) continue;
 		if (!Array.isArray(child.marks)) {
 			out.add(`${where} children[${j}].marks: must be an array`);
@@ -316,6 +348,24 @@ function containerLists(node, type) {
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
+/**
+ * More than MAX_RECORD_KEYS own enumerable keys: core's safeFields (portable-text-table.js:494) runs a regex over every
+ * key of a table, row, cell or markDef record and copies it. for…in returns at the first key past the cap, though V8
+ * lists every key of a huge record first (about what Object.keys costs, far less than safeFields).
+ */
+function tooManyFields(record) {
+	let n = 0;
+	for (const key in record) if (Object.hasOwn(record, key) && ++n > MAX_RECORD_KEYS) return true;
+	return false;
+}
+
+/** Table and cell markDefs, which core copies through safeFields too. Non-objects are left to the normalizer. */
+function checkDefFields(defs, at, out) {
+	for (let k = 0; k < defs.length && !out.full; k++) {
+		if (isObject(defs[k]) && tooManyFields(defs[k])) out.add(`${at} markDefs[${k}]: at most ${MAX_RECORD_KEYS} fields are allowed`);
+	}
+}
+
 /** Columns.astro maps `columns` and reads column.width, so a non-array or a null column throws. */
 function checkColumns(node, i, out) {
 	if (node.columns == null) return;
@@ -326,9 +376,15 @@ function checkColumns(node, i, out) {
 	}
 }
 
-/** A table cell's content: spans only (core renders them inline), within the span and mark caps. Spans are counted by checkTable. */
+/**
+ * A table cell's content: spans only (core renders them inline), within the span, mark and line-break caps; its markDefs
+ * within MAX_RECORD_KEYS fields each. Spans are counted by checkTable.
+ */
 function checkCell(cell, at, out) {
-	if (Array.isArray(cell.markDefs)) count(out, { markDefs: cell.markDefs.length });
+	if (Array.isArray(cell.markDefs)) {
+		count(out, { markDefs: cell.markDefs.length });
+		checkDefFields(cell.markDefs, at, out);
+	}
 	if (out.full || cell.content == null) return;
 	if (!Array.isArray(cell.content)) return out.add(`${at} content: must be an array of spans`);
 	if (cell.content.length > MAX_CHILDREN) return out.add(`${at} content: at most ${MAX_CHILDREN} spans are allowed`);
@@ -340,6 +396,8 @@ function checkCell(cell, at, out) {
 			continue;
 		}
 		if (span.children != null) out.add(`${at} content[${j}] span: a span must not have children`);
+		checkLines(span, `${at} content[${j}]`, out);
+		if (out.full) return;
 		if (span.marks == null) continue;
 		if (!Array.isArray(span.marks)) out.add(`${at} content[${j}].marks: must be an array`);
 		else if (span.marks.length > MAX_MARKS) out.add(`${at} content[${j}].marks: at most ${MAX_MARKS} marks are allowed`);
@@ -351,14 +409,21 @@ function checkCell(cell, at, out) {
  * core's Table.astro maps rows[].cells[]: arrays of objects, within MAX_ROWS rows and MAX_CELLS written cells, with no
  * `_key` repeated among the table, its rows and its cells (the normalizer de-duplicates keys with a linear suffix scan
  * per key, `reserveKey`, so repeats cost quadratic time at render). These bound one normalizer run, not the sum over a
- * value. Then core's own normalizer lays the table out: one it cannot lay out is rejected, the grid it fills (work per
- * slot, however few cells are written) is capped at MAX_CELLS and counted toward MAX_GRID_SLOTS for the value, and the
- * spans it renders (empty and padded cells are one span each) count toward MAX_SPANS. The markDefs of the table and of
- * each cell count toward MAX_MARK_DEFS as they are met, before any normalizer run.
+ * value. The table, its rows, its cells and their markDefs hold at most MAX_RECORD_KEYS fields each (safeFields walks
+ * every key), checked first, rows or not: core normalizes a row-less table too. Then core's own normalizer lays the table
+ * out: one it cannot lay out is rejected, the grid it fills (work per slot, however few cells are written) is capped at
+ * MAX_CELLS and counted toward MAX_GRID_SLOTS for the value, or the raw row count if that is larger (rows without cells
+ * become one cell, after every row is keyed and copied), and the spans it renders (empty and padded cells are one span
+ * each) count toward MAX_SPANS. The markDefs of the table and of each cell count toward MAX_MARK_DEFS as they are met,
+ * before any normalizer run.
  */
 function checkTable(node, i, out) {
 	const where = `#${i} table`;
-	if (Array.isArray(node.markDefs)) count(out, { markDefs: node.markDefs.length });
+	if (tooManyFields(node)) out.add(`${where}: at most ${MAX_RECORD_KEYS} fields are allowed`);
+	if (Array.isArray(node.markDefs)) {
+		count(out, { markDefs: node.markDefs.length });
+		checkDefFields(node.markDefs, where, out);
+	}
 	if (out.full || node.rows == null) return;
 	if (!Array.isArray(node.rows)) return out.add(`${where} rows: must be an array`);
 	if (node.rows.length > MAX_ROWS) return out.add(`${where} rows: at most ${MAX_ROWS} rows are allowed`);
@@ -378,6 +443,7 @@ function checkTable(node, i, out) {
 			out.add(`${where} rows[${r}]: must be an object`);
 			continue;
 		}
+		if (tooManyFields(row)) out.add(`${where} rows[${r}]: at most ${MAX_RECORD_KEYS} fields are allowed`);
 		checkUnique(row._key, `${where} rows[${r}]`);
 		if (row.cells == null) continue;
 		if (!Array.isArray(row.cells)) {
@@ -390,6 +456,7 @@ function checkTable(node, i, out) {
 			const at = `${where} rows[${r}].cells[${c}]`;
 			if (!isObject(row.cells[c])) out.add(`${at}: must be an object`);
 			else {
+				if (tooManyFields(row.cells[c])) out.add(`${at}: at most ${MAX_RECORD_KEYS} fields are allowed`);
 				checkUnique(row.cells[c]._key, at);
 				checkCell(row.cells[c], at, out);
 			}
@@ -402,7 +469,7 @@ function checkTable(node, i, out) {
 	if (!normalized.ok) return out.stop(`${where}: core cannot lay out this table (${normalized.reason})`);
 	const { width, height } = normalized;
 	if (width * height > MAX_CELLS) return out.stop(`${where}: at most ${MAX_CELLS} cells are allowed (got ${width}×${height} once core fills the grid)`);
-	count(out, { slots: width * height });
+	count(out, { slots: Math.max(width * height, node.rows.length) });
 	if (out.full) return;
 	let spans = 0;
 	for (const row of normalized.table.rows) for (const cell of row.cells) spans += Math.max(1, cell.content?.length ?? 0);
