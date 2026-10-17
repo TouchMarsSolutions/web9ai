@@ -1,20 +1,13 @@
 ---
 import { sanitizeHref } from "emdash";
 import { renderInlineMarkdown } from "../lib/markdown.mjs";
-import { logoSize } from "../lib/tool-grid.mjs";
+import { logoSize, toolItems } from "../lib/tool-grid.mjs";
 
-interface Tool {
-	name?: string;
-	tagline?: string;
-	logo?: string;
-	url?: string;
-	featured?: boolean;
-}
 interface Props {
-	node: { _type: "tool_grid"; _key: string; title?: string; tools?: Tool[]; logo_size?: number };
+	node: { _type: "tool_grid"; _key: string; title?: string; tools?: unknown; logo_size?: number };
 }
 const { node } = Astro.props;
-const tools = Array.isArray(node?.tools) ? node.tools : [];
+const tools = toolItems(node);
 // Also set inline on the img: preflight's img { height: auto } would otherwise undo object-contain.
 const size = logoSize(node?.logo_size);
 ---
@@ -36,7 +29,7 @@ const size = logoSize(node?.logo_size);
 					<img
 						class="max-w-full object-contain"
 						src={sanitizeHref(tool.logo)}
-						alt={tool.name ?? ""}
+						alt={tool.name}
 						width={size}
 						height={size}
 						style={`width:${size}px;height:${size}px`}

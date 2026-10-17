@@ -20,3 +20,16 @@ describe("astro/index.mjs registry", () => {
 		expect(source).toMatch(/export \{ default as SafeWidgetArea \} from "\.\/SafeWidgetArea\.astro";/);
 	});
 });
+
+describe("Tabs and ToolGrid", () => {
+	const component = (name) => readFileSync(new URL(`./astro/${name}`, import.meta.url), "utf8");
+	it("render the lists tabItems and toolItems give (a null item or a number tagline used to throw)", () => {
+		const tabs = component("Tabs.astro");
+		expect(tabs).toMatch(/^import \{ tabItems \} from "\.\.\/lib\/tabs\.mjs";$/m);
+		expect(tabs).toContain("const tabs = tabItems(node);");
+		const grid = component("ToolGrid.astro");
+		expect(grid).toMatch(/^import \{ logoSize, toolItems \} from "\.\.\/lib\/tool-grid\.mjs";$/m);
+		expect(grid).toContain("const tools = toolItems(node);");
+		for (const source of [tabs, grid]) expect(source).not.toMatch(/Array\.isArray\(node\?\.(tabs|tools)\)/);
+	});
+});
