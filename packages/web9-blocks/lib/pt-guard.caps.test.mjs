@@ -7,6 +7,7 @@ const para = (children) => ({ _type: "block", _key: "b", style: "normal", markDe
 let keys = 0;
 const cell = (content) => ({ _type: "tableCell", _key: `c${keys++}`, content, markDefs: [] });
 const row = (cells) => ({ _type: "tableRow", _key: `r${keys++}`, cells });
+const emptyRow = () => ({ _type: "tableRow", _key: `r${keys++}` });
 const table = (rows) => ({ _type: "table", _key: "t", rows });
 
 describe("guardPortableText: totals over the whole value (spec 2026-10-17 §3.6)", () => {
@@ -101,22 +102,62 @@ describe("guardPortableText: repeated keys in a table (core's reserveKey de-dupl
 describe("guardPortableText: tables on core's normalized grid (normalizePortableTextTable pads rows and fills empty cells)", () => {
 	const grid = (rows, cols) => table(Array.from({ length: rows }, () => row(Array.from({ length: cols }, () => cell([])))));
 	it("caps the grid core renders, not the cells written (a colspan of 100 and 199 empty rows)", () => {
-		const wide = table([row([{ ...cell([]), colspan: 100 }]), ...Array.from({ length: 199 }, () => ({ _type: "tableRow", _key: `r${keys++}` }))]);
+		const wide = table([row([{ ...cell([]), colspan: 100 }]), ...Array.from({ length: 199 }, emptyRow)]);
 		expect(guardPortableText([wide])).toEqual(["#0 table: at most 2000 cells are allowed (got 100×200 once core fills the grid)"]);
 	});
+	// 9 tables of 2000 slots and 2000 spans each leave 2000 spans of the total (and 2000 slots, which the blocks do not use).
+	const spans = (n) => Array.from({ length: Math.ceil(n / 1000) }, (_, k) => para(Array.from({ length: Math.min(1000, n - k * 1000) }, () => span())));
 	it("counts an empty cell as one span, as core renders it", () => {
-		expect(guardPortableText(Array.from({ length: 10 }, () => grid(50, 40)))).toEqual([]);
-		expect(guardPortableText(Array.from({ length: 11 }, () => grid(50, 40)))).toEqual(["at most 20000 spans are allowed in total"]);
+		const nine = Array.from({ length: 9 }, () => grid(50, 40));
+		expect(guardPortableText([...nine, ...spans(2000)])).toEqual([]);
+		expect(guardPortableText([...nine, ...spans(2001)])).toEqual(["at most 20000 spans are allowed in total"]);
 	});
 	it("counts the cells core pads a short row with", () => {
-		const ragged = table([row(Array.from({ length: 40 }, () => cell([]))), ...Array.from({ length: 49 }, () => row([cell([])]))]);
-		expect(guardPortableText(Array.from({ length: 10 }, () => ragged))).toEqual([]);
-		expect(guardPortableText(Array.from({ length: 11 }, () => ragged))).toEqual(["at most 20000 spans are allowed in total"]);
+		const ragged = () => table([row(Array.from({ length: 40 }, () => cell([]))), ...Array.from({ length: 49 }, () => row([cell([])]))]);
+		const nine = Array.from({ length: 9 }, ragged);
+		expect(guardPortableText([...nine, ...spans(2000)])).toEqual([]);
+		expect(guardPortableText([...nine, ...spans(2001)])).toEqual(["at most 20000 spans are allowed in total"]);
 	});
 	it("rejects a table core cannot lay out", () => {
 		const huge = table(Array.from({ length: 500 }, () => row([{ ...cell([]), colspan: 100 }])));
 		expect(guardPortableText([huge])).toEqual(["#0 table: core cannot lay out this table (TABLE_TOO_LARGE)"]);
 		expect(guardPortableText([table([row([cell([span("a", ["nope"])])])])])).toEqual(["#0 table: core cannot lay out this table (UNSUPPORTED_MARK_DEFINITION)"]);
+	});
+});
+
+describe("guardPortableText: table grid slots over the whole value (core does work per slot, not per written cell)", () => {
+	// One cell of colspan 100 and rowspan 20 over 20 rows: 2000 slots, one written cell, one rendered span.
+	const slab = () => table([row([{ ...cell([]), colspan: 100, rowspan: 20 }]), ...Array.from({ length: 19 }, emptyRow)]);
+	const MESSAGE = ["at most 20000 table cells are allowed in total (counting cells spanned by another)"];
+	it("allows 20000 slots in total and stops at the table that passes it", () => {
+		expect(guardPortableText(Array.from({ length: 10 }, slab))).toEqual([]);
+		expect(guardPortableText(Array.from({ length: 11 }, slab))).toEqual(MESSAGE);
+	});
+	it("stops a value of 2000 such tables at the 11th, so the normalizer runs 11 times, not 2000", () => {
+		expect(guardPortableText(Array.from({ length: 2000 }, slab))).toEqual(MESSAGE);
+	});
+});
+
+describe("guardPortableText: markDefs over the whole value (the toolkit runs markDefs.find per mark)", () => {
+	let id = 0;
+	const defs = (n) => Array.from({ length: n }, () => ({ _type: "link", _key: `m${id++}`, href: "/x" }));
+	const withDefs = (n) => ({ ...para([span()]), markDefs: defs(n) });
+	const MESSAGE = ["at most 5000 markDefs are allowed in total"];
+	it("allows 5000 block markDefs in total", () => {
+		const five = Array.from({ length: 5 }, () => withDefs(1000));
+		expect(guardPortableText(five)).toEqual([]);
+		expect(guardPortableText([...five, withDefs(1)])).toEqual(MESSAGE);
+	});
+	it("counts table and cell markDefs toward the same total", () => {
+		const both = (tableDefs, cellDefs) => ({ ...table([row([{ ...cell([]), markDefs: defs(cellDefs) }])]), markDefs: defs(tableDefs) });
+		expect(guardPortableText([both(3000, 2000)])).toEqual([]);
+		expect(guardPortableText([both(3000, 2001)])).toEqual(MESSAGE);
+		expect(guardPortableText([withDefs(2000), both(2000, 1000)])).toEqual([]);
+		expect(guardPortableText([withDefs(2000), both(2000, 1001)])).toEqual(MESSAGE);
+	});
+	it("counts markDefs before it walks them, so a huge array is one problem", () => {
+		expect(guardPortableText([withDefs(200000)])).toEqual(MESSAGE);
+		expect(guardPortableText([{ ...table([row([cell([])])]), markDefs: defs(200000) }])).toEqual(MESSAGE);
 	});
 });
 

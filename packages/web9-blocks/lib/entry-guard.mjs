@@ -1,7 +1,8 @@
 // The check of one entry (spec §10; spec 2026-10-17 §3.2, §3.3): its Portable Text, image and block-image fields
 // (pt-guard.mjs) and the length limits (limits.mjs). content:beforeSave, the publish hooks (index.mjs) and
 // scripts/guard-scan.mjs all call entryProblems, so a value is judged the same wherever it is checked. Nothing here
-// imports emdash, so guard-scan runs it in plain node.
+// imports emdash's runtime (pt-guard.mjs imports only core's self-contained table normalizer), so guard-scan runs it
+// in plain node.
 import { DATA_LIMITS, LIMITS, lengthProblem } from "./limits.mjs";
 import { guardBlockImages, guardImageValue, guardPortableText } from "./pt-guard.mjs";
 

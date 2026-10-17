@@ -27,7 +27,12 @@
 // Totals over the whole value (spec 2026-10-17 §3.6): render CPU grows with every span and, most, with every mark
 // (plan 2 measured 0.3 s for one block of 1000 spans × 20 marks), so a value holds at most MAX_NODES top-level nodes,
 // MAX_SPANS spans and MAX_TOTAL_MARKS marks, counting blocks, container blocks and table cells (on the normalized
-// grid); past a total the walk stops with that one problem. Lists that a renderer maps (buttons.buttons, tabs.tabs,
+// grid). Two more totals bound what a per-block or per-table cap cannot. Core's normalizer and Table.astro do work per
+// grid slot of every table, however few cells are written (one cell of colspan 100 × rowspan 20 fills 2000 slots and is
+// one span), so a value holds at most MAX_GRID_SLOTS slots. And @portabletext/toolkit builds marks with markDefs.find per
+// mark (dist/index.js:65), so render cost is marks × markDefs per block: a value holds at most MAX_MARK_DEFS markDefs
+// (blocks, tables and table cells), counted before they are walked or normalized. Past a total the walk stops with that
+// one problem. Lists that a renderer maps (buttons.buttons, tabs.tabs,
 // tool_grid.tools) must be arrays of objects within a size cap, and their text fields strings: a null item or a number
 // tagline throws at render time, and so does `buttons: null` (core's Buttons.astro defaults only undefined).
 // Output is bounded: collecting stops after MAX_PROBLEMS (plain pushes, never spreads of a long list, which
@@ -94,6 +99,8 @@ function collector() {
 		full: false,
 		spans: 0,
 		marks: 0,
+		slots: 0,
+		markDefs: 0,
 		added: 0,
 		add(problem) {
 			this.added++;
@@ -111,13 +118,17 @@ function collector() {
 	};
 }
 
-/** Counts spans and marks toward the value's totals; past one, stops the walk with its problem. */
-function count(out, spans, marks) {
+/** Adds spans, marks, table grid slots and markDefs to the value's totals; past one, stops the walk with its problem. */
+function count(out, { spans = 0, marks = 0, slots = 0, markDefs = 0 }) {
 	if (out.full) return;
 	out.spans += spans;
 	out.marks += marks;
+	out.slots += slots;
+	out.markDefs += markDefs;
 	if (out.spans > MAX_SPANS) out.stop(`at most ${MAX_SPANS} spans are allowed in total`);
 	else if (out.marks > MAX_TOTAL_MARKS) out.stop(`at most ${MAX_TOTAL_MARKS} marks are allowed in total`);
+	else if (out.slots > MAX_GRID_SLOTS) out.stop(`at most ${MAX_GRID_SLOTS} table cells are allowed in total (counting cells spanned by another)`);
+	else if (out.markDefs > MAX_MARK_DEFS) out.stop(`at most ${MAX_MARK_DEFS} markDefs are allowed in total`);
 }
 
 /** Field checks per allowed _type. Paths use `a.b` for nesting and `list[].field` for arrays. */
@@ -219,6 +230,8 @@ const MAX_CHILDREN = 1000;
 const MAX_NODES = 2000;
 const MAX_SPANS = 20000;
 const MAX_TOTAL_MARKS = 5000;
+const MAX_GRID_SLOTS = 20000;
+const MAX_MARK_DEFS = 5000;
 const MAX_ROWS = 500;
 const MAX_CELLS = 2000;
 /**
@@ -251,6 +264,7 @@ function checkBlock(node, where, out) {
 	if (node.markDefs != null && !Array.isArray(node.markDefs)) out.add(`${where} markDefs: must be an array`);
 	else {
 		const defs = node.markDefs ?? [];
+		count(out, { markDefs: defs.length });
 		for (let k = 0; k < defs.length && !out.full; k++) {
 			const def = defs[k];
 			if (def?._type !== "link") out.add(notAllowed(where, `markDefs[${k}]._type`, def?._type));
@@ -261,10 +275,11 @@ function checkBlock(node, where, out) {
 		}
 	}
 
+	if (out.full) return;
 	if (node.children === undefined) return;
 	if (!Array.isArray(node.children)) return out.add(`${where} children: must be an array of spans`);
 	if (node.children.length > MAX_CHILDREN) return out.add(`${where} children: at most ${MAX_CHILDREN} spans are allowed`);
-	count(out, node.children.length, 0);
+	count(out, { spans: node.children.length });
 	for (let j = 0; j < node.children.length && !out.full; j++) {
 		const child = node.children[j];
 		const type = typeof child?._type === "string" ? child._type : "(no _type)";
@@ -283,7 +298,7 @@ function checkBlock(node, where, out) {
 			out.add(`${where} children[${j}].marks: at most ${MAX_MARKS} marks are allowed`);
 			continue;
 		}
-		count(out, 0, child.marks.length);
+		count(out, { marks: child.marks.length });
 		for (let m = 0; m < child.marks.length && !out.full; m++) {
 			const mark = child.marks[m];
 			if (typeof mark !== "string" || !(DECORATORS.has(mark) || keys.has(mark))) out.add(notAllowed(where, `children[${j}].marks`, mark));
@@ -313,7 +328,8 @@ function checkColumns(node, i, out) {
 
 /** A table cell's content: spans only (core renders them inline), within the span and mark caps. Spans are counted by checkTable. */
 function checkCell(cell, at, out) {
-	if (cell.content == null) return;
+	if (Array.isArray(cell.markDefs)) count(out, { markDefs: cell.markDefs.length });
+	if (out.full || cell.content == null) return;
 	if (!Array.isArray(cell.content)) return out.add(`${at} content: must be an array of spans`);
 	if (cell.content.length > MAX_CHILDREN) return out.add(`${at} content: at most ${MAX_CHILDREN} spans are allowed`);
 	for (let j = 0; j < cell.content.length && !out.full; j++) {
@@ -327,20 +343,23 @@ function checkCell(cell, at, out) {
 		if (span.marks == null) continue;
 		if (!Array.isArray(span.marks)) out.add(`${at} content[${j}].marks: must be an array`);
 		else if (span.marks.length > MAX_MARKS) out.add(`${at} content[${j}].marks: at most ${MAX_MARKS} marks are allowed`);
-		else count(out, 0, span.marks.length);
+		else count(out, { marks: span.marks.length });
 	}
 }
 
 /**
- * core's Table.astro maps rows[].cells[]: arrays of objects, within MAX_ROWS rows and MAX_CELLS written cells (these bound
- * the normalizer's work), with no `_key` repeated among the table, its rows and its cells (the normalizer de-duplicates
- * keys with a linear suffix scan per key, `reserveKey`, so repeats cost quadratic time at render). Then core's own
- * normalizer lays the table out: one it cannot lay out is rejected, the grid it fills is capped at MAX_CELLS, and the
- * spans it renders (empty and padded cells are one span each) count toward the total.
+ * core's Table.astro maps rows[].cells[]: arrays of objects, within MAX_ROWS rows and MAX_CELLS written cells, with no
+ * `_key` repeated among the table, its rows and its cells (the normalizer de-duplicates keys with a linear suffix scan
+ * per key, `reserveKey`, so repeats cost quadratic time at render). These bound one normalizer run, not the sum over a
+ * value. Then core's own normalizer lays the table out: one it cannot lay out is rejected, the grid it fills (work per
+ * slot, however few cells are written) is capped at MAX_CELLS and counted toward MAX_GRID_SLOTS for the value, and the
+ * spans it renders (empty and padded cells are one span each) count toward MAX_SPANS. The markDefs of the table and of
+ * each cell count toward MAX_MARK_DEFS as they are met, before any normalizer run.
  */
 function checkTable(node, i, out) {
 	const where = `#${i} table`;
-	if (node.rows == null) return;
+	if (Array.isArray(node.markDefs)) count(out, { markDefs: node.markDefs.length });
+	if (out.full || node.rows == null) return;
 	if (!Array.isArray(node.rows)) return out.add(`${where} rows: must be an array`);
 	if (node.rows.length > MAX_ROWS) return out.add(`${where} rows: at most ${MAX_ROWS} rows are allowed`);
 	let cells = 0;
@@ -383,9 +402,11 @@ function checkTable(node, i, out) {
 	if (!normalized.ok) return out.stop(`${where}: core cannot lay out this table (${normalized.reason})`);
 	const { width, height } = normalized;
 	if (width * height > MAX_CELLS) return out.stop(`${where}: at most ${MAX_CELLS} cells are allowed (got ${width}×${height} once core fills the grid)`);
+	count(out, { slots: width * height });
+	if (out.full) return;
 	let spans = 0;
 	for (const row of normalized.table.rows) for (const cell of row.cells) spans += Math.max(1, cell.content?.length ?? 0);
-	count(out, spans, 0);
+	count(out, { spans });
 }
 
 /** A list a renderer maps (LISTS): an array of objects within its cap (null only where allowed), text fields strings, flags booleans. */
