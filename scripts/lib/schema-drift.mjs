@@ -19,6 +19,9 @@ function imagePaths(fields) {
 	});
 }
 
+// The field types whose values the layout renderers print as text. A new text-like type in core (a `markdown` field,
+// say) has to be added here: otherwise a block field of that type yields no text path, so the drift check never reports
+// it and it stays uncapped without a word.
 const TEXT_TYPES = ["string", "text", "url"];
 
 /** Text paths among a block type version's fields: "title", "features[].title", and "image.alt" for each image path. */
