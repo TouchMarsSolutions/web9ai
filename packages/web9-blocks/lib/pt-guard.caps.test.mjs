@@ -3,8 +3,10 @@ import { guardPortableText } from "./pt-guard.mjs";
 
 const span = (text = "a", marks = []) => ({ _type: "span", _key: "s", text, marks });
 const para = (children) => ({ _type: "block", _key: "b", style: "normal", markDefs: [], children });
-const cell = (content) => ({ _type: "tableCell", _key: "c", content, markDefs: [] });
-const row = (cells) => ({ _type: "tableRow", _key: "r", cells });
+// Keys are unique per cell and row: a table whose keys repeat is rejected (core's reserveKey is quadratic in repeats).
+let keys = 0;
+const cell = (content) => ({ _type: "tableCell", _key: `c${keys++}`, content, markDefs: [] });
+const row = (cells) => ({ _type: "tableRow", _key: `r${keys++}`, cells });
 const table = (rows) => ({ _type: "table", _key: "t", rows });
 
 describe("guardPortableText: totals over the whole value (spec 2026-10-17 §3.6)", () => {
@@ -73,13 +75,33 @@ describe("guardPortableText: tables (spec 2026-10-17 §3.6)", () => {
 	});
 });
 
+describe("guardPortableText: repeated keys in a table (core's reserveKey de-duplicates them in quadratic time)", () => {
+	it("rejects two cells with the same _key", () => {
+		expect(guardPortableText([table([row([{ ...cell([span("a")]), _key: "dup" }, { ...cell([]), _key: "dup" }])])])).toEqual(['#0 table rows[0].cells[1]._key: duplicate key "dup"']);
+		expect(guardPortableText([table([row([{ ...cell([]), _key: "dup" }]), row([{ ...cell([]), _key: "dup" }])])])).toEqual(['#0 table rows[1].cells[0]._key: duplicate key "dup"']);
+	});
+	it("rejects a row, a cell or the table sharing a _key with another", () => {
+		expect(guardPortableText([table([{ ...row([{ ...cell([]), _key: "x" }]), _key: "x" }])])).toEqual(['#0 table rows[0].cells[0]._key: duplicate key "x"']);
+		expect(guardPortableText([table([row([]), { ...row([]), _key: "x" }, { ...row([]), _key: "x" }])])).toEqual(['#0 table rows[2]._key: duplicate key "x"']);
+		expect(guardPortableText([{ ...table([row([{ ...cell([]), _key: "t" }])]), _key: "t" }])).toEqual(['#0 table rows[0].cells[0]._key: duplicate key "t"']);
+	});
+	it("ignores a missing, empty or non-string _key (core generates one)", () => {
+		const bare = { _type: "tableCell", content: [] };
+		expect(guardPortableText([table([row([bare, { ...bare, _key: "" }, { ...bare, _key: 5 }, { ...bare, _key: 5 }, { ...bare, _key: "" }, bare])])])).toEqual([]);
+	});
+	it("stops at 50 problems for 2000 cells with one key, before the normalizer runs", () => {
+		const same = table([row(Array.from({ length: 2000 }, () => ({ ...cell([]), _key: "c" })))]);
+		const problems = guardPortableText([same]);
+		expect(problems).toHaveLength(51);
+		expect(problems.slice(0, 2)).toEqual(['#0 table rows[0].cells[1]._key: duplicate key "c"', '#0 table rows[0].cells[2]._key: duplicate key "c"']);
+		expect(problems[50]).toBe("…and more");
+	});
+});
+
 describe("guardPortableText: tables on core's normalized grid (normalizePortableTextTable pads rows and fills empty cells)", () => {
-	// Distinct keys: core's reserveKey is quadratic in cells that share a _key, and these tables have thousands of cells.
-	let seq = 0;
-	const fresh = () => ({ ...cell([]), _key: `k${seq++}` });
-	const grid = (rows, cols) => table(Array.from({ length: rows }, () => row(Array.from({ length: cols }, fresh))));
+	const grid = (rows, cols) => table(Array.from({ length: rows }, () => row(Array.from({ length: cols }, () => cell([])))));
 	it("caps the grid core renders, not the cells written (a colspan of 100 and 199 empty rows)", () => {
-		const wide = table([row([{ ...cell([]), colspan: 100 }]), ...Array.from({ length: 199 }, () => ({ _type: "tableRow", _key: "r" }))]);
+		const wide = table([row([{ ...cell([]), colspan: 100 }]), ...Array.from({ length: 199 }, () => ({ _type: "tableRow", _key: `r${keys++}` }))]);
 		expect(guardPortableText([wide])).toEqual(["#0 table: at most 2000 cells are allowed (got 100×200 once core fills the grid)"]);
 	});
 	it("counts an empty cell as one span, as core renders it", () => {
@@ -87,7 +109,7 @@ describe("guardPortableText: tables on core's normalized grid (normalizePortable
 		expect(guardPortableText(Array.from({ length: 11 }, () => grid(50, 40)))).toEqual(["at most 20000 spans are allowed in total"]);
 	});
 	it("counts the cells core pads a short row with", () => {
-		const ragged = table([row(Array.from({ length: 40 }, fresh)), ...Array.from({ length: 49 }, () => row([fresh()]))]);
+		const ragged = table([row(Array.from({ length: 40 }, () => cell([]))), ...Array.from({ length: 49 }, () => row([cell([])]))]);
 		expect(guardPortableText(Array.from({ length: 10 }, () => ragged))).toEqual([]);
 		expect(guardPortableText(Array.from({ length: 11 }, () => ragged))).toEqual(["at most 20000 spans are allowed in total"]);
 	});

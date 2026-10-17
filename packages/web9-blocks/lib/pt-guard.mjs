@@ -22,6 +22,8 @@
 // is also run through that normalizer (same module and specifier as Table.astro, which is a dependency of emdash and
 // pinned with it): a table core cannot lay out is rejected (that covers mark names and markDefs in cells), the grid it
 // fills (width × height) is capped at MAX_CELLS, and the spans it renders, padding included, are counted on that grid.
+// The normalizer de-duplicates keys with a linear suffix scan per key (reserveKey), so repeated keys cost quadratic time
+// at render: a table whose own, row or cell `_key`s repeat is rejected, and that check runs before the normalizer.
 // Totals over the whole value (spec 2026-10-17 §3.6): render CPU grows with every span and, most, with every mark
 // (plan 2 measured 0.3 s for one block of 1000 spans × 20 marks), so a value holds at most MAX_NODES top-level nodes,
 // MAX_SPANS spans and MAX_TOTAL_MARKS marks, counting blocks, container blocks and table cells (on the normalized
@@ -331,8 +333,10 @@ function checkCell(cell, at, out) {
 
 /**
  * core's Table.astro maps rows[].cells[]: arrays of objects, within MAX_ROWS rows and MAX_CELLS written cells (these bound
- * the normalizer's work). Then core's own normalizer lays the table out: one it cannot lay out is rejected, the grid it
- * fills is capped at MAX_CELLS, and the spans it renders (empty and padded cells are one span each) count toward the total.
+ * the normalizer's work), with no `_key` repeated among the table, its rows and its cells (the normalizer de-duplicates
+ * keys with a linear suffix scan per key, `reserveKey`, so repeats cost quadratic time at render). Then core's own
+ * normalizer lays the table out: one it cannot lay out is rejected, the grid it fills is capped at MAX_CELLS, and the
+ * spans it renders (empty and padded cells are one span each) count toward the total.
  */
 function checkTable(node, i, out) {
 	const where = `#${i} table`;
@@ -341,12 +345,21 @@ function checkTable(node, i, out) {
 	if (node.rows.length > MAX_ROWS) return out.add(`${where} rows: at most ${MAX_ROWS} rows are allowed`);
 	let cells = 0;
 	const added = out.added;
+	// The keys core's reserveKey puts in one set; a missing, empty or non-string key is replaced by a generated one.
+	const seen = new Set();
+	const checkUnique = (key, at) => {
+		if (typeof key !== "string" || !key) return;
+		if (seen.has(key)) out.add(`${at}._key: duplicate key ${show(key)}`);
+		else seen.add(key);
+	};
+	checkUnique(node._key, where);
 	for (let r = 0; r < node.rows.length && !out.full; r++) {
 		const row = node.rows[r];
 		if (!isObject(row)) {
 			out.add(`${where} rows[${r}]: must be an object`);
 			continue;
 		}
+		checkUnique(row._key, `${where} rows[${r}]`);
 		if (row.cells == null) continue;
 		if (!Array.isArray(row.cells)) {
 			out.add(`${where} rows[${r}].cells: must be an array`);
@@ -357,7 +370,10 @@ function checkTable(node, i, out) {
 		for (let c = 0; c < row.cells.length && !out.full; c++) {
 			const at = `${where} rows[${r}].cells[${c}]`;
 			if (!isObject(row.cells[c])) out.add(`${at}: must be an object`);
-			else checkCell(row.cells[c], at, out);
+			else {
+				checkUnique(row.cells[c]._key, at);
+				checkCell(row.cells[c], at, out);
+			}
 		}
 	}
 	// A table that already has a problem is rejected anyway; the normalizer would only repeat it as a failure.
