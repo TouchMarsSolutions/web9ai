@@ -1,7 +1,9 @@
 ---
 // `hero` block of pages.layout (seed blockTypes). Block props only reach text, href and src, never a
-// class attribute; the url fields only accept http(s), mailto, tel and site-relative paths.
+// class attribute. Core validates the url fields on write; heroButtons runs them through safeHref again,
+// because a row that bypassed that check must not put a javascript: href on the home page.
 import { Image } from "emdash/ui";
+import { heroButtons } from "../../../packages/web9-site/lib/hero-buttons.mjs";
 import type { PageLayoutHeroBlock } from "../../../emdash-env";
 
 interface Props {
@@ -12,10 +14,7 @@ interface Props {
 const { value: b, index } = Astro.props;
 // The first block of a page carries its h1.
 const Heading = index === 0 ? "h1" : "h2";
-const buttons = [
-	{ label: b.primary_label, href: b.primary_href, primary: true },
-	{ label: b.secondary_label, href: b.secondary_href, primary: false },
-].filter((x) => x.label && x.href);
+const buttons = heroButtons(b);
 ---
 
 <section class="border-b border-border bg-surface px-4 py-16 text-center">

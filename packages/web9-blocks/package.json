@@ -7,6 +7,7 @@
   "exports": {
     ".": "./index.mjs",
     "./astro": "./astro/index.mjs",
+    "./href": "./lib/href.mjs",
     "./markdown": "./lib/markdown.mjs",
     "./html": "./lib/html.mjs",
     "./to-markdown": "./lib/to-markdown.mjs",

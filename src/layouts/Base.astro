@@ -6,7 +6,7 @@ import { createPublicPageContext } from "emdash/page";
 import LiveSearch from "emdash/ui/search";
 import WebMcpSearch from "emdash/ui/webmcp-search";
 import { Font } from "astro:assets";
-import { localizeHref } from "../../packages/web9-site/lib/nav.mjs";
+import { linkRel, localizeHref } from "../../packages/web9-site/lib/nav.mjs";
 import { resolveBlogSiteIdentity } from "../utils/site-identity";
 import "../styles/global.css";
 import "../styles/tokens.css";
@@ -76,7 +76,6 @@ const ICONS: Record<string, string> = {
 	dark: '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>',
 	system: '<rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><path d="M8 21h8M12 17v4"></path>',
 };
-const linkRel = (target?: string | null) => (target === "_blank" ? "noopener noreferrer" : undefined);
 ---
 
 <!doctype html>

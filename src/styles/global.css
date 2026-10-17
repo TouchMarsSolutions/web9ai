@@ -137,4 +137,10 @@
 	.prose code::after {
 		content: none;
 	}
+
+	/* Typography sizes headings in em, so headings nested in headings (the Markdown sanitizer keeps `<h1><div><h1>`) would
+	   compound at every level. Inherit instead; (0,1,2) beats the plugin's (0,1,0). */
+	.prose :is(h1, h2, h3, h4, h5, h6) :is(h1, h2, h3, h4, h5, h6) {
+		font-size: inherit;
+	}
 }

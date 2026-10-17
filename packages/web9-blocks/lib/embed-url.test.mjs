@@ -7,10 +7,24 @@ describe("embedSrc", () => {
 		["https://youtu.be/SKS-URw9a18", "https://www.youtube-nocookie.com/embed/SKS-URw9a18"],
 		["https://www.youtube.com/embed/SKS-URw9a18", "https://www.youtube-nocookie.com/embed/SKS-URw9a18"],
 		["https://www.youtube.com/watch?v=trXPfpV5iRQ&t=644s", "https://www.youtube-nocookie.com/embed/trXPfpV5iRQ?start=644"],
+		["https://youtube.com/watch?v=SKS-URw9a18", "https://www.youtube-nocookie.com/embed/SKS-URw9a18"],
+		["https://m.youtube.com/watch?v=SKS-URw9a18", "https://www.youtube-nocookie.com/embed/SKS-URw9a18"],
+		["https://m.youtube.com/watch?feature=share&v=SKS-URw9a18&t=30s", "https://www.youtube-nocookie.com/embed/SKS-URw9a18?start=30"],
+		["https://www.youtube.com/shorts/SKS-URw9a18", "https://www.youtube-nocookie.com/embed/SKS-URw9a18"],
+		["https://youtube.com/shorts/SKS-URw9a18", "https://www.youtube-nocookie.com/embed/SKS-URw9a18"],
+		["https://m.youtube.com/shorts/SKS-URw9a18?feature=share", "https://www.youtube-nocookie.com/embed/SKS-URw9a18"],
 		["https://vimeo.com/123456789", "https://player.vimeo.com/video/123456789"],
 	])("%s", (url, src) => expect(embedSrc(url)).toBe(src));
-	it.each([["https://evil.example/watch?v=SKS-URw9a18"], ["javascript:alert(1)"], ["http://www.youtube.com/watch?v=SKS-URw9a18"], [undefined]])(
-		"returns null for %s",
-		(url) => expect(embedSrc(url)).toBeNull(),
-	);
+	it.each([
+		["https://evil.example/watch?v=SKS-URw9a18"],
+		["javascript:alert(1)"],
+		["http://www.youtube.com/watch?v=SKS-URw9a18"],
+		["http://m.youtube.com/watch?v=SKS-URw9a18"],
+		["https://music.youtube.com/watch?v=SKS-URw9a18"],
+		["https://m.youtube.com.evil.example/watch?v=SKS-URw9a18"],
+		["https://evil.example/m.youtube.com/shorts/SKS-URw9a18"],
+		["https://www.youtube.com/shorts/SKS-URw9a18abc"],
+		["https://www.youtube.com/shorts/"],
+		[undefined],
+	])("returns null for %s", (url) => expect(embedSrc(url)).toBeNull());
 });

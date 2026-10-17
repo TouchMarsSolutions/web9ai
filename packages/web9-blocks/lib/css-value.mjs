@@ -4,7 +4,7 @@
 // No math functions (calc, min, max, clamp): a sum or a division can exceed a cap while each number stays under it.
 // Every number needs a unit from PX_PER_UNIT: exponents and absolute, viewport or container units fail.
 // Caps compare px equivalents with em = rem = 16px. That bounds the value token, not the rendered size:
-// nested headings can inflate em.
+// nested headings would inflate em, so global.css resets a heading inside a heading in .prose to font-size: inherit.
 // box-shadow takes px lengths and unitless 0 only: a shadow paints outside its box, and relative units compound.
 // margin takes no minus sign anywhere: a minus after a number or % (0-256px) is still a negative margin.
 // font-size takes no em, rem, % or larger/smaller keywords: relative sizes compound through nested elements.

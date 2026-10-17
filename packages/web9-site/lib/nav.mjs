@@ -6,3 +6,9 @@ export function localizeHref(href, locale) {
 	if (href.startsWith("/docs/")) return `/${locale}${href}`;
 	return href;
 }
+
+/**
+ * `rel` for a menu link. Menu items are agent-writable and core takes any string as `target`, so a named target on
+ * an external url would open a window that keeps `window.opener`: whenever a target is set, cut opener and referrer.
+ */
+export const linkRel = (target) => (typeof target === "string" && target !== "" ? "noopener noreferrer" : undefined);
