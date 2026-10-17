@@ -152,6 +152,8 @@ describe("menu, term and byline findings", () => {
 			`term tag/${long(101).slice(0, 40)}… (en): slug: at most 100 characters (got 101)`,
 		]);
 		expect(bylineFindings({ id: "B1", slug: "a", displayName: long(81) })).toEqual(["byline B1: displayName: at most 80 characters (got 81)"]);
+		expect(bylineFindings({ id: "B2", slug: "a", displayName: "A", avatarMediaId: long(65) })).toEqual(["byline B2: avatarMediaId: at most 64 characters (got 65)"]);
+		for (const avatarMediaId of [null, long(64), "01JABCDEFGHJKMNPQRSTVWXYZ0"]) expect(bylineFindings({ id: "B3", slug: "a", displayName: "A", avatarMediaId })).toEqual([]);
 		expect(termFindings("tag", { slug: "ai", label: "AI" })).toEqual([]);
 	});
 });

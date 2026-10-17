@@ -33,6 +33,33 @@ describe("schemaDrift", () => {
 		expect(schemaDrift(pages)).toEqual([
 			'schema drift: pages.layout hero v2 has image path "background" missing from BLOCK_IMAGE_FIELDS',
 			'schema drift: pages.layout hero v2 has image path "logos[].img" missing from BLOCK_IMAGE_FIELDS',
+			'schema drift: pages.layout hero v2 has text path "background.alt" missing from BLOCK_TEXT_FIELDS',
+			'schema drift: pages.layout hero v2 has text path "logos[].img.alt" missing from BLOCK_TEXT_FIELDS',
+		]);
+	});
+	it("reports a text path (string, text, url, an image's alt) in any version of a block type that BLOCK_TEXT_FIELDS lacks", () => {
+		const pages = live(seed.collections.find((c) => c.slug === "pages"));
+		const layout = pages.fields.find((f) => f.slug === "layout");
+		const grid = layout.blockTypes.find((t) => t.slug === "feature_grid");
+		const fields = [
+			{ slug: "title", type: "string" },
+			{ slug: "kicker", type: "string" },
+			{ slug: "note", type: "text" },
+			{ slug: "more", type: "url" },
+			{ slug: "logo", type: "image" },
+			{ slug: "count", type: "number" },
+			{ slug: "features", type: "repeater", validation: { subFields: [{ slug: "title", type: "string" }, { slug: "cta", type: "string" }, { slug: "icon", type: "image" }] } },
+		];
+		layout.blockTypes = [...layout.blockTypes.filter((t) => t !== grid), { ...grid, versions: [...grid.versions, { version: 2, fields }] }];
+		expect(schemaDrift(pages)).toEqual([
+			'schema drift: pages.layout feature_grid v2 has image path "logo" missing from BLOCK_IMAGE_FIELDS',
+			'schema drift: pages.layout feature_grid v2 has image path "features[].icon" missing from BLOCK_IMAGE_FIELDS',
+			'schema drift: pages.layout feature_grid v2 has text path "kicker" missing from BLOCK_TEXT_FIELDS',
+			'schema drift: pages.layout feature_grid v2 has text path "note" missing from BLOCK_TEXT_FIELDS',
+			'schema drift: pages.layout feature_grid v2 has text path "more" missing from BLOCK_TEXT_FIELDS',
+			'schema drift: pages.layout feature_grid v2 has text path "logo.alt" missing from BLOCK_TEXT_FIELDS',
+			'schema drift: pages.layout feature_grid v2 has text path "features[].cta" missing from BLOCK_TEXT_FIELDS',
+			'schema drift: pages.layout feature_grid v2 has text path "features[].icon.alt" missing from BLOCK_TEXT_FIELDS',
 		]);
 	});
 	it("reads a collection without fields, and a field without a slug, as no drift", () => {

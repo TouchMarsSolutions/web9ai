@@ -162,7 +162,11 @@ export function termFindings(taxonomy, term) {
 	return at(label, [lengthProblem("label", term.label, LIMITS.label), lengthProblem("slug", term.slug, LIMITS.slug)]);
 }
 
-/** A byline (byline_list item). */
+/** A byline (byline_list item): the gate's BYLINE fields. */
 export function bylineFindings(byline) {
-	return at(`byline ${byline.id}`, [lengthProblem("displayName", byline.displayName, LIMITS.label), lengthProblem("slug", byline.slug, LIMITS.slug)]);
+	return at(`byline ${byline.id}`, [
+		lengthProblem("displayName", byline.displayName, LIMITS.label),
+		lengthProblem("slug", byline.slug, LIMITS.slug),
+		lengthProblem("avatarMediaId", byline.avatarMediaId, LIMITS.id),
+	]);
 }
