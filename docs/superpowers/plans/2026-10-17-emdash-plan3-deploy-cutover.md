@@ -5,7 +5,7 @@
 **Goal:** 把站点部署到 Cloudflare Workers，在生产 D1 上跑完迁移，再把 `www.web9.ai` 从 GitHub Pages 切到 Worker。
 
 **Architecture:**
-- 一个 Worker `web9-ai`，账号 `Jhcao23@gmail.com's Account`（`eb04f0cb…`），和 zone `web9.ai` 在同一个账号。
+- 一个 Worker `web9-ai`，账号 `eb04f0cb…`，和 zone `web9.ai` 在同一个账号。
 - Worker 的 binding：
   - D1 `web9-ai`；
   - R2 `web9-ai-media`；
@@ -41,7 +41,10 @@
 | GitHub Pages | 从 `gh-pages` 构建（legacy），cname `www.web9.ai`，证书覆盖 `www.web9.ai` 和 `web9.ai`，2026-12-01 到期 | `gh api repos/TouchMarsSolutions/web9ai/pages` |
 | branch protection | `main` 没有 required status check，所以 spec §12 里 CI 改名那一项不阻塞 | `gh api …/branches/main/protection` |
 | 迁移 token 的 scope | `admin`：`hasScope` 把 `admin` 当成除 `mcp:tools` 外的全部 scope，没列进 SCOPE_RULES 的 REST 路径（如 `/_emdash/api/redirects`）也要 `admin`。MCP 端点不过 SCOPE_RULES | `emdash/dist/astro/middleware/auth.mjs`、`@emdash-cms/auth` |
-| 首次请求 | 空库的第一次请求要跑 core migration，约 30 s | `touchmars.technology/CLAUDE.md` |
+| 首次请求 | 空库的第一次请求（或第一次 cron tick）要跑 core migration，约 30 s；2026-10-17 实测 36 s | `touchmars.technology/CLAUDE.md` |
+| Custom Domain 和已有 DNS 记录 | stdout 不是 TTY 时（agent 的 shell 就是这样），`wrangler deploy` 不提示，直接覆盖和 Custom Domain 冲突的 DNS 记录（`override_existing_dns_record`）；只有在交互终端里才会提示。所以带 `routes` 的配置一旦部署，GitHub Pages 的记录会被无声替换，并不会报错 | `node_modules/wrangler/wrangler-dist/cli.js:164347-164385`（PR #6 评审 I1） |
+| API token 权限 | wrangler deploy 需要 Workers Scripts:Edit、Workers KV Storage:Edit、D1:Read、R2:Read、Account Settings:Read；Task 4 另需 zone `web9.ai` 的 DNS:Edit 和 Workers Routes:Edit。缺 KV 权限时 wrangler 会跳过 provisioning 继续部署，然后在后面才失败 | `cli.js:175311-175318`（评审 M6）。2026-10-17 首次部署成功，说明 Task 2 需要的权限都有；DNS:Edit 等到 Task 4 才知道 |
+| 仓库是公开的 | 计划和 PR 会公开 workers.dev 的地址。setup 没完成之前，谁看到都能抢先注册管理员，所以部署后要立刻完成 setup，并在 Task 3 核对管理员只有一个 | `gh api repos/TouchMarsSolutions/web9ai`（评审 I3） |
 
 ## Owner 检查点
 
@@ -65,6 +68,10 @@
   - token 最多显示前 8 个字符；
   - 迁移用的 admin token 在 Task 4 验证完后 revoke，并删除本地文件。
 - 不改 `gh-pages` 分支，不停用 GitHub Pages（它是回退目标），不从 `legacy/` 部署任何东西。
+- **带 `routes` 的配置**：在 Task 4 Step 2 的 DNS 备份做完、Step 3 删掉那 5 条记录之前，routes PR 不能合并，任何带 `routes` 的 checkout 都不能运行 `wrangler deploy`，原因见上表"Custom Domain 和已有 DNS 记录"。
+- 永远不运行 `wrangler dev --remote`：它连的是生产 D1，第一次请求就会对生产库跑 core migration。
+- 环境变量不会在 Bash 调用之间保留：每条 `node scripts/...` 命令前面都直接带上 `EMDASH_URL=... EMDASH_TOKEN=...`，不要用 `export`。
+- 后台里的操作由 owner 本人完成：2026-10-17 agent 用 CDP 替 owner 点 setup 的 "Continue" 时，被 Claude Code 的 auto mode 拦下（Unrequested Commit in a Connected App）。
 - 提交：按文件名 `git add`，永远不提交 `.env`、`.dev.vars`、`.local/`、`.wrangler/`、`data.db`、`dist/`、`.superpowers/`。提交信息最后一行写 `Co-Authored-By: <你的模型名> <noreply@anthropic.com>`。
 - PR 合并前要跑一次独立的 Fable `code-reviewer` 评审（只读，不发 GitHub 评论）。按评审意见修完后，把评审结果和处理结果合成一条 PR comment 贴上。CI 绿、PR 状态 CLEAN 后，用 merge commit 合并，标题 "Merge <PR title> (#N)"。
 - dev server：
@@ -91,6 +98,11 @@
 ---
 
 ### Task 1: 部署配置和 canonical host（代码 + 文档，一个 PR）
+
+**状态**：PR #6。评审（Approve with fixes）之后有这些改动，下面的代码块是评审前的版本：
+- `canonical-host.mjs` 新增 `canonicalResponse(request)`：GET 和 HEAD 返回 301，其他方法返回 308，这样 API 客户端跟随跳转时不会把写操作变成 GET。`new URL` 解析失败时返回 null。
+- `src/worker.ts` 的 `fetch` 改成 `return canonicalResponse(request) ?? handler.fetch!(request, env, ctx)`。
+- `preview_urls` 的注释改为如实说明：它只是不给版本分配预览 URL。
 
 **Files:**
 - Create: `packages/web9-site/lib/canonical-host.mjs`、`packages/web9-site/lib/canonical-host.test.mjs`
@@ -182,7 +194,7 @@ export default {
 } satisfies ExportedHandler;
 ```
 
-- [ ] **Step 5: 改** `wrangler.jsonc`，在 `compatibility_flags` 后面加（routes 留给 Task 4：GitHub Pages 的记录还在时绑 Custom Domain 会失败）
+- [ ] **Step 5: 改** `wrangler.jsonc`，在 `compatibility_flags` 后面加。routes 留给 Task 4：非交互的 `wrangler deploy` 会不提示、直接覆盖冲突的 DNS 记录，所以 routes 只能在 DNS 备份之后再进 `main`。
 
 ```jsonc
 	"observability": { "enabled": true },
@@ -231,23 +243,42 @@ push 之后开 PR，跑 Fable 评审，修完合并（见 Global Constraints）�
 
 ### Task 2: 首次部署和 setup（检查点 A）
 
-**前提**：Task 1 已合并，本地在 `main` 的 HEAD 上；owner 已经说"可以部署"，并且人在浏览器前。
+**前提**：owner 已经说"可以部署"，并且人在浏览器前。
 
-- [ ] **Step 1: 生成生产用的 encryption key**（只用于加密插件 secret，现在没有插件 secret，但要在第一次保存之前设好）
+**状态（2026-10-17）**：
+- owner 说"部署"后，从 PR #6 分支的 HEAD `be8e11b7` 部署，没有等合并。原因：canonical redirect 只对 `web9.ai` 和 `www.web9.ai` 生效，而这两个域名还没绑到 Worker 上；合并后会再部署一次。
+- 部署结果：
+  - version `b0be8077-506e-4405-962c-25fc3d108824`；
+  - KV `web9-ai-session`（`eb64a983…`）已自动创建；
+  - D1 和 R2 按名字连上了已有资源；
+  - `EMDASH_ENCRYPTION_KEY` 已上传为 secret。
+- 第一次请求 `setup/status` 用了 36 s，返回 `needsSetup:true, step:"start"`。
+- 现在等 owner 完成 setup。
+
+- [x] **Step 1: 生成生产用的 encryption key**（只用于加密插件 secret。现在没有插件 secret，但要在第一次保存之前设好）
 
 ```bash
-mkdir -p .local && umask 077 && npx emdash secrets generate > .local/prod-secrets.raw
+mkdir -p .local && umask 077 && npx emdash secrets generate --write .local/prod-secrets.env
 ```
 
-从输出里取出 `EMDASH_ENCRYPTION_KEY=...` 那一行，写进 `.local/prod-secrets.env`（只留这一行，权限 600），删掉 `.raw`，再用 `npx emdash secrets fingerprint` 记下 kid（8 位，可以写进 ledger）。告诉 owner 把 `.local/prod-secrets.env` 里的 key 存进自己的密码管理器，和 D1 备份分开放。在聊天里不要显示 key。
+文件只有一行 `EMDASH_ENCRYPTION_KEY=...`，权限 600，在聊天里不显示。key 怎么保管由 owner 决定（2026-10-17）：只放在 Cloudflare 的 Worker secret 里，不另做备份，部署后删掉本地文件（见 spec §9"备份"）。
 
-- [ ] **Step 2: 构建并部署**
+- [x] **Step 2: 构建并部署**
 
 ```bash
-npx astro dev stop; npm run build && npx wrangler deploy --secrets-file .local/prod-secrets.env
+npx astro dev stop; npm run build && npx wrangler deploy --secrets-file .local/prod-secrets.env && rm .local/prod-secrets.env
 ```
 
-Expected: 输出 `https://web9-ai.jhcao23.workers.dev`，并且有 `Creating new KV Namespace "web9-ai-session"`。D1 和 R2 应连上已有的资源（`Resource name found in config`）。部署后立刻告诉 owner："现在打开 https://web9-ai.jhcao23.workers.dev/_emdash/admin 完成 setup"。
+Expected:
+- 输出 `https://web9-ai.jhcao23.workers.dev`。
+- provisioning 的输出只有 `Provisioning SESSION (KV Namespace)...` 和 `Creating new KV Namespace "web9-ai-session"`。D1 和 R2 按名字连上已有资源，不会进入 provisioning，所以没有对应的输出。
+- bindings 表里有 `env.DB (web9-ai)`、`env.MEDIA (web9-ai-media)`、`env.SESSION`、`env.IMAGES`、`env.ASSETS` 和 `env.EMDASH_ENCRYPTION_KEY`。
+
+部署后立刻：
+1. 由 agent 先 `curl` `/_emdash/api/setup/status`，这一步会把约 30 s 的 migration 跑完。
+2. 确认返回的是 `needsSetup:true, step:"start"`，再告诉 owner 打开 `/_emdash/admin` 完成 setup。如果返回 `step` 不是 `start`，或者 `needsSetup:false`，而 owner 还没动过，说明有人抢先了，立刻停下。
+
+如果改在交互终端里部署，wrangler 可能把 `database_id` 写进 `wrangler.jsonc`。部署后看一下 `git status`，有这类改动就丢掉。
 
 - [ ] **Step 3: owner 做 setup**（检查点 A）
 
@@ -275,16 +306,32 @@ Expected:
 
 ### Task 3: 生产迁移（检查点 B）
 
-- [ ] **Step 1: 用 device flow 拿 admin token**
+- [ ] **Step 1: 用 device flow 拿 admin token**（字段名已对照 `node_modules/emdash/dist/astro/routes/api/oauth/device/*.mjs` 和 `device-flow-*.mjs` 核实，见 PR #6 评审 M3）
 
 ```bash
 curl -s -X POST https://web9-ai.jhcao23.workers.dev/_emdash/api/oauth/device/code \
-  -H 'Content-Type: application/json' -H 'X-EmDash-Request: 1' -d '{"scope":"admin"}'
+  -H 'Content-Type: application/json' -d '{"scope":"admin"}'
 ```
 
+- 返回格式是 `{success:true, data:{device_code, user_code, verification_uri, expires_in, interval}}`，code 15 分钟过期。
 - 把 `user_code` 和 `verification_uri` 给 owner（检查点 B），owner 在 `/_emdash/admin/device` 输入 code 并批准。
-- 按返回的 `interval` 轮询 `POST /_emdash/api/oauth/device/token`，拿到后：access token 写进 `.local/prod-token`，refresh token 写进 `.local/prod-refresh-token`，权限都是 600。
-- 请求和响应的字段名以 core 的 `oauth/device` 路由为准；字段对不上时先读源码再调，不要猜。
+- 轮询 token：
+
+  ```bash
+  curl -s -X POST https://web9-ai.jhcao23.workers.dev/_emdash/api/oauth/device/token \
+    -H 'Content-Type: application/json' \
+    -d '{"device_code":"<device_code>","grant_type":"urn:ietf:params:oauth:grant-type:device_code"}'
+  ```
+
+  - 每 6 s 一次，也就是 `interval` 加 1 秒。这个接口每个 IP 每分钟限 12 次；轮询太快会收到 `slow_down`，间隔再加 5 s。
+  - 还没批准时返回 400 `{error:"authorization_pending"}`。
+  - 批准后返回 `data.access_token`（1 小时过期）和 `data.refresh_token`（90 天过期）。分别写进 `.local/prod-token` 和 `.local/prod-refresh-token`，权限都是 600。
+- access token 过期后，用 refresh token 换新的：
+
+  ```bash
+  POST /_emdash/api/oauth/token/refresh
+  {"refresh_token":"…","grant_type":"refresh_token"}
+  ```
 
 - [ ] **Step 2: 核对只有一个管理员**
 
@@ -296,8 +343,9 @@ Expected: 只有 1 个用户，role 是 admin，邮箱是 owner 的。如果多�
 
 - [ ] **Step 3: 跑迁移**（顺序见 spec §12 和计划 2 路线图第 4 步）
 
+每条命令前面都要带上 `EMDASH_URL=https://web9-ai.jhcao23.workers.dev EMDASH_TOKEN=$(cat .local/prod-token)`（环境变量不会在 Bash 调用之间保留）：
+
 ```bash
-export EMDASH_URL=https://web9-ai.jhcao23.workers.dev EMDASH_TOKEN=$(cat .local/prod-token)
 node scripts/migrate.mjs all --dry-run
 node scripts/migrate.mjs menu --overwrite
 node scripts/migrate.mjs all
@@ -312,7 +360,7 @@ Expected:
 - `verify` 是 54/54 页面、86/86 redirect，没有 schema drift；
 - `guard-scan` 报 0 problems。
 
-access token 1 小时过期。过期后用 refresh token 换新的（`/_emdash/api/oauth/token/refresh`），不要让 owner 再批一次。
+access token 1 小时过期。过期后按 Step 1 用 refresh token 换新的，不要让 owner 再批一次。
 
 - [ ] **Step 4: 线上抽查**
 
@@ -326,7 +374,7 @@ access token 1 小时过期。过期后用 refresh token 换新的（`/_emdash/a
 
 **前提**：Task 3 全部通过；owner 已经说"可以切换"。
 
-- [ ] **Step 1: 提前准备 routes 的 PR**（可以和 Task 3 同时做，评审通过后先不合并）
+- [ ] **Step 1: 提前准备 routes 的 PR**（可以和 Task 3 同时做，评审通过后先不合并；Step 2 的备份和 Step 3 第 1 步的删除做完之前，绝对不能合并，也不能从这个分支部署）
 
 在 `wrangler.jsonc` 的 `"workers_dev": true` 前面加：
 
@@ -345,22 +393,35 @@ access token 1 小时过期。过期后用 refresh token 换新的（`/_emdash/a
 
 - [ ] **Step 2: 备份 DNS**
 
-把 5 条要删的记录（apex 的 4 条 A 和 `www` 的 CNAME）完整导出到 `.local/dns-backup.json`，每条包括 id、type、name、content、proxied 和 ttl。用 `jq length` 确认正好是 5 条。
+把 zone 的**全部** DNS 记录导出到 `.local/dns-full-before.json`，供 Step 3 比对。再把要删的 5 条（apex 的 4 条 A 和 `www` 的 CNAME）单独导出到 `.local/dns-backup.json`，每条包括 id、type、name、content、proxied 和 ttl。用 `jq length` 确认正好是 5 条。
 
 - [ ] **Step 3: 删记录、合并、部署**
+
+做法是先按 id 手动删掉这 5 条，再部署；不靠 wrangler 自动覆盖。原因：
+- 自动覆盖时，apex 上哪些记录会被认为"冲突"，是 Cloudflare 那边定的，我们看不到。apex 上还有 MX、SPF、验证用的 TXT，这些绝不能动。
+- 先删，部署时就没有冲突，覆盖逻辑什么都不会做。
+
+代价是：从删记录到 Custom Domain 生效，站点会有一两分钟不可用。这一步要连着做完。
 
 1. 按 id 逐条 `DELETE /zones/{zone}/dns_records/{id}`，只删这 5 条。
 2. 合并 Step 1 的 PR，然后 `git pull`、停 dev、`npm run build`、`npx wrangler deploy`。
 3. 预期输出里有 `www.web9.ai (custom domain)` 和 `web9.ai (custom domain)`。
-4. 证书签发可能要几分钟。从删记录到 Custom Domain 生效之间，站点会短暂不可用；这一步要连着做完。
+4. 再拉一次 zone 的全部 DNS 记录，和 `.local/dns-backup.json` 之前的完整列表比对：
+   - 只少了那 5 条；
+   - 多了 Custom Domain 的记录；
+   - MX、TXT 一条不少，内容不变。
+
+   不一致就停下，按"回退"处理。
 
 - [ ] **Step 4: 验证**
 
 ```bash
-curl -sI https://www.web9.ai/ | head -5                  # 200，没有 x-github-request-id
-curl -sI https://web9.ai/docs/intro?x=1 | command grep -i '^location'   # https://www.web9.ai/docs/intro?x=1
-curl -sI http://www.web9.ai/posts | command grep -i '^location'         # https://www.web9.ai/posts
-curl -sI https://www.web9.ai/blog/rss.xml | command grep -i '^location' # /rss.xml
+curl -sI 'https://www.web9.ai/' | head -5                  # 200，没有 x-github-request-id
+curl -sI 'https://web9.ai/docs/intro?x=1' | command grep -i '^location'   # 301 https://www.web9.ai/docs/intro?x=1
+curl -sI 'http://www.web9.ai/posts' | command grep -i '^location'         # 301 https://www.web9.ai/posts
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' -X POST 'https://web9.ai/_emdash/api/mcp'  # 308 https://www.web9.ai/_emdash/api/mcp
+curl -sI 'https://www.web9.ai/blog/rss.xml' | command grep -i '^location' # 301 /rss.xml
+curl -sIL 'https://web9.ai/blog/rss.xml' | command grep -i '^location'    # 两跳：/rss.xml（asset 层的 _redirects），再到 https://www.web9.ai/rss.xml
 curl -s -o /dev/null -w '%{http_code}\n' 'https://www.web9.ai/docs/%E0%A4%A'   # spec §12：记下实际状态码
 EMDASH_URL=https://www.web9.ai EMDASH_TOKEN=$(cat .local/prod-token) node scripts/migrate.mjs verify
 EMDASH_URL=https://www.web9.ai EMDASH_TOKEN=$(cat .local/prod-token) node scripts/mcp.mjs content_list '{"collection":"docs","limit":1}'
@@ -416,10 +477,11 @@ owner 的操作：在 Workers & Pages › `web9-ai` › Settings › Build 里�
 
 ## 回退
 
-切换后出问题时：
-1. 删掉两个 Custom Domain：`GET /accounts/{account}/workers/domains` 找到 id，再 `DELETE`。
-2. 按 `.local/dns-backup.json` 重建 5 条记录（POST，proxied 等字段保持原值）。
-3. GitHub Pages 的证书到 2026-12-01 前都有效，旧站立即恢复。
+切换后出问题时，按顺序：
+1. **先撤掉 routes**：开一个 revert routes PR 的 PR 并合并，或者从 `wrangler.jsonc` 删掉 `routes`。否则下一次 `wrangler deploy`（或者连上 Workers Builds 之后的任何一次合并）又会不提示地覆盖恢复好的记录，回退就白做了。在这一步完成之前，不从任何带 `routes` 的 checkout 部署。
+2. 删掉两个 Custom Domain：`GET /accounts/{account}/workers/domains` 找到 id，再 `DELETE`。删 Custom Domain 会连带删掉 Cloudflare 为它建的 DNS 记录，所以下一步是在空的名字上重建。
+3. 按 `.local/dns-backup.json` 重建 5 条记录（POST，proxied 等字段保持原值），再和 `.local/dns-full-before.json` 比对一次。
+4. GitHub Pages 的证书到 2026-12-01 前都有效，旧站立即恢复。
 
 生产 D1 不受影响，修好后重新切换。
 
