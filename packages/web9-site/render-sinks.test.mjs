@@ -117,3 +117,12 @@ describe("set:html in src/ and the block renderers", () => {
 		}
 	});
 });
+
+describe("menu", () => {
+	it("is bounded on render: at most LIMITS.menuItems items, labels cut to LIMITS.label (spec 2026-10-17 §3.1)", () => {
+		const base = raw("src/layouts/Base.astro");
+		expect(base).toMatch(/^import \{ LIMITS, clampText \} from "\.\.\/\.\.\/packages\/web9-blocks\/lib\/limits\.mjs";$/m);
+		expect(base).toContain(".slice(0, LIMITS.menuItems)");
+		expect(base).toContain("label: clampText(item.label, LIMITS.label)");
+	});
+});
