@@ -125,6 +125,14 @@ describe("writeGateResponse: REST", () => {
 		expect(writeGateResponse("PUT", BYLINE, { slug: long(101) }).body.error.message).toBe("Write rejected (spec §10): slug: at most 100 characters (got 101)");
 		expect(writeGateResponse("POST", BYLINE_TRANSLATIONS, { locale: "zh-CN", displayName: long(81), slug: long(101) }).status).toBe(400);
 	});
+	it("rejects an over-long byline avatarMediaId (printed into an img src) on every byline route", () => {
+		for (const [method, route] of [["POST", BYLINES], ["PUT", BYLINE], ["POST", BYLINE_TRANSLATIONS]]) {
+			expect(writeGateResponse(method, route, { slug: "ok", displayName: "Ok", avatarMediaId: long(65) }).body.error.message, route).toBe(
+				"Write rejected (spec §10): avatarMediaId: at most 64 characters (got 65)",
+			);
+			for (const avatarMediaId of [long(64), "01JABCDEFGHJKMNPQRSTVWXYZ0", null, undefined, 5]) expect(writeGateResponse(method, route, { slug: "ok", avatarMediaId }), route).toBeNull();
+		}
+	});
 	it("lets through values within the limits, other routes and bodies that are not objects", () => {
 		expect(writeGateResponse("POST", CONTENT, { slug: long(100), data: { title: long(5000) }, seo: { image: long(2048) }, bylines: [{ bylineId: "a", roleLabel: long(80) }] })).toBeNull();
 		expect(writeGateResponse("POST", "/_emdash/api/content/[collection]/[id]/publish", { slug: long(500) })).toBeNull();
@@ -157,6 +165,8 @@ describe("writeGateResponse: MCP", () => {
 			["taxonomy_update_term", { taxonomy: "tag", termSlug: "ai", slug: long(101) }, "taxonomy_update_term slug: at most 100"],
 			["byline_create", { slug: "a", displayName: long(81) }, "byline_create displayName: at most 80"],
 			["byline_update", { id: "b", slug: long(101) }, "byline_update slug: at most 100"],
+			["byline_create", { slug: "a", displayName: "A", avatarMediaId: long(65) }, "byline_create avatarMediaId: at most 64 characters (got 65)"],
+			["byline_update", { id: "b", avatarMediaId: long(65) }, "byline_update avatarMediaId: at most 64 characters (got 65)"],
 			["menu_set_items", { name: "primary", items: [{ label: "ok", type: "custom" }, { label: long(81), type: "custom", customUrl: long(2049) }] }, "menu_set_items items[1].label: at most 80"],
 			["menu_set_items", { name: "primary", items: Array.from({ length: 51 }, () => ({ label: "a" })) }, "menu_set_items items: at most 50 menu items are allowed (got 51)"],
 		]) expect(writeGateResponse("POST", MCP, call(name, args)).body.error.message, name).toContain(problem);

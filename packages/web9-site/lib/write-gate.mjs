@@ -1,15 +1,15 @@
 // Write-length gate (spec 2026-10-17 §3.1), run by src/middleware.ts. core's REST and MCP schemas put no maximum on a
 // content slug, a content entry's seo.image, seo.canonical and byline roleLabel, a menu item's label, URL, target and
-// titleAttr, a term's label and slug or a byline's name and slug, and no hook sees them, while menus, terms and bylines
-// render on many pages. EmDash's middleware is all order "pre", so src/middleware.ts runs after its auth and before the
-// route, and answers in the route's place when a value is over LIMITS. The gate keys on the route pattern Astro matched
-// (context.routePattern), never on the URL: core's routes match on a decoded path string that context.url re-normalizes
-// (a backslash becomes a slash, dot segments resolve), so a path check and the router can disagree, while the matched
-// pattern is by construction the route that runs. Pure: the middleware passes the method, the pattern and the parsed
-// JSON body (readGatedBody only reads the stream it is given). Anything the gate cannot read (a body that is not JSON,
-// an unknown route or tool) passes through to core, which validates it. A body over MAX_GATED_BODY_BYTES is the
-// exception: core refuses only a declared Content-Length (a chunked body is read with no cap), so on a gated route the
-// gate answers it itself with payloadTooLarge instead of handing it on unread.
+// titleAttr, a term's label and slug or a byline's name, slug and avatarMediaId, and no hook sees them, while menus,
+// terms and bylines render on many pages. EmDash's middleware is all order "pre", so src/middleware.ts runs after its
+// auth and before the route, and answers in the route's place when a value is over LIMITS. The gate keys on the route
+// pattern Astro matched (context.routePattern), never on the URL: core's routes match on a decoded path string that
+// context.url re-normalizes (a backslash becomes a slash, dot segments resolve), so a path check and the router can
+// disagree, while the matched pattern is by construction the route that runs. Pure: the middleware passes the method,
+// the pattern and the parsed JSON body (readGatedBody only reads the stream it is given). Anything the gate cannot read
+// (a body that is not JSON, an unknown route or tool) passes through to core, which validates it. A body over
+// MAX_GATED_BODY_BYTES is the exception: core refuses only a declared Content-Length (a chunked body is read with no
+// cap), so on a gated route the gate answers it itself with payloadTooLarge instead of handing it on unread.
 import { LIMITS, lengthProblem } from "../../web9-blocks/lib/limits.mjs";
 
 /**
@@ -46,7 +46,8 @@ const ROLE_LABELS = (record, at) =>
 const CONTENT = [SLUG, SEO, ROLE_LABELS];
 const MENU_ITEM = [LABEL, field("customUrl", LIMITS.url), field("titleAttr", LIMITS.titleAttr), field("target", LIMITS.target)];
 const TERM = [LABEL, SLUG];
-const BYLINE = [field("displayName", LIMITS.label), SLUG];
+/** A byline: its name, slug and avatarMediaId (PostCard.astro and posts/index.astro print it into an img src). */
+const BYLINE = [field("displayName", LIMITS.label), SLUG, field("avatarMediaId", LIMITS.id)];
 
 const MCP = "/_emdash/api/mcp";
 /** The route patterns emdash injects (astro/integration/routes.ts) whose write bodies the gate reads, with their checks. */
