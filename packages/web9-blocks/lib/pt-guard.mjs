@@ -14,8 +14,14 @@
 // astro-portabletext's own PortableText with only a `mark` map (cover/Columns/BlockquoteGroup.astro), whose
 // `type` map is empty: a non-block node there is hidden at best, a prototype key crashes. It may hold
 // blocks only, and each is checked like a top-level block (a fixed depth: container -> block -> span).
-// Table cells are not walked: they are left to core's normalizePortableTextTable, which bounds their types
-// (spans only) and marks (decorators or a link) but not their sizes, so the caps below do not reach them.
+// Table cells (core: rows[] of { _type: "tableRow", cells[] }, a cell { _type: "tableCell", content: Span[], markDefs? })
+// are walked for shape and size: rows and cells must be arrays of objects, a cell's content spans only, with the span
+// caps below. Mark names and markDefs in cells are left to core's normalizePortableTextTable, which bounds them.
+// Totals over the whole value (spec 2026-10-17 §3.6): render CPU grows with every span and, most, with every mark
+// (plan 2 measured 0.3 s for one block of 1000 spans × 20 marks), so a value holds at most MAX_NODES top-level nodes,
+// MAX_SPANS spans and MAX_TOTAL_MARKS marks, counting blocks, container blocks and table cells; past a total the walk
+// stops with that one problem. Lists that a renderer maps (buttons.buttons, tabs.tabs, tool_grid.tools) must be arrays
+// of objects within a size cap, and their text fields strings: a null item or a number tagline throws at render time.
 // Output is bounded: collecting stops after MAX_PROBLEMS (plain pushes, never spreads of a long list, which
 // throw RangeError past ~120k items) and ends with MORE, so a hostile value cannot make the guard throw.
 // Messages print a value through show(): JSON.stringify overflows the stack on a value nested a few thousand levels
@@ -71,19 +77,36 @@ const STRING = (v) => typeof v === "string";
 const MAX_PROBLEMS = 50;
 const MORE = "…and more";
 
-/** Keeps the first MAX_PROBLEMS problems. `full` turns true once one was left out, so loops can stop early. */
+/** Keeps the first MAX_PROBLEMS problems. `full` turns true once one was left out or the walk was stopped, so loops end. */
 function collector() {
 	const list = [];
+	let dropped = false;
 	return {
 		full: false,
+		spans: 0,
+		marks: 0,
 		add(problem) {
 			if (list.length < MAX_PROBLEMS) list.push(problem);
-			else this.full = true;
+			else dropped = this.full = true;
+		},
+		/** Adds `problem` and ends the walk (a total cap is past). */
+		stop(problem) {
+			this.add(problem);
+			this.full = true;
 		},
 		done() {
-			return this.full ? [...list, MORE] : list;
+			return dropped ? [...list, MORE] : list;
 		},
 	};
+}
+
+/** Counts spans and marks toward the value's totals; past one, stops the walk with its problem. */
+function count(out, spans, marks) {
+	if (out.full) return;
+	out.spans += spans;
+	out.marks += marks;
+	if (out.spans > MAX_SPANS) out.stop(`at most ${MAX_SPANS} spans are allowed in total`);
+	else if (out.marks > MAX_TOTAL_MARKS) out.stop(`at most ${MAX_TOTAL_MARKS} marks are allowed in total`);
 }
 
 /** Field checks per allowed _type. Paths use `a.b` for nesting and `list[].field` for arrays. */
@@ -182,6 +205,17 @@ const MAX_LIST_ID = 128; // emdash normalizeListId (content/converters/numbered-
 const MAX_LIST_START = 100000;
 const MAX_MARKS = 20;
 const MAX_CHILDREN = 1000;
+const MAX_NODES = 2000;
+const MAX_SPANS = 20000;
+const MAX_TOTAL_MARKS = 5000;
+const MAX_ROWS = 500;
+const MAX_CELLS = 2000;
+/** Lists a renderer maps: [field, max items, string fields of an item, boolean fields of an item]. url/logo are in RULES. */
+const LISTS = {
+	buttons: ["buttons", 10, ["text"], []],
+	tabs: ["tabs", 20, ["label", "body"], []],
+	tool_grid: ["tools", 100, ["name", "tagline"], ["featured"]],
+};
 
 /** `_key` may be absent (undefined or null); when present it must be a string. */
 function checkKey(node, where, field, out) {
@@ -215,6 +249,7 @@ function checkBlock(node, where, out) {
 	if (node.children === undefined) return;
 	if (!Array.isArray(node.children)) return out.add(`${where} children: must be an array of spans`);
 	if (node.children.length > MAX_CHILDREN) return out.add(`${where} children: at most ${MAX_CHILDREN} spans are allowed`);
+	count(out, node.children.length, 0);
 	for (let j = 0; j < node.children.length && !out.full; j++) {
 		const child = node.children[j];
 		const type = typeof child?._type === "string" ? child._type : "(no _type)";
@@ -233,6 +268,7 @@ function checkBlock(node, where, out) {
 			out.add(`${where} children[${j}].marks: at most ${MAX_MARKS} marks are allowed`);
 			continue;
 		}
+		count(out, 0, child.marks.length);
 		for (let m = 0; m < child.marks.length && !out.full; m++) {
 			const mark = child.marks[m];
 			if (typeof mark !== "string" || !(DECORATORS.has(mark) || keys.has(mark))) out.add(notAllowed(where, `children[${j}].marks`, mark));
@@ -255,6 +291,76 @@ function checkColumns(node, i, out) {
 	for (let k = 0; k < node.columns.length && !out.full; k++) {
 		const column = node.columns[k];
 		if (!column || typeof column !== "object" || Array.isArray(column)) out.add(`#${i} columns columns[${k}]: must be an object`);
+	}
+}
+
+const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+
+/** A table cell's content: spans only (core renders them inline), within the span and mark caps. */
+function checkCell(cell, at, out) {
+	if (cell.content == null) return;
+	if (!Array.isArray(cell.content)) return out.add(`${at} content: must be an array of spans`);
+	if (cell.content.length > MAX_CHILDREN) return out.add(`${at} content: at most ${MAX_CHILDREN} spans are allowed`);
+	count(out, cell.content.length, 0);
+	for (let j = 0; j < cell.content.length && !out.full; j++) {
+		const span = cell.content[j];
+		const type = typeof span?._type === "string" ? span._type : "(no _type)";
+		if (type !== "span") {
+			out.add(`${at} content[${j}] ${type}: only spans are allowed in a table cell`);
+			continue;
+		}
+		if (span.children != null) out.add(`${at} content[${j}] span: a span must not have children`);
+		if (span.marks == null) continue;
+		if (!Array.isArray(span.marks)) out.add(`${at} content[${j}].marks: must be an array`);
+		else if (span.marks.length > MAX_MARKS) out.add(`${at} content[${j}].marks: at most ${MAX_MARKS} marks are allowed`);
+		else count(out, 0, span.marks.length);
+	}
+}
+
+/** core's Table.astro maps rows[].cells[]: arrays of objects, within MAX_ROWS rows and MAX_CELLS cells. */
+function checkTable(node, i, out) {
+	const where = `#${i} table`;
+	if (node.rows == null) return;
+	if (!Array.isArray(node.rows)) return out.add(`${where} rows: must be an array`);
+	if (node.rows.length > MAX_ROWS) return out.add(`${where} rows: at most ${MAX_ROWS} rows are allowed`);
+	let cells = 0;
+	for (let r = 0; r < node.rows.length && !out.full; r++) {
+		const row = node.rows[r];
+		if (!isObject(row)) {
+			out.add(`${where} rows[${r}]: must be an object`);
+			continue;
+		}
+		if (row.cells == null) continue;
+		if (!Array.isArray(row.cells)) {
+			out.add(`${where} rows[${r}].cells: must be an array`);
+			continue;
+		}
+		cells += row.cells.length;
+		if (cells > MAX_CELLS) return out.add(`${where}: at most ${MAX_CELLS} cells are allowed`);
+		for (let c = 0; c < row.cells.length && !out.full; c++) {
+			const at = `${where} rows[${r}].cells[${c}]`;
+			if (!isObject(row.cells[c])) out.add(`${at}: must be an object`);
+			else checkCell(row.cells[c], at, out);
+		}
+	}
+}
+
+/** A list a renderer maps (LISTS): an array of objects within its cap, text fields strings, flags booleans. */
+function checkList(node, type, i, out) {
+	const [field, max, strings, booleans] = LISTS[type];
+	const list = node[field];
+	const where = `#${i} ${type} ${field}`;
+	if (list == null) return;
+	if (!Array.isArray(list)) return out.add(`${where}: must be an array`);
+	if (list.length > max) return out.add(`${where}: at most ${max} items are allowed`);
+	for (let k = 0; k < list.length && !out.full; k++) {
+		const item = list[k];
+		if (!isObject(item)) {
+			out.add(`${where}[${k}]: must be an object`);
+			continue;
+		}
+		for (const key of strings) if (item[key] != null && typeof item[key] !== "string") out.add(notAllowed(`#${i} ${type}`, `${field}[${k}].${key}`, item[key]));
+		for (const key of booleans) if (item[key] != null && typeof item[key] !== "boolean") out.add(notAllowed(`#${i} ${type}`, `${field}[${k}].${key}`, item[key]));
 	}
 }
 
@@ -281,6 +387,7 @@ function checkContainers(node, type, i, out) {
 export function guardPortableText(value) {
 	if (value == null || (typeof value === "string" && !value.trim())) return [];
 	if (!Array.isArray(value)) return [`value ${show(value)} is not allowed: a Portable Text field must be an array of blocks`];
+	if (value.length > MAX_NODES) return [`at most ${MAX_NODES} top-level blocks are allowed (got ${value.length})`];
 	const out = collector();
 	for (let i = 0; i < value.length && !out.full; i++) {
 		const node = value[i];
@@ -300,6 +407,8 @@ export function guardPortableText(value) {
 			if (node.children !== undefined && node.children !== null) out.add(`#${i} ${type} children: only a block may have children`);
 		}
 		if (type === "columns") checkColumns(node, i, out);
+		if (type === "table") checkTable(node, i, out);
+		if (Object.hasOwn(LISTS, type)) checkList(node, type, i, out);
 		checkContainers(node, type, i, out);
 		checkRules(node, RULES[type], `#${i} ${type} `, out);
 	}

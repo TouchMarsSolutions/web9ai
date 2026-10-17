@@ -491,7 +491,6 @@ describe("guardPortableText: bounded output", () => {
 	it("does not throw on 200k bad top-level nodes, markDefs, container blocks or gallery images", () => {
 		const bad = (n, make) => Array.from({ length: n }, make);
 		for (const blocks of [
-			bad(200000, () => ({ _type: "marquee" })),
 			[para({ markDefs: bad(200000, () => ({ _type: "x" })) })],
 			[{ _type: "cover", _key: "c", content: bad(200000, () => ({ _type: "iframe" })) }],
 			[{ _type: "gallery", _key: "g", images: bad(200000, () => ({ blurhash: 1 })) }],
@@ -501,6 +500,7 @@ describe("guardPortableText: bounded output", () => {
 			expect(problems.length).toBeLessThanOrEqual(51);
 			expect(problems.at(-1)).toBe(MORE);
 		}
+		expect(guardPortableText(bad(200000, () => ({ _type: "marquee" })))).toEqual(["at most 2000 top-level blocks are allowed (got 200000)"]);
 	});
 	it("adds the final entry only when problems were left out", () => {
 		const nodes = (n) => Array.from({ length: n }, () => ({ _type: "marquee" }));
