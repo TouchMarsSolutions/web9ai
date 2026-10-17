@@ -35,9 +35,18 @@ describe("schemaDrift", () => {
 			'schema drift: pages.layout hero v2 has image path "logos[].img" missing from BLOCK_IMAGE_FIELDS',
 		]);
 	});
-	it("never throws on an odd shape", () => {
-		for (const c of [{}, { slug: "x" }, { slug: "x", fields: "y" }, { slug: "x", fields: [null, { type: "blocks", slug: "b", blockTypes: [null, { slug: "t", versions: "v" }] }] }]) {
-			expect(() => schemaDrift(c)).not.toThrow();
+	it("reads a collection without fields, and a field without a slug, as no drift", () => {
+		for (const c of [{}, { slug: "x" }, { slug: "x", fields: "y" }, { slug: "x", fields: [null, 5, { type: "blocks" }, { type: "portableText" }] }]) expect(schemaDrift(c)).toEqual([]);
+	});
+	it("throws on a blocks field whose block types it cannot read, rather than reading them as no image paths", () => {
+		const blocks = (blockTypes) => ({ slug: "pages", fields: [{ slug: "layout", type: "blocks", blockTypes }] });
+		for (const blockTypes of [undefined, null, "hero", { hero: {} }]) expect(() => schemaDrift(blocks(blockTypes)), String(blockTypes)).toThrow("schema_get_collection: pages.layout is a blocks field without a blockTypes array");
+		for (const type of [null, "hero", { versions: [] }, { slug: "hero" }, { slug: "hero", versions: "v" }]) {
+			expect(() => schemaDrift(blocks([type])), JSON.stringify(type)).toThrow("schema_get_collection: pages.layout has a block type without a slug and a versions array");
 		}
+		for (const version of [null, { version: 1 }, { version: 1, fields: "f" }]) {
+			expect(() => schemaDrift(blocks([{ slug: "hero", versions: [version] }])), JSON.stringify(version)).toThrow("schema_get_collection: pages.layout hero has a version without a fields array");
+		}
+		expect(schemaDrift(blocks([]))).toEqual([]);
 	});
 });

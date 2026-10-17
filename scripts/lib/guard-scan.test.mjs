@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { bylineFindings, entryFindings, menuFindings, pages, revisionsOf, scanFields, termFindings } from "./guard-scan.mjs";
+import {
+	bylineFindings,
+	entryFindings,
+	menuFindings,
+	pages,
+	restGet,
+	revisionsOf,
+	scanFields,
+	summaryLine,
+	termFindings,
+	widgetAreaFindings,
+	widgetAreasOf,
+} from "./guard-scan.mjs";
 
 const long = (n) => "x".repeat(n);
 
@@ -74,33 +86,45 @@ describe("entryFindings", () => {
 			{ id: "R2", data: { _slug: long(101), title: long(201) } },
 			{ id: "R3", data: { title: "fine" } },
 		];
-		expect(entryFindings("docs", item, revisions, 3, fields)).toEqual([
-			"docs/D1: slug: at most 100 characters (got 101)",
-			"docs/D1@R1: body: #0 htmlBlock: raw HTML blocks are not allowed; use Markdown or a Web9 block",
-			"docs/D1@R2: title: at most 200 characters (got 201)",
-			"docs/D1@R2: slug: at most 100 characters (got 101)",
-		]);
+		expect(entryFindings("docs", item, revisions, 3, fields)).toEqual({
+			entry: ["docs/D1: slug: at most 100 characters (got 101)"],
+			revisions: [
+				"docs/D1@R1: body: #0 htmlBlock: raw HTML blocks are not allowed; use Markdown or a Web9 block",
+				"docs/D1@R2: title: at most 200 characters (got 201)",
+				"docs/D1@R2: slug: at most 100 characters (got 101)",
+			],
+		});
 	});
-	it("reports revisions it could not see", () => {
-		expect(entryFindings("docs", { id: "D1", slug: "a", data: {} }, [], 51, fields)).toEqual(["docs/D1: only the newest 0 of 51 revisions were scanned"]);
+	it("reports revisions it could not see as a finding of the entry", () => {
+		expect(entryFindings("docs", { id: "D1", slug: "a", data: {} }, [], 51, fields)).toEqual({ entry: ["docs/D1: only the newest 0 of 51 revisions were scanned"], revisions: [] });
 	});
 	it("checks the item's seo.image and bylines[].roleLabel, which content_list carries beside data", () => {
 		const item = {
 			id: "D1",
 			slug: "a",
 			data: {},
-			seo: { title: null, image: long(2049) },
+			seo: { title: null, image: long(2049), canonical: long(2049) },
 			bylines: [{ roleLabel: "ok" }, { roleLabel: long(81) }, { roleLabel: null, source: "inferred" }],
 		};
-		expect(entryFindings("docs", item, [], 0, fields)).toEqual([
-			"docs/D1: seo.image: at most 2048 characters (got 2049)",
-			"docs/D1: bylines[1].roleLabel: at most 80 characters (got 81)",
-		]);
+		expect(entryFindings("docs", item, [], 0, fields)).toEqual({
+			entry: [
+				"docs/D1: seo.image: at most 2048 characters (got 2049)",
+				"docs/D1: seo.canonical: at most 2048 characters (got 2049)",
+				"docs/D1: bylines[1].roleLabel: at most 80 characters (got 81)",
+			],
+			revisions: [],
+		});
 	});
 	it("reads an item without seo or bylines (a trashed one) or with odd ones as clean", () => {
 		const bare = { id: "D1", slug: "a", data: {} };
-		for (const extra of [{}, { seo: null, bylines: null }, { seo: { image: null }, bylines: [] }, { seo: "x", bylines: [null, "y", {}] }, { seo: { image: long(2048) }, bylines: [{ roleLabel: long(80) }] }]) {
-			expect(entryFindings("docs", { ...bare, ...extra }, [], 0, fields), JSON.stringify(extra)).toEqual([]);
+		for (const extra of [
+			{},
+			{ seo: null, bylines: null },
+			{ seo: { image: null, canonical: null }, bylines: [] },
+			{ seo: "x", bylines: [null, "y", {}] },
+			{ seo: { image: long(2048), canonical: long(2048) }, bylines: [{ roleLabel: long(80) }] },
+		]) {
+			expect(entryFindings("docs", { ...bare, ...extra }, [], 0, fields), JSON.stringify(extra)).toEqual({ entry: [], revisions: [] });
 		}
 	});
 });
@@ -129,5 +153,90 @@ describe("menu, term and byline findings", () => {
 		]);
 		expect(bylineFindings({ id: "B1", slug: "a", displayName: long(81) })).toEqual(["byline B1: displayName: at most 80 characters (got 81)"]);
 		expect(termFindings("tag", { slug: "ai", label: "AI" })).toEqual([]);
+	});
+});
+
+describe("summaryLine", () => {
+	const counts = { entries: 39, revisions: 38, menus: 2, terms: 3, bylines: 1, areas: 2 };
+	it("counts each kind of record and the problems", () => {
+		expect(summaryLine(counts, 0, 0)).toBe("guard-scan: 39 entries, 38 revisions, 2 menus, 3 terms, 1 bylines, 2 widget areas; 0 problems");
+		expect(summaryLine(counts, 4, 0)).toBe("guard-scan: 39 entries, 38 revisions, 2 menus, 3 terms, 1 bylines, 2 widget areas; 4 problems");
+	});
+	it("says how many problems are in revisions, which no edit fixes", () => {
+		expect(summaryLine(counts, 5, 3)).toBe(
+			"guard-scan: 39 entries, 38 revisions, 2 menus, 3 terms, 1 bylines, 2 widget areas; 5 problems (3 in revisions, which cannot be edited; they age out after 50 newer revisions)",
+		);
+	});
+});
+
+describe("restGet", () => {
+	/** A stand-in for fetch that answers with `status` and `body` and records each call. */
+	const fakeFetch = (status, body, type = "application/json") => {
+		const calls = [];
+		const fetch = async (url, init) => {
+			calls.push([String(url), init]);
+			return new Response(typeof body === "string" ? body : JSON.stringify(body), { status, headers: { "content-type": type } });
+		};
+		return Object.assign(fetch, { calls });
+	};
+	it("GETs the path on the site with the token and returns the answer's data", async () => {
+		const fetch = fakeFetch(200, { success: true, data: { items: [] } });
+		expect(await restGet("http://localhost:4321", "tok", fetch)("/_emdash/api/widget-areas")).toEqual({ items: [] });
+		expect(fetch.calls).toEqual([["http://localhost:4321/_emdash/api/widget-areas", { headers: { Authorization: "Bearer tok" } }]]);
+	});
+	it("throws on an answer that is not JSON, not ok, or a failure, never reading it as data", async () => {
+		const get = (fetch) => restGet("http://x", "t", fetch)("/p");
+		await expect(get(fakeFetch(200, "<html>", "text/html"))).rejects.toThrow("REST GET /p: HTTP 200, not JSON (text/html)");
+		await expect(get(fakeFetch(403, { error: { code: "FORBIDDEN" } }))).rejects.toThrow('REST GET /p: HTTP 403 {"code":"FORBIDDEN"}');
+		await expect(get(fakeFetch(200, { success: false, error: { code: "X" } }))).rejects.toThrow('REST GET /p: HTTP 200 {"code":"X"}');
+	});
+});
+
+describe("widgetAreasOf", () => {
+	it("returns the areas of a GET widget-areas answer", () => {
+		const areas = [{ name: "footer", widgets: [] }, { name: "sidebar", widgets: [{ type: "component" }] }];
+		expect(widgetAreasOf({ items: areas })).toEqual(areas);
+	});
+	it("throws on an answer without an items array, or an area without a name string and a widgets array", () => {
+		for (const answer of [undefined, null, "text", { areas: [] }, { items: {} }]) expect(() => widgetAreasOf(answer), JSON.stringify(answer)).toThrow("widget-areas: expected an items array");
+		for (const area of [null, "footer", { name: "footer" }, { name: 5, widgets: [] }, { name: "footer", widgets: {} }, { widgets: [] }]) {
+			expect(() => widgetAreasOf({ items: [area] }), JSON.stringify(area)).toThrow("widget-areas: expected each area to have a name string and a widgets array");
+		}
+	});
+});
+
+describe("widgetAreaFindings", () => {
+	const WIDGET_CHECK =
+		"fails the widget check (a content widget, an unknown type, component or prop, a string over its length cap, or more than 20 widgets), so SafeWidgetArea renders nothing";
+	const MENU_CHECK =
+		"fails the menu check (more than 50 items, a label that is not a string or is over 80 characters, a url over 2048 or a titleAttr over 200), so SafeWidgetArea renders nothing";
+	const area = (...widgets) => ({ name: "footer", widgets });
+	const menuWidget = { type: "menu", menuName: "links" };
+	/** A menu as menu_get answers it: flat items with customUrl, no resolved url. */
+	const menu = (locale, ...items) => ({ name: "links", locale, items: items.map((item) => ({ type: "custom", customUrl: "/a", titleAttr: null, ...item })) });
+
+	it("passes the seed's areas", () => {
+		expect(widgetAreaFindings(area(), [])).toEqual([]);
+		expect(widgetAreaFindings(area({ type: "component", componentId: "core:search", title: "Search" }, { type: "component", componentId: "core:recent-posts", componentProps: { count: 5, showDate: true } }), [])).toEqual([]);
+	});
+	it("reports an area that fails widgetAreaIsSafe, without reading its menus", () => {
+		expect(widgetAreaFindings(area({ type: "content", content: [] }), [])).toEqual([`widget area footer: ${WIDGET_CHECK}`]);
+		expect(widgetAreaFindings(area(menuWidget, { type: "component", componentId: "constructor" }), [menu("en", { label: long(81) })])).toEqual([`widget area footer: ${WIDGET_CHECK}`]);
+	});
+	it("checks every locale's menu of each name a menu widget gives, as SafeWidgetArea's getMenu may resolve to any", () => {
+		const menus = [menu("en", { label: "ok" }), menu("zh-CN", { label: long(81) }), { ...menu("en", { label: long(81) }), name: "other" }];
+		expect(widgetAreaFindings(area(menuWidget), menus)).toEqual([`widget area footer: menu links (zh-CN) ${MENU_CHECK}`]);
+		expect(widgetAreaFindings(area(menuWidget), [menu("en", ...Array.from({ length: 51 }, () => ({ label: "a" })))])).toEqual([`widget area footer: menu links (en) ${MENU_CHECK}`]);
+		expect(widgetAreaFindings(area(menuWidget), [menu("en", { label: null })])).toEqual([`widget area footer: menu links (en) ${MENU_CHECK}`]);
+	});
+	it("reads a custom item's customUrl as the url getMenu gives it, and an empty titleAttr as none", () => {
+		expect(widgetAreaFindings(area(menuWidget), [menu("en", { label: "a", customUrl: long(2049) })])).toEqual([`widget area footer: menu links (en) ${MENU_CHECK}`]);
+		expect(widgetAreaFindings(area(menuWidget), [menu("en", { label: "a", titleAttr: long(201) })])).toEqual([`widget area footer: menu links (en) ${MENU_CHECK}`]);
+		const fine = [{ label: "a", customUrl: long(2048), titleAttr: long(200) }, { label: "b", customUrl: null, titleAttr: "" }, { label: "c", type: "page", customUrl: null, referenceId: "P1" }];
+		expect(widgetAreaFindings(area(menuWidget), [menu("en", ...fine)])).toEqual([]);
+	});
+	it("passes a menu widget without a menu name, or naming a menu that does not exist (it renders nothing)", () => {
+		expect(widgetAreaFindings(area({ type: "menu" }, { type: "menu", menuName: null }), [menu("en", { label: long(81) })])).toEqual([]);
+		expect(widgetAreaFindings(area({ type: "menu", menuName: "missing" }), [menu("en", { label: long(81) })])).toEqual([]);
 	});
 });
