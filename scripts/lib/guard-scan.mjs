@@ -3,11 +3,44 @@
 // no hook sees: an entry's seo.image and byline role labels, and menus, terms and bylines.
 import { entryProblems, mergeLiveFields, staticFields } from "../../packages/web9-blocks/lib/entry-guard.mjs";
 import { LIMITS, lengthProblem } from "../../packages/web9-blocks/lib/limits.mjs";
+import { listOf } from "./mcp.mjs";
 
 const SHOWN = 40;
 const short = (s) => (typeof s === "string" && s.length > SHOWN ? `${s.slice(0, SHOWN)}…` : String(s));
 const at = (label, problems) => problems.filter(Boolean).map((p) => `${label}: ${p}`);
 const isRecord = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+
+/**
+ * Every item of a cursor-paged MCP list tool (`call` is callTool). Throws, rather than ending early, on an answer
+ * without an items array, a nextCursor that is not a non-empty string or that repeats, and a stated total that is not
+ * the number of items listed, so a scan never reads what it failed to read as an empty list.
+ */
+export async function* pages(call, tool, args) {
+	const seen = new Set();
+	let cursor;
+	let count = 0;
+	let total;
+	for (;;) {
+		const page = await call(tool, { ...args, limit: 100, ...(cursor ? { cursor } : {}) });
+		const items = listOf(tool, page);
+		count += items.length;
+		if (Number.isInteger(page.total)) total = page.total;
+		yield* items;
+		cursor = page.nextCursor ?? undefined;
+		if (cursor === undefined) break;
+		if (typeof cursor !== "string" || !cursor) throw new Error(`${tool}: nextCursor is not a non-empty string`);
+		if (seen.has(cursor)) throw new Error(`${tool}: cursor repeated`);
+		seen.add(cursor);
+	}
+	if (total !== undefined && total !== count) throw new Error(`${tool}: listed ${count} items but the answer's total is ${total}`);
+}
+
+/** A revision_list answer's items and total; any other shape throws. */
+export function revisionsOf(answer) {
+	const items = listOf("revision_list", answer);
+	if (!Number.isInteger(answer.total)) throw new Error("revision_list: expected an integer total");
+	return { items, total: answer.total };
+}
 
 /** The fields to check in a collection: the pinned ones plus its live schema's (MCP schema_get_collection output). */
 export function scanFields(schema) {
@@ -29,7 +62,11 @@ export function entryFindings(collection, item, revisions, total, fields) {
 	return out;
 }
 
-/** A menu (menu_get answer; its items carry customUrl, titleAttr and target, and no resolved url). */
+/**
+ * A menu (menu_get answer; its items carry customUrl, titleAttr and target, and no resolved url). Only the length and
+ * count rules of menuIsSafe (packages/web9-blocks/lib/widgets.mjs) and of the gate's MENU_ITEM: core stores a label NOT
+ * NULL (migrations/005_menus.ts) and menu_get items are objects, so menuIsSafe's type checks have nothing to find here.
+ */
 export function menuFindings(menu) {
 	const label = `menu ${menu.name}${menu.locale ? ` (${menu.locale})` : ""}`;
 	const items = Array.isArray(menu.items) ? menu.items : [];

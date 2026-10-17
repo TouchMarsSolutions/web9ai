@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { checkMarkers } from "./markers.mjs";
-import { parseRpcBody, rpc, unwrapToolResult } from "./mcp.mjs";
+import { listOf, parseRpcBody, rpc, unwrapToolResult } from "./mcp.mjs";
 
 describe("parseRpcBody", () => {
 	it("parses plain JSON", () => {
@@ -27,6 +27,22 @@ describe("unwrapToolResult", () => {
 	});
 	it("throws when the body is not a JSON-RPC result", () => {
 		expect(() => unwrapToolResult("t", { message: "Unauthorized" })).toThrow(/^t: .*not a JSON-RPC result/);
+	});
+});
+
+describe("listOf", () => {
+	it("returns the array an answer holds, empty or not", () => {
+		expect(listOf("t", { items: [1] })).toEqual([1]);
+		expect(listOf("t", { taxonomies: [] }, "taxonomies")).toEqual([]);
+		expect(listOf("t", [1, 2], null)).toEqual([1, 2]);
+	});
+	it("throws, naming the tool, instead of reading a wrong shape as empty", () => {
+		for (const answer of ["not json", null, undefined, 7, [], { renamed_items: [] }, { items: {} }, { items: "x" }]) {
+			expect(() => listOf("content_list", answer), JSON.stringify(answer)).toThrow("content_list: expected an items array");
+		}
+		expect(() => listOf("taxonomy_list", { items: [] }, "taxonomies")).toThrow("taxonomy_list: expected a taxonomies array");
+		expect(() => listOf("menu_list", { items: [] }, null)).toThrow("menu_list: expected an array");
+		expect(() => listOf("menu_list", null, null)).toThrow("menu_list: expected an array");
 	});
 });
 
