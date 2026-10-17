@@ -34,6 +34,25 @@ describe("hero buttons", () => {
 	});
 });
 
+describe("layout block text", () => {
+	it("prints only what heroText, heroButtons and featureGridItems give (a stored non-string renders as nothing)", () => {
+		const hero = raw("src/components/blocks/Hero.astro");
+		expect(hero).toMatch(/^import \{ heroText \} from "\.\.\/\.\.\/\.\.\/packages\/web9-site\/lib\/layout-blocks\.mjs";$/m);
+		expect(hero).toContain("const { title, tagline, image, alt } = heroText(b);");
+		const grid = raw("src/components/blocks/FeatureGrid.astro");
+		expect(grid).toMatch(/^import \{ featureGridItems \} from "\.\.\/\.\.\/\.\.\/packages\/web9-site\/lib\/layout-blocks\.mjs";$/m);
+		expect(grid).toContain("const { title, features } = featureGridItems(b);");
+		// the block value is read only by those helpers; core's <Image> gets the alt they give
+		for (const [name, source] of [["Hero", hero], ["FeatureGrid", grid]]) {
+			const template = source.split("---")[2];
+			expect(template, name).not.toMatch(/\bb\.\w/);
+			expect(template, name).not.toMatch(/\bf\.image\.alt\b|\bb\.features\b/);
+		}
+		expect(hero).toContain("<Image image={image} alt={alt}");
+		expect(grid).toContain("<Image image={f.image} alt={f.alt}");
+	});
+});
+
 // The raw-HTML sinks: every set:html in the site (src/) and in the block renderers. An expression is read up
 // to its matching brace (strings skipped), so one that holds a brace still shows whole; anything this cannot
 // read as `set:html={...}` is listed as it stands, which fails the exact-list test below.
