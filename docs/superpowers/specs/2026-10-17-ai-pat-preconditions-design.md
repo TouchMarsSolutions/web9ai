@@ -45,8 +45,8 @@
 
 | # | 项 | 做法 |
 |---|---|---|
-| 1 | 长度上限 | `data` 里的字段（title、description、excerpt）由 guard 检查，保存和发布时都跑；slug、`seo.image`、byline 的 `roleLabel`、菜单项、term、byline 由新增的 `src/middleware.ts` 写入闸门检查；菜单在渲染时截断，widget area（footer、文章侧栏）里的菜单 widget 渲染前检查 |
-| 2 | 发布、恢复等不重跑 guard | `content:beforePublish`/`beforeSchedule` 重跑整套 guard 并检查 slug，fail closed；新增 `scripts/guard-scan.mjs`，扫描所有条目、回收站、revision、菜单、term、byline |
+| 1 | 长度上限 | `data` 里的字段（title、description、excerpt，docs 的 category）由 guard 检查，保存和发布时都跑；slug、`seo.image`、`seo.canonical`、byline 的 `roleLabel`、菜单项、term、byline 由新增的 `src/middleware.ts` 写入闸门检查；菜单在渲染时截断，widget area（footer、文章侧栏）里的菜单 widget 渲染前检查 |
+| 2 | 发布、恢复等不重跑 guard | `content:beforePublish`/`beforeSchedule` 重跑整套 guard 并检查 slug，fail closed；新增 `scripts/guard-scan.mjs`，扫描所有条目、回收站、revision、菜单、term、byline、widget area |
 | 3 | 字段表钉在 seed 上 | hook 用 `schema:read` 读线上的 portableText/image 字段，和钉死的表取并集；`migrate verify` 加 schema 漂移检查 |
 | 4 | `sections` | 测试锁定 `src/`、`packages/` 不调用 `getSection`/`getSections` |
 | 5 | import 和 transfer | AI 用 Editor 账号的 device flow token，scope 只要 `content:read content:write media:read media:write`；发放和核对写成 runbook（§3.5） |
@@ -64,8 +64,10 @@
 | content `data.title` | 200 | 31 | guard（保存、发布） |
 | content `data.description` | 1000 | 227 | guard（保存、发布） |
 | content `data.excerpt` | 1000 | 20 | guard（保存、发布） |
+| docs `data.category` | 80 | 7 | guard（保存、发布）；侧栏分组名渲染截断 |
 | content `slug` | 100 | 16 | 闸门；发布 hook（待生效 slug） |
 | content `seo.image` | 2048 | 无 | 闸门 |
+| content `seo.canonical` | 2048 | 无 | 闸门 |
 | content `bylines[].roleLabel` | 80 | 无 | 闸门 |
 | 菜单项 `label` | 80 | 6 | 闸门；渲染截断；widget area 里的菜单 widget 渲染前检查 |
 | 菜单项 `customUrl` | 2048 | 44 | 闸门；widget area 里的菜单 widget 渲染前检查 |
@@ -77,9 +79,9 @@
 | byline `displayName` | 80 | 无 | 闸门（REST `admin/bylines` 和 MCP） |
 | byline `slug` | 100 | 无 | 闸门（REST `admin/bylines` 和 MCP） |
 
-"现有最大值"是 2026-10-17 在本地库里读出来的（MCP 只读，39 个条目、1 个菜单、5 个 term）。`seo.image`、`roleLabel`、`titleAttr` 和 byline 现在库里没有值。
+"现有最大值"是 2026-10-17 在本地库里读出来的（MCP 只读，39 个条目、1 个菜单、5 个 term）。`seo.image`、`seo.canonical`、`roleLabel`、`titleAttr` 和 byline 现在库里没有值。`category` 的现有最大值是 2026-10-17 最后一轮修复时读的（39 个条目、38 个 revision）。
 
-**guard 里的长度**（title、description、excerpt）：按字段名作用于所有 collection，值是字符串时才检查，其他类型交给 core。保存时（`beforeSave`）、发布时（§3.2）、扫描时（§3.2）用的是同一个函数。
+**guard 里的长度**（title、description、excerpt、category）：按字段名作用于所有 collection，值是字符串时才检查，其他类型交给 core。`category` 是 docs 侧栏的分组名：没有对应显示名的 category 原样当分组名打印在每个 doc 页的侧栏上，所以 `docs-nav.mjs` 的 `groupLabel` 渲染时也按 80 截断（分组的 key 不截断）。保存时（`beforeSave`）、发布时（§3.2）、扫描时（§3.2）用的是同一个函数。
 
 **写入闸门**（`src/middleware.ts`，判定逻辑放在纯函数 `packages/web9-site/lib/write-gate.mjs`，单测覆盖）：
 
@@ -90,7 +92,7 @@
 
   | 路由 pattern | 检查 |
   |---|---|
-  | `/_emdash/api/content/[collection]`、`/_emdash/api/content/[collection]/[id]` | `slug`、`seo.image`、`bylines[].roleLabel` |
+  | `/_emdash/api/content/[collection]`、`/_emdash/api/content/[collection]/[id]` | `slug`、`seo.image`、`seo.canonical`、`bylines[].roleLabel` |
   | `/_emdash/api/menus/[name]/items`、`/_emdash/api/menus/[name]/items/[id]` | `label`、`customUrl`、`titleAttr`、`target` |
   | `/_emdash/api/taxonomies/[name]/terms`、`/_emdash/api/taxonomies/[name]/terms/[slug]`、`/_emdash/api/taxonomies/[name]/terms/[slug]/translations` | `label`、`slug` |
   | `/_emdash/api/admin/bylines`、`/_emdash/api/admin/bylines/[id]`、`/_emdash/api/admin/bylines/[id]/translations` | `displayName`、`slug` |
@@ -99,7 +101,7 @@
 
   | 工具 | 检查 |
   |---|---|
-  | `content_create`、`content_update` | `slug`、`seo.image`、`bylines[].roleLabel` |
+  | `content_create`、`content_update` | `slug`、`seo.image`、`seo.canonical`、`bylines[].roleLabel` |
   | `menu_set_items` | `items` 的长度，以及每项的 `label`、`customUrl`、`titleAttr`、`target`（items 是平铺的，没有嵌套） |
   | `taxonomy_create_term`、`taxonomy_update_term` | `label`、`slug` |
   | `byline_create`、`byline_update` | `displayName`、`slug` |
@@ -111,7 +113,8 @@
   - `node_modules/emdash/src/mcp/server.ts` 注册的全部 MCP 工具名；
   - `astro/integration/routes.ts` 注入的、content、menus、taxonomies、admin/bylines、widget-areas、mcp 下的全部路由 pattern，闸门用到的每一条都必须在里面；
   - `astro/routes/api/{content,menus,taxonomies,admin/bylines,widget-areas}` 下的路由文件；
-  - `parse.ts` 的 10 MiB 上限，以及 MCP SDK 的 413 格式。
+  - `parse.ts` 的 10 MiB 上限，以及 MCP SDK 的 413 格式；
+  - 闸门读的参数名和 body 字段名：上面每个 MCP 工具的 zod 参数 key（含 `seo`、`bylines` 的子 schema），以及每条 REST 路由 `parseBody` 用的 schema 的 key。core 改名时（例如 `seo.canonical` 换了名字），闸门会静默放行，快照测试让它先失败。
 - core 升级新增工具或路由、或改了 pattern 的名字时，测试失败，提醒人重新核对闸门，再更新快照。
 
 **渲染兜底**：
@@ -137,13 +140,15 @@
   - `schema_list_collections` 给出的每个 collection，字段为线上字段和钉死的表的并集；
   - 每个 collection 的 `content_list`（全部状态、全部 locale，翻页到底）和 `content_list_trashed`；
   - 每个条目的 `revision_list`（`limit: 50`）；
-  - `menu_list` 给出的每个菜单（`menu_get`），`taxonomy_list` 给出的每个 taxonomy 的 term（翻页到底），`byline_list`（翻页到底）。
+  - `menu_list` 给出的每个菜单（`menu_get`），`taxonomy_list` 给出的每个 taxonomy 的 term（翻页到底），`byline_list`（翻页到底）；
+  - widget area 走 REST `GET /_emdash/api/widget-areas`（没有读 widget 的 MCP 工具；要 `widgets:read`，admin token 有）。
 - 对每份 content data 跑 guard。条目查 `slug`，revision 查 `data._slug`。
-- 条目另查 `content_list` 返回的 `seo.image` 和 `bylines[].roleLabel`。回收站里的条目查不了这两项：`content_list_trashed` 不返回它们，`content_get` 又排除回收站的行。闸门限制了写入，但从回收站恢复既不经过闸门也不经过 hook。
+- 条目另查 `content_list` 返回的 `seo.image`、`seo.canonical` 和 `bylines[].roleLabel`。回收站里的条目查不了这三项：`content_list_trashed` 不返回它们，`content_get` 又排除回收站的行。闸门限制了写入，但从回收站恢复既不经过闸门也不经过 hook。
 - 菜单查每项的 `label`、`customUrl`、`url`、`titleAttr`、`target` 和项数；term、byline 查 §3.1 的长度。
-- 不覆盖 widget area：没有读 widget 的 MCP 工具，`SafeWidgetArea` 渲染时检查每个 area 并 fail closed（§3.1）。
+- widget area 按 `SafeWidgetArea` 渲染前的检查来查（§3.1）：先 `widgetAreaIsSafe`，再对每个 menu widget 指向的菜单跑 `menuIsSafe`。`getMenu` 按请求的 locale 选菜单，所以同名菜单的每个 locale 都查；菜单用 `menu_get` 的结果，custom 项的 `customUrl` 按 core 的规则当作 `url`（`customUrl || "#"`，`menus/index.ts:297-298`）。菜单名找不到时通过（渲染出来是空的）。返回的形状不对（没有 `items` 数组，或某个 area 没有字符串 `name` 和 `widgets` 数组）时中止。
 - `revision_list` 的 `total` 大于返回数时，记一条问题（"只扫了最新的 N 个"）。
 - 输出 `collection/id[@revision]: 问题`，每发现一条就打印一条，最后一行是汇总。有任何问题时退出码为 1。
+- 汇总单独写出 revision 里的问题数：`…; N problems (M in revisions, which cannot be edited; they age out after 50 newer revisions)`。revision 是存下来的快照，编辑修不了；core 每个条目只留最新 50 个（`cleanup.ts:42`，每小时的系统清理执行），所以再保存 50 次后它们会被清掉。它们仍然让退出码为 1。
 - fail loud：读不到的东西不算"0 个问题"。MCP 返回的形状不对、cursor 重复、`nextCursor` 不是非空字符串，或者列出的条数和 core 给的 `total` 对不上，都直接中止：退出码为 1，不打印汇总行。
 - 规则收紧后、部署前都要跑它；`CLAUDE.md` 的 Commands 写进这条命令。
 
@@ -185,25 +190,26 @@ runbook（写进上级 spec §8）：
 
 ### 3.6 body 总量、表格、块结构（第 7 项）
 
-在 `pt-guard.mjs` 里加三类检查。上限都远高于现有内容，括号里是现有最大值：
+在 `pt-guard.mjs` 里加三类检查。上限都远高于现有内容，括号里是现有最大值（最后一轮修复新增的上限，即每个 block、表格、单元格的 markDefs、图片数、记录字段数和 `default_tab`，其现有值是 2026-10-17 用 MCP 只读重测的：39 个条目、38 个 revision、73 个 PT 值）：
 
 **body 总量**：
 - 顶层节点不超过 2000（141）；
 - 整个值里的 span 总数不超过 20000（203）：block 的 children、容器里 block 的 children、表格单元格的 content 都计入；表格按 core 的 normalizer 铺好的网格计，补出来的空格子每个算一个 span；
 - 整个值里的 mark 总数不超过 5000（77），同样的计入范围。单页 CPU 主要花在 mark 上：计划 2 实测 1000 span × 20 mark 的块约 0.3 s（`buildMarksTree`）。只限 span 总数时，一页仍可以有 40 万个 mark；限到 5000 个后，按实测比例估算约 0.08 s；
 - 整个值里的表格网格格子总数不超过 20000（109）：core 的 normalizer 和 `Table.astro` 对每个网格格子都要做一遍工作，写下来的单元格再少也一样（一个 colspan 100 × rowspan 20 的单元格铺出 2000 个格子，只算 1 个 span）。每张表按 max(网格格子数, 原始行数) 计，因为没有 cell 的行会被排成一个格子，但要先把每一行都加 key 并复制一遍；
-- 整个值里的 markDefs 总数不超过 5000（49）：`@portabletext/toolkit` 对每个 mark 做一次 `markDefs.find`（astro-portabletext 3.0.3 的副本，`dist/index.js:81`），渲染成本是 mark 数 × markDefs 数。block、容器里的 block、表格和表格单元格的 markDefs 都计入，在逐项检查和交给 normalizer 之前先计；
-- 换行：一个 span 的文字最多 1000 个换行，整个值最多 5000 个（现有最大值：一个 span 1 个，整个值 3 个）。原因：toolkit 把每个 span 按 `\n` 切开，再从尾部一行一行把 `\n` 节点插回去（`dist/index.js:92`），每个 span 是平方级（8 万个换行约 1.6 s）。block、容器里的 block 和表格单元格里的 span 都计入；
+- 整个值里的 markDefs 总数不超过 5000（49）：`@portabletext/toolkit` 对每个 mark 做一次 `markDefs.find`（astro-portabletext 3.0.3 的副本，`dist/index.js:81`），渲染成本是 mark 数 × markDefs 数。block、容器里的 block、表格和表格单元格的 markDefs 都计入，在逐项检查和交给 normalizer 之前先计。另外每个 block、每张表格、每个单元格的 markDefs 不超过 100（3；表格和单元格现在都是 0）：总量只管整个值，一个 block 带 5000 个 markDefs 就把整个值的额度用在一处；core 的 `Table.astro` 用 Map 查单元格的 markDefs，交给 toolkit 的只有被引用的那几个，但 block 的 markDefs 整个交给 toolkit，`find` 在一个 block 的列表上跑；表格和单元格的列表同样限 100；
+- 换行：一个 span 的文字最多 1000 个换行，整个值最多 5000 个（现有最大值：一个 span 1 个，整个值 3 个）。原因：toolkit 把每个 span 按 `\n` 切开，再从尾部一行一行把 `\n` 节点插回去（`dist/index.js:91-95`），每个 span 是平方级（8 万个换行约 1.6 s）。block、容器里的 block 和表格单元格里的 span 都计入；
+- 整个值里的图片不超过 500（14）：`image` 块算 1 张，`gallery` 每张图算 1 张。原因见下面的 blurhash：渲染时每张带 blurhash 的图都要解码一次；
 - 一个 `tabs` 块的 tab 不超过 20（6），一个 `tool_grid` 块的 tool 不超过 100（8），一个 `buttons` 块的 button 不超过 10（0）。
 
-span、mark、网格格子、markDefs、换行这五项总量中任何一项超限，检查就在那一处停止，不再往下走，并记一条"最多 N 个"的问题。
+span、mark、网格格子、markDefs、换行、图片这六项总量中任何一项超限，检查就在那一处停止，不再往下走，并记一条"最多 N 个"的问题。
 
 **表格**（core 结构：`table.rows[]` 是 `{ _type: "tableRow", cells[] }`，cell 是 `{ _type: "tableCell", content: Span[], markDefs?, ... }`）：
 - `rows` 存在时必须是数组，每张表不超过 500 行（13）、写下来的单元格不超过 2000 个（78）；
 - row 必须是对象，`cells` 存在时必须是数组；cell 必须是对象，`content` 存在时必须是数组；
 - `content` 里只能是 span，span 不能有 children，`marks` 存在时是数组且不超过 20 个；
 - 表格、row、cell 的 `_key` 在这张表里不能重复（缺失、空或非字符串的 key 由 core 生成，不查）：core 的 normalizer 对每个 key 做一次线性的后缀扫描来去重（`reserveKey`），重复的 key 让渲染时间变成平方级；
-- 表格、row、cell，以及表格和单元格的 markDef，每条记录最多 32 个字段（现有最大值 5）：normalizer 对每条记录的每个 key 跑一遍正则并复制整条记录（`safeFields`，`node_modules/@emdash-cms/admin/dist/portable-text-table.js:494`）。过宽的记录在上面几项检查里就被拒，不会交给 normalizer；
+- 表格、row、cell，以及表格和单元格的 markDef，每条记录最多 16 个字段（现有最大值 5）：normalizer 对每条记录的每个 key 跑一遍正则并复制整条记录（`safeFields`，`node_modules/@emdash-cms/admin/dist/portable-text-table.js:494`）。过宽的记录在上面几项检查里就被拒，不会交给 normalizer；
 - guard 自己跑 core 的 `normalizePortableTextTable`，和 `Table.astro` 是同一个模块、同一个 specifier：
   - core 排不出来的表直接拒绝，单元格里的 mark 名字和 markDefs 不合法也在这里被拒；
   - "2000 个单元格"指的是 normalizer 铺出来的网格（宽 × 高，colspan 和 rowspan 最多各按 100 算），另外写下来的单元格最多 2000 个；网格格子数还要计入上面 20000 的总量；
@@ -213,12 +219,16 @@ span、mark、网格格子、markDefs、换行这五项总量中任何一项超�
 - `buttons.buttons`、`tabs.tabs`、`tool_grid.tools` 存在时必须是数组，元素必须是对象；
 - `buttons.buttons: null` 被拒：core 的 `Buttons.astro` 只给 undefined 设默认值（`buttons = []`），null 会抛错；`tabs.tabs` 和 `tool_grid.tools` 为 null 则通过，因为 web9 的 Tabs、ToolGrid 把 null 当空列表；
 - button 的 `text`，tab 的 `label`、`body`，tool 的 `name`、`tagline`、`url`、`logo` 存在时必须是字符串；
-- tool 的 `featured` 存在时必须是布尔值。
+- tool 的 `featured` 存在时必须是布尔值；
+- `tabs.default_tab` 存在（不是 null 或 undefined）时必须是 1 到 tab 数之间的整数（tab 数按上限 20 计；现有值：6 个 tab 的块用 3，3 个 tab 的块用 1）。后台的数字输入框清空时存的是 undefined，所以不填可以通过。
+
+**blurhash**：guard 不解码 blurhash，只做解码器自己在抛错之前做的结构检查：第一个字符在 base83 字母表里，长度等于 `4 + 2 × numX × numY`（numX、numY 由第一个字符算出）。解码器（`@unpic/placeholder` 0.1.2 的 `blurhashToImageCssString`，内部是 `blurhash` 2.0.5 的 `decode`）只在这两种情况抛错：字符串为空或短于 6，或长度对不上（首字符不在字母表里时按 -1 读，算出的长度是 4，所以总是对不上）；其余字符不在字母表里时也按 -1 读，不抛错。所以这个检查和"解码不抛错"完全等价，不额外要求其余字符在字母表里（那样会拒绝能渲染的值）。`pt-guard.blurhash.test.mjs` 把两边对比了 7 万多个字符串（每个首字符、几种填充字符、长度 0–168），并钉住两个包的版本。原因：原来 guard 对每张图解码一次，一张 9×9 的 blurhash 约 0.13 ms，一个 4 MiB 的 gallery 要 2–3 s CPU；结构检查约 0.03 µs。渲染时仍要解码，500 张 9×9 的图约 67 ms。
 
 **渲染端**：Tabs、ToolGrid 的数据经由纯函数（`lib/tabs.mjs` 的 `tabItems`、`lib/tool-grid.mjs` 的 `toolItems`）整理后再渲染：
 - 跳过不是对象的元素；
 - 不是字符串的文本当空字符串；
-- `featured` 只认 `true`。
+- `featured` 只认 `true`；
+- Tabs 的 `default_tab` 不是整数时按 1，超出范围时夹到第一个或最后一个 tab（`lib/tabs.mjs` 的 `activeTab`）。
 
 `buttons` 块用 core 的组件渲染，不合法的结构由写入端和发布 hook 挡住，存量由扫描发现。
 
@@ -260,3 +270,7 @@ span、mark、网格格子、markDefs、换行这五项总量中任何一项超�
 | guard 自己跑 core 的表格 normalizer（`@emdash-cms/admin/portable-text-table`） | `Table.astro` 渲染的就是它的输出；只有跑同一个函数，才知道 core 排不排得出这张表、铺出多少格子 | 它是 emdash 的传递依赖，没有写进 `web9-blocks/package.json`：emdash 升级把它挪走时 import 失败，测试会发现 |
 | 表格的"单元格"改指网格格子 | 渲染成本跟网格格子数成正比，一个 colspan × rowspan 的单元格就能占几千个格子，写下来的单元格数管不住 | 合法的大表被拒：网格上限 2000，现有最大 78 |
 | 发布和定时发布被拒时，reason 文案相同（`Publish rejected (spec §10): …`），错误码不同（`PUBLISH_REJECTED`、`SCHEDULE_REJECTED`） | 同一个 handler 注册为 `beforePublish` 和 `beforeSchedule`，错误码由 core 按动作给出 | 只看 reason 分不出是发布还是定时发布，要看错误码 |
+| blurhash 改为结构检查，不再解码（最后一轮修复） | 解码一张 9×9 的 blurhash 约 0.13 ms，一个 4 MiB 的 gallery 让一次保存花 2–3 s CPU；结构检查和"解码不抛错"完全等价（§3.6），测试对比两边并钉住版本 | `blurhash` 或 `@unpic/placeholder` 升级改了抛错的条件：版本钉死的测试和对比测试先失败 |
+| 每个 block、表格、单元格的 markDefs 上限 100，整个值的图片上限 500，表格记录字段上限从 32 降到 16 | 总量只管整个值，一个 block 就能用掉 5000 个 markDefs；图片数决定渲染时的解码次数；16 仍是现有最大值（5）的 3 倍多 | 合法内容被拒：现有最大值分别是 3、14、5，可以调高 |
+| `seo.canonical` 进闸门，docs 的 `category` 进 guard（上限 80），侧栏分组名渲染时也截到 80 | 同属 Editor token 能写、core 没有上限、又渲染到页面上的字符串：`canonical` 进 `<link rel="canonical">`，没有显示名的 `category` 原样当侧栏分组名，出现在每个 doc 页 | 合法的长值被拒：现有 category 最长 7 |
+| `guard-scan` 经 REST 扫 widget area，汇总单列 revision 里的问题 | widget 没有 MCP 工具可读，原来不在扫描范围内；revision 里的问题编辑修不了，要和能修的分开说 | REST 返回的形状变了时扫描中止（fail loud），不会当作 0 个 area |

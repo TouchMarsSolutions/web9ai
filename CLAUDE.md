@@ -11,7 +11,7 @@ Read `AGENTS.md` for EmDash conventions; agent skills are in `.agents/skills/`.
 - MCP from the shell: `node scripts/mcp.mjs <tool> '<json>'`; page assertions: `node scripts/check-page.mjs <url> <marker>...`
 - Migration runner (idempotent; stops on any existing entry that differs unless `--overwrite`): `node scripts/migrate.mjs <docs|menu|terms|posts|redirects|home|all>... [--dry-run] [--overwrite]`, then `node scripts/migrate.mjs verify`; env `EMDASH_URL`, `EMDASH_TOKEN` (redirects need an admin token; `verify` also reads the schema over MCP, so its token needs `schema:read`, and it exits 1 when that read fails)
 - First run on an empty DB: `all --dry-run`, then `menu --overwrite` (the seed menu differs), then `all`; a re-run of `all` writes nothing (every step `unchanged`)
-- Guard scan (after tightening a guard rule, before deploying; exits 1 on any problem or any answer it cannot read): `node scripts/guard-scan.mjs` (all entries incl. trashed, all revisions, menus, terms, bylines; admin token)
+- Guard scan (after tightening a guard rule, before deploying; exits 1 on any problem or any answer it cannot read): `node scripts/guard-scan.mjs` (all entries incl. trashed, all revisions, menus, terms, bylines, widget areas; admin token; the summary counts the problems in revisions apart, as no edit fixes them)
 - Tests: `npm test` (vitest; `*.test.mjs` under scripts/, packages/, seed/)
 - Build: `npm run build` · Type check: `npm run typecheck` (both need the dev server stopped) · Content types: `npx emdash types`
 - Local D1/R2 state lives in `.wrangler/state` (delete it to start over); secrets in `.dev.vars`
