@@ -36,6 +36,37 @@ describe("renderMarkdown sanitizer", () => {
 			'<aside class="callout callout--tip"><p class="callout__title">Title</p><p>body <strong>bold</strong></p>\n</aside>',
 		);
 	});
+	describe("admonitions open only at the start of a block, in time linear in the field", () => {
+		const elapsed = (src) => {
+			const t0 = performance.now();
+			renderMarkdown(src);
+			return performance.now() - t0;
+		};
+		const fill = (unit) => unit.repeat(Math.ceil(25000 / unit.length)).slice(0, 25000);
+		it("opens at the start of the field, after a blank line and after another block", () => {
+			const tip = '<aside class="callout callout--tip"><p>x</p>\n</aside>';
+			expect(renderMarkdown(":::tip\nx\n:::")).toBe(tip);
+			expect(renderMarkdown("para\n\n:::tip\nx\n:::")).toBe(`<p>para</p>\n${tip}`);
+			expect(renderMarkdown("# h\n:::tip\nx\n:::")).toBe(`<h1>h</h1>\n${tip}`);
+		});
+		it("stays text when glued to a paragraph line", () => {
+			expect(renderMarkdown("para\n:::note\nx\n:::")).toBe("<p>para\n:::note\nx\n:::</p>\n");
+		});
+		it("leaves an opener unclosed when the next opener line comes before a closing line", () => {
+			expect(renderMarkdown(":::note\nx\n\n:::tip\ny\n:::")).toBe(
+				'<p>:::note\nx</p>\n<aside class="callout callout--tip"><p>y</p>\n</aside>',
+			);
+		});
+		it("renders 25000 \":\" and 105 dense unclosed openers in well under 200 ms (3.6 s and 0.46 s before)", () => {
+			renderMarkdown(":::tip\nwarm up\n:::");
+			expect(elapsed(":".repeat(25000))).toBeLessThan(200);
+			expect(elapsed(fill(`${":::note a\n".repeat(105)}${"lorem ipsum ".repeat(2000)}`))).toBeLessThan(200);
+		});
+		it("renders unclosed openers, each at a block start, in well under 200 ms (0.6 s with a search to the field's end)", () => {
+			expect(elapsed(fill(":::note\n\n"))).toBeLessThan(200);
+			expect(elapsed(fill(":::x\n\n"))).toBeLessThan(200);
+		});
+	});
 	it("renders mermaid fences as escaped <pre class=mermaid>", () => {
 		expect(renderMarkdown("```mermaid\ngraph TD; A-->B\n```")).toBe('<pre class="mermaid">graph TD; A--&gt;B</pre>');
 	});
