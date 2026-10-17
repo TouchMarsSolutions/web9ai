@@ -2,7 +2,7 @@
 
 - 日期：2026-10-15
 - 分支：`main`（计划 1 的 PR #2 已合并；计划 2 在 `plan2` 分支）；仓库 `TouchMarsSolutions/web9ai`
-- 进度：计划 1 完成（2026-10-15）；计划 2 完成（本地迁移和安全关口，2026-10-16）；计划 3（部署、生产迁移、切换）进行中，见 `docs/superpowers/plans/2026-10-17-emdash-plan3-deploy-cutover.md`
+- 进度：计划 1 完成（2026-10-15）；计划 2 完成（本地迁移和安全关口，2026-10-16）；计划 3（部署、生产迁移、切换）：2026-10-17 已切换到 Worker，Workers Builds（Task 5）和切换后观察（Task 6）待做，见 `docs/superpowers/plans/2026-10-17-emdash-plan3-deploy-cutover.md`
 - 状态标记：**已定** = 已验证或已由 owner 拍板；**建议** = 默认方案，可改；**待验证** = 计划第一个里程碑里实测
 
 ## 0. 目标与取舍
@@ -151,12 +151,17 @@
      - 再预检一次，确认没有冲突后紧接着部署；
      - 比对全部记录，MX、TXT 不变。
 
-     完成后由 Task 6 把这一步标成"已完成"，并补上日期和 version；
+     **已完成（2026-10-17 13:57 PDT，version `e1a8b99b-6bf8-419c-98f0-ea1aea8b404f`，`main` 的 `e7c40ac7`）**：
+     - 删记录到部署完成用了 18 s，13:57:43 时 www 已经返回 200。
+     - DNS 比对：只少了备份里的那 5 条，多了两条 Custom Domain 的 `AAAA 100::`（proxied），MX ×5、TXT ×5 逐字节不变。
+     - 和计划不同的一处：changeset 预检的校准没通过。旧的 A 和 CNAME 还在时，它返回 `conflicting: []`、`added` 两个域名，也就是说这个接口不报 DNS 冲突。Cloudflare 文档写明，已有 CNAME 的 hostname 不能直接建 Custom Domain，所以 `www` 本该出现在 `conflicting` 里。
+     - 按计划这时应该停下。owner 看过证据后决定继续（检查点 C）。依据：同账号的 itouchmars.com 和 touchmars.technology 走过同样的流程（先删冲突记录，再以非 TTY 方式部署，带 override），两个 zone 的 apex MX、TXT 的修改时间都早于各自的切换，之后的每次重新部署也没碰过它们。
+     - 以后每次部署都会带 `override_existing_dns_record=true`：不要在 `www` 或 apex 上加 A、AAAA、CNAME 记录，否则下一次部署会不提示地把它换掉；
   5. GitHub Pages 保留作为回退：回退靠的是 `gh-pages` 分支上**已经构建好的产物**（Pages 设置：source `gh-pages`，custom domain `www.web9.ai`），可以随时把 DNS 切回去。确认稳定后再关闭。旧站源码完整保存在 tag `docusaurus-final`，需要时从它重建；`legacy/` **不能**重新构建出线上站点（静态资源已经移到 `public/`），不要从它重新部署到 `gh-pages`。原来的 `static/CNAME` 和 `deploy.yml` 也放在 `legacy/static/` 和 `legacy/.github/workflows/`，只作记录，workflow 不会运行。
 - **已定（2026-10-17）**：不开预览。`wrangler versions upload` 上传的版本（Workers Builds 给非生产分支构建时就是这样做的）和生产共用 D1、R2 binding，而 EmDash 在版本第一次收到请求时跑 core migration，所以一个升级了 emdash 的分支一旦能被访问，就会改生产库的 schema。真正起作用的是 Workers Builds 关掉非生产分支构建（计划 3 Task 5）。`preview_urls: false` 只是不给版本分配预览 URL，上传的版本照样带着生产 binding。`wrangler dev --remote` 也会连生产 D1，不要用。以后需要预览时，加一个用独立 D1、R2 的 staging environment。
 - **已验证（2026-10-17）**：wrangler 按 `wrangler.jsonc` 里的名字连接资源，找不到就创建。D1 `web9-ai`（`721318a8-ef7b-46b0-9e7c-423d1496882a`，WNAM，read replication `auto`，`d1({session:"auto"})` 需要它）和 R2 `web9-ai-media`（WNAM，没有公开访问）已于 2026-10-17 建好。KV `SESSION` 不写名字，首次部署时由 wrangler 建成 `web9-ai-session`。`IMAGES` 不需要另建资源。`wrangler.jsonc` 只写名字、不写 id，和同账号的 itouchmars、touchmars.technology 一样。
 - **首次启动**：EmDash 在空库第一次启动时自动应用一次 `seed/seed.json`（`applySeed`，`onConflict: "skip"`，之后不再应用，改 seed 也没用），写入 settings、collections、taxonomies、menus、widgetAreas；content 只在 setup 向导里选了才导入。所以 seed 只放 Web9.AI 自己的站点信息，不放模板 demo 内容；菜单只放稳定链接（Blog、GitHub），AI/Dev 入口由迁移 runner 建好 docs 后通过 MCP 加。上线后再改站点信息、菜单、widget，走后台或 MCP。计划 2 Task 1 起，seed 还包含块类型、`pages.layout`、`posts`/`pages` 的 `search_text`、5 个 tag term 和 `settings.url`。注意 `applySeed` 只在 `includeContent` 为 true 时写 taxonomy terms（运行时首次启动用的是 `onConflict: "skip"`、不带 `includeContent`；setup 向导取决于是否勾选导入内容），所以 terms 由迁移 runner 的 `terms` 步骤从 seed 补建（计划 2 Task 1 实测）。
-- **登录域名（2026-10-17 核实）**：没设 `siteUrl` 和 `EMDASH_SITE_URL`，passkey 的 rpId 就是请求的 hostname。setup 在 workers.dev 上做，passkey 只在 workers.dev 能用；切换后在后台用 Settings › General › Change domain 迁到 `www.web9.ai`。它的自动检查注定失败（Worker 请求自己的 Custom Domain 不会回到本 Worker），所以先从外部 curl `POST /_emdash/api/site/domain-proof` 确认，再点 **Use … anyway**。setup 之后不要再设 `EMDASH_SITE_URL`，否则已有的 passkey 都会失效。空库时第一个完成 setup 的人就是管理员，所以首次部署后 owner 要马上完成 setup。
+- **登录域名（2026-10-17 核实）**：没设 `siteUrl` 和 `EMDASH_SITE_URL`，passkey 的 rpId 就是请求的 hostname。setup 在 workers.dev 上做，passkey 只在 workers.dev 能用；切换后在后台用 Settings › General › Change domain 迁到 `www.web9.ai`。它的自动检查注定失败（Worker 请求自己的 Custom Domain 不会回到本 Worker），所以先从外部 curl `POST /_emdash/api/site/domain-proof` 确认，再点 **Use … anyway**。setup 之后不要再设 `EMDASH_SITE_URL`，否则已有的 passkey 都会失效。空库时第一个完成 setup 的人就是管理员，所以首次部署后 owner 要马上完成 setup。**已完成（2026-10-17）**：owner 在 workers.dev 上完成 setup，切换后做了 Change domain，site URL 现在是 `https://www.web9.ai`，并在 www 上注册了新 passkey。workers.dev 的 passkey 保留到切换后观察期结束，因为回退后只能用它登录。
 - 备份：
   - **已定（owner，2026-10-17）**：`EMDASH_ENCRYPTION_KEY` 只存在 Cloudflare 的 Worker secret 里（首次部署时用 `--secrets-file` 上传，本地文件随后删除），不另做备份。它只用来加密插件 secret。丢了就生成新 key，再在后台重填插件 secret；今天还没有插件 secret。
   - 定时导出 D1，再定期通过 MCP `site_export` 做整站导出。
@@ -206,7 +211,8 @@
   - 媒体一直经 `/_emdash/api/media/file/...` 提供（`sandbox` CSP、`nosniff`、SVG 和 PDF 作为附件），不改成公开的 R2 域名：那样上传的 SVG 会不带这些头直接内联渲染。**已做**：`render-sinks.test.mjs` 锁定 `astro.config.mjs` 和 `wrangler.jsonc` 里没有 `publicUrl`。
   - 计划 2 文末"未决事项"里标了 **AI PAT 之前修** 的三项：单页 CPU、表格单元格不受 guard 约束、块形状错误导致本页 500。**已做**：guard 现在限制 body 总量（span 20000、mark 5000、表格网格格子 20000、markDefs 5000、换行 5000、图片 500）和每个 block、表格、单元格的 markDefs（100）、检查表格单元格（形状、`_key` 不重复、每条表格记录（表格、row、cell，含表格和单元格的 markDef）最多 16 个字段，并跑 core 的表格 normalizer）和块结构（含 `tabs.default_tab`）；blurhash 改为结构检查，不再解码；Tabs、ToolGrid 遇到异常结构不再抛错。PR 评审修复轮又加了：renderer 打印的块文本字段（含 `block.textAlign`、`pages.layout` 的文字）必须是字符串，Markdown 和代码限长（25000、300、20000），整个值的 Markdown 合计 52000，`pages.layout` 的文字限长；web9 的 renderer 把非字符串当空字符串；读线上 schema 限时 1500 ms。PR 评审 I2 又加了 Markdown 字段的分隔符密度上限：marked 的渲染成本在密集的 link opener 上是三次方（opener 数 × destination 里的 `(` 数 × 长度），在 `*`、`_`、`~`、`` ` ``、`!`、`<`、`\` 上是平方，list 的 lazy 行是换行数 × 后面的长度，一行几千个 list/quote marker 会让渲染栈溢出，裸链接末尾每个被 backpedal 去掉的标点或 entity 都让整段重扫一遍，所以每个字段和每个值都限这些量（换行按换行数 × 字段长度限，裸链接末尾的步数和一段里的链接开头数按字段限，2026-10-17 spec §3.6）；admonition 扩展改成只在 block 开头试、找 closer 时遇到下一个 opener 就停，不再是平方；`renderMarkdown`、`renderInlineMarkdown` 抛错时渲染成空字符串。仍然残留的：fuzz 没覆盖到的 pattern、线性但重的内容（宽表格、大量要转义的字符）、workerd 的栈没量过、REST 逐项加菜单项时闸门数不了项数，见 2026-10-17 spec §5。
 - `DocsPage.astro` 的侧栏每个语言只取 `limit: 500` 篇 doc，没有 `orderBy`：超过 500 篇时侧栏会静默少掉条目；而且每个 doc 页都打印全部 doc 的 title（title 已限 200 字符，见上面第 1 项）。
-- 路径里有残缺的百分号编码（`/docs/%E0%A4%A`、`/%E0%A4%A`）时返回 500。这是 core 的既有行为，响应不带 `Cache-Control`、不进共享缓存；生产上再确认一次。
+- 路径里有残缺的百分号编码（`/docs/%E0%A4%A`、`/%E0%A4%A`）时，本地 dev 返回 500，这是 core 的既有行为，响应不带 `Cache-Control`、不进共享缓存。**生产实测（2026-10-17）**：`https://www.web9.ai/docs/%E0%A4%A` 返回 404。
+- Browser Integrity Check（zone 默认开着）不拦 Node 发出的请求：2026-10-17 在 `www.web9.ai` 上，`migrate verify` 和 `scripts/mcp.mjs content_list` 都正常，不用关 BIC，也不用加 WAF 规则。
 - `npm audit` 有两项：katex（经 mermaid）、postcss-selector-parser（经 `@tailwindcss/typography`）；两项的修复都是 breaking，计划 3 评估后再升级。
 - CI job 已改名为 "Tests and build"（原来是 "Unit tests"）：如果 `main` 的 branch protection 规则要求 "Unit tests" 这个 check，会挡住所有 PR；计划 3 配置 GitHub 时要改成新名字。**已核实（2026-10-17）**：`main` 的 branch protection 没有 required status check，不阻塞。
 - 生产第一次运行迁移 runner：先 `node scripts/migrate.mjs all --dry-run`，再 `node scripts/migrate.mjs menu --overwrite`（seed 里的菜单与目标不同，§7），然后 `node scripts/migrate.mjs all`；再跑一次 `all` 确认全是 `unchanged`，最后 `verify`。
