@@ -3,7 +3,8 @@
 // reports "unchanged" for everything already in place and writes nothing.
 //
 //   node scripts/migrate.mjs <step>... [--dry-run] [--overwrite]
-//   steps: docs, menu, terms, posts, redirects, home, verify (reads only), all (every write step, in order)
+//   steps: docs, menu, terms, posts, redirects, home, verify (reads only; reports schema drift, scripts/lib/schema-drift.mjs),
+//   all (every write step, in order)
 // Fail closed: an entry or menu that exists and differs from the migration stops the run ([WOULD_OVERWRITE])
 // unless --overwrite is given; a dry run lists the differences. A pending draft that differs always stops it
 // ([PENDING_DRAFT]). Redirect rules of the legacy-docusaurus group follow the same rule. See scripts/lib/sync.mjs
@@ -19,6 +20,7 @@ import { checkMarkers } from "./lib/markers.mjs";
 import { callTool, defaultToken } from "./lib/mcp.mjs";
 import { postPayloads } from "./lib/posts.mjs";
 import { legacyRedirects, restRequest, syncRedirects } from "./lib/redirects.mjs";
+import { schemaDrift } from "./lib/schema-drift.mjs";
 import { upsertEntry, upsertMenu } from "./lib/sync.mjs";
 import { seedTerms, syncTerms } from "./lib/terms.mjs";
 import { docPageChecks } from "./lib/verify-pages.mjs";
@@ -110,10 +112,14 @@ const STEPS = {
 			const location = res.headers.get("location") && new URL(res.headers.get("location"), site).pathname;
 			if (res.status !== 301 || location !== to) failures.push({ url: from, status: res.status, location, wanted: to });
 		}
+		const drift = [];
+		for (const { slug } of (await callTool("schema_list_collections", {})).items) drift.push(...schemaDrift(await callTool("schema_get_collection", { slug })));
 		for (const f of failures) console.error(`verify: ${JSON.stringify(f)}`);
+		for (const d of drift) console.error(`verify: ${d}`);
 		console.log(`verify: ${checks.length - pageFailures}/${checks.length} pages ok`);
 		console.log(`verify: ${hops.length - (failures.length - pageFailures)}/${hops.length} redirects ok`);
-		if (failures.length) process.exitCode = 1;
+		console.log(`verify: ${drift.length ? `${drift.length} schema drift` : "no schema drift"}`);
+		if (failures.length || drift.length) process.exitCode = 1;
 		return [];
 	},
 };
