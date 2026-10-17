@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   test:
-    name: Unit tests
+    name: Tests and build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,3 +20,5 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      # postbuild runs scripts/check-public-css.mjs: no overlay utilities, no lowered light-dark() (spec §10, §11)
+      - run: npm run build
