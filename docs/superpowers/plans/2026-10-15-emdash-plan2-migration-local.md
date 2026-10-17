@@ -6399,7 +6399,6 @@ Expected：`git status --short` 没有输出（`.local/`、`.wrangler/`、`dist/
 - `css-value.mjs`：`border-radius: 9999px`（药丸形）超过 1000 的上限被拒，`turn`、`ch` 单位也被拒；需要时再放宽。
 - `width`、`max-width` 的 `%` 上限是 2000，嵌套时会叠加（只在文档流里横向溢出，盖不住站点框架）；可以改成 100。
 - `img` 不在可设盒属性的标签里（`img` 上的 width、padding、border 会被去掉），`hr`、`menu` 也没有盒属性。
-- 嵌套标题（`<h1><div><h1>…`）不用 style 也会让 prose 字号叠加；可加 `.prose :is(h1,h2,h3,h4,h5,h6) :is(h1,h2,h3,h4,h5,h6) { font-size: inherit }` 或 sanitize-html 的 `nestingLimit`。
 - ruby 过滤只作用于 sanitize-html 的默认标签数组：以后 concat 进 ruby 标签，或 sanitize-html 升级加了 ruby 类标签，就会绕过（`markdown.test.mjs` 钉住了今天的集合）。
 - **AI PAT 之前修**：单页 CPU。在现有上限内，一个 1000 span × 20 mark 的块约 0.3 s（`buildMarksTree`），每个顶满上限的块约 0.7 s；body 没有总量上限。
 - **AI PAT 之前修**：guard 不进表格单元格。core 的 normalize 保留 3000 个 mark、2 万个 span，那一页会 RangeError 或耗时 13 s；单元格内容也要加上限。
@@ -6412,3 +6411,6 @@ Expected：`git status --short` 没有输出（`.local/`、`.wrangler/`、`dist/
 - zh 首页没有自己的行时仍声明 zh-CN hreflang（迁移后不会出现这种状态）；空库时的首页占位没有测过。
 - fallback 页面（zh-CN 下显示英文正文）的 `<html lang>` 仍是 `zh-CN`。
 - callout、tabs、details 正文里没闭合的 ``` 会让 `.md` 里之后的站内链接保持相对路径（`absolutize` 以为还在代码块里）。
+- 重复的小函数：`oneLine`、`escLink`、`str` 在 `to-markdown.mjs` 和 `llms.mjs` 里各有一份，`LANGUAGE` 在 `pt-guard.mjs` 和 `to-markdown.mjs` 里各有一份；可以合进一个小的 `text.mjs`。
+- `home-content.mjs` 从 `verify-pages.mjs` 引 `escapeHtml`（内容模块依赖校验模块）；可以挪到 `markers.mjs` 一类的共用模块。
+- 仅 dev：`/docs/.md` 和 `/zh-CN/docs/.md` 在 `astro dev` 下返回 500（Vite 的 markdown middleware 把 `/docs/.md` 当文件去开）；production build 没有 Vite middleware，预期是 404，但没有确认。
