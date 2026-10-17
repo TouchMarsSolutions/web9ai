@@ -53,12 +53,12 @@
   - 抽成组件 `src/components/DocsSidebar.astro`，桌面 sidebar 和手机抽屉（§3.3）各渲染一次。
 - **面包屑**：首页图标 › section 名 › 分类名（`general` 不显示）› 当前页标题。section 和分类是纯文本（旧站也不能点），首页图标链到当前语言的首页。`<nav aria-label="Breadcrumbs">` 加 `<ol>`。纯函数 `breadcrumbs(doc, locale)`。
 - **标题锚点**：
-  - 给 `PortableText` 传 `components={{ block: { h2, h3, h4, h5, h6 } }}`，用自己的 `Heading.astro` 渲染 `<hN id>`，标题后面跟一个悬停才显示的 `<a href="#id" aria-label="Direct link to …">#</a>`。emdash 的 `PortableText` 把用户组件合并在最上层（`node_modules/emdash/src/components/PortableText.astro`）。
+  - 给 `PortableText` 传 `components={{ block: Heading }}`：一个组件接管所有 block 样式。h2–h6 渲染成 core 的 `Block`（`emdash/ui` 导出）加上 `id`（core `Block` 把多余的 prop 展开到元素上，所以保留了它的 text-align class），标题后面跟一个悬停才显示的 `<a href="#id" aria-label="Direct link to …">#</a>`；其他样式原样交给 core `Block`。不能传 `block: { h2, … }` 这样的对象：emdash 的 `block` 是单个组件，`mergeComponents` 遇到组件就整个替换，段落会落到 `UnknownBlock`（2026-10-17 写计划时核对 `astro-portabletext` 0.11.4 发现，修订本节）。
   - id 在 DocsPage 里一次算好：纯函数 `headingAnchors(body, legacyIds)` 按文档顺序遍历顶层 `_type: "block"`、`style` 为 h2–h6 的块，标题文字是 children 里 span 文字的拼接。id 的来源依次是：
     1. 旧站自定义 id 表（下面），命中就用；
     2. `github-slugger`（Docusaurus 用的同一个库）对标题文字生成，按页去重（同名标题得到 `-1`、`-2` 后缀）。
-  - `Heading.astro` 按块的 `_key` 查 id。没有 `_key` 的块（只可能来自没按 skill 写的 MCP 内容）退回到不去重的 slug。
-  - **旧站自定义 id 表**：旧站 5 个文件里有 22 个 `{#id}`，站内有 8 处链接用了其中 3 个（`#what-is-not`、`#programming-code`、`#function`）。转换器把 `{#id}` 去掉了（`scripts/lib/mdx-to-pt.mjs:212`），所以从标题文字推不回来。做法：一个生成脚本对 `legacy/` 里带 `{#id}` 的文件跑 `convertMdx`，按标题顺序把第 k 个源标题的 id 对到第 k 个 heading 块的文字，写成 `packages/web9-site/lib/legacy-anchors.json`（`{ "<locale>/<slug>": { "<标题文字>": "<id>" } }`），提交进仓库。测试在 `legacy/` 还在时重新生成并比对（和 `docs-nav.test.mjs` 同样的做法），`legacy/` 删掉后跳过。
+  - `Heading.astro` 按块的 `_key` 查 id，id 表由 DocsPage 放在 `Astro.locals.headingIds`（按请求隔离；`PortableText` 只给块组件传 `node`）。不能把 id 写进一个新的 `value` 数组：`PortableText` 靠 `value` 上不可枚举的 edit meta 判断编辑模式，换成新数组会让 owner 的行内编辑失效。没有 `_key` 的块（只可能来自没按 skill 写的 MCP 内容）退回到不去重的 slug，也不用旧 id 表。编辑模式下 `PortableText` 渲染行内编辑器，标题没有 id，这是预期的。
+  - **旧站自定义 id 表**：旧站 5 个文件里有 22 个 `{#id}`，站内有 8 处链接用了其中 3 个（`#what-is-not`、`#programming-code`、`#function`）。转换器把 `{#id}` 去掉了（`scripts/lib/mdx-to-pt.mjs:212`），所以从标题文字推不回来。做法：一个生成脚本用迁移同一套转换（`docPayloads(readLegacyTree())`，就是数据库里的 body）处理带 `{#id}` 的文件，按文字把每个源标题（去掉 `{#id}` 和行内的反引号、加粗、链接语法）对到级别相同、文字相同的那一个 heading 块，对不上或对上不止一个就报错（不按"第 k 个"对：H1 被转换器用作标题，`<details>` 里的标题变成块里的 Markdown），写成 `packages/web9-site/lib/legacy-anchors.json`（`{ "<locale>/<slug>": { "<标题文字>": "<id>" } }`），提交进仓库。测试在 `legacy/` 还在时重新生成并比对（和 `docs-nav.test.mjs` 同样的做法），`legacy/` 删掉后跳过。
 - **目录（On this page）**：
   - 数据来自 `headingAnchors` 里 h2、h3 的条目（Docusaurus 默认的范围），纯函数 `tocEntries`。少于 2 条就不显示。
   - ≥ 1280 px：右侧一列（约 220 px），sticky，`max-height: calc(100dvh - 5rem)`，自己滚动。一个小脚本用 `IntersectionObserver` 给当前节的链接设 `aria-current="true"`，样式随之高亮。
@@ -81,7 +81,7 @@
 - 依赖 `prismjs`（钉住版本）。只打包用到的语言：python、bash、yaml、typescript、javascript、json、kotlin、java、csharp、swift、markdown（旧站代码块用到的语言，加 javascript、json）。未知语言不处理。
 - 一个客户端模块 `packages/web9-blocks/astro/prism-client.mjs`（和 `mermaid-client.mjs` 并列）。DocsPage 和 posts 页的脚本只在页面里有 `pre code[class*="language-"]` 时才 `import()` 它，所以没有代码的页面不下载。设 `window.Prism = { manual: true }`，然后对正文容器调用 `highlightAllUnder`。
 - 范围：core `code` 块（`<pre><code class="language-x">`），以及 callout、tabs、details 正文 Markdown 里的代码块（`markdown.mjs` 保留 `language-*` class）。
-- 配色：Prism token 类（`.token.keyword` 等）写在 `packages/web9-blocks/astro/blocks.css`，颜色用新的 token（`--color-code-keyword` 等），浅色值放 `@theme static`，深色值放 `:root.dark` 和 `@media (prefers-color-scheme: dark) { :root:not(.light) }`（CLAUDE.md 的样式规则，不用 `dark:` 也不用 `light-dark()`）。
+- 配色（2026-10-17 写计划时修订）：emdash 的 core `code` 块在两种主题下都是深色底（`Code.astro` 写死 `#1e1e1e` / `#e0e0e0`），而 callout、tabs、details 里 Markdown 的代码块用 `prose` 的 `--color-surface` 底，浅色主题下是浅色。一套配色不能在两种底色上都可读。决定：Markdown 的代码块也改成同样的深色底（`.prose pre:not(.mermaid)`，写在 `blocks.css`），整站只用一套深色 Prism 配色（VS Code Dark+ 的颜色），token 类（`pre .token.keyword` 等）写在 `packages/web9-blocks/astro/blocks.css`。这样占绝大多数的 core 代码块外观不变（视觉沿用新站），只有少量 Markdown 代码块在浅色主题下从浅底变成深底。配色不随主题变，所以不新增 `--color-*` token，`theme.test.mjs` 不受影响；仍然不用 `dark:` 也不用 `light-dark()`。
 - 安全：Prism 读 `textContent`，输出转义后的 token span；它加的 class 只存在于运行时的 DOM，不进存储的内容。内容 HTML 里的 class 仍由 sanitizer 白名单控制，内容不能自己写 `token` 类（白名单不放宽）。
 
 ## 4. 约束（来自上级 spec 和 CLAUDE.md）
@@ -102,7 +102,7 @@
   - `splitMenu`、`activeMenuHref`：doc 页按 section、posts 类页面、精确匹配、不匹配、zh-CN 前缀；
   - `docsSidebar`：只返回当前 section，根条目在前，只有当前分类 `open`，顺序沿用 `sort_order`；zh-CN 的分类名；
   - `breadcrumbs`：有分类、`general`、zh-CN；
-  - `headingAnchors`：slug 和 Docusaurus 一致（中文、标点、行内代码）、同名去重、旧 id 表优先、没有 `_key` 的块；`tocEntries` 只取 h2、h3；
+  - `headingAnchors`：slug 和 Docusaurus 一致（中文、标点、行内代码；期望值取自旧站页面）、同名去重、旧 id 表优先、没有 `_key` 的块；`tocEntries` 只取 h2、h3。2026-10-17 写计划时把全部 35 篇 doc 转换后的标题 id 和旧站页面逐个比对过，完全一致；
   - `legacy-anchors.json`：`legacy/` 在时重新生成并比对，并确认 `#what-is-not`、`#programming-code` 在表里。
 - `npm test`、`npm run build`（含 `check-public-css`）、`npm run typecheck` 通过。
 - 浏览器（CDP，本地 dev，合并前）：
