@@ -3,9 +3,12 @@
 // through REST without passing content:beforeSave, so check the area here and render nothing if it holds a
 // widget the site does not render: any content widget (use a doc or page instead), an unknown component or
 // an undeclared prop. A throw inside core's WidgetArea cannot be caught here, so the check must come first.
-import { getWidgetArea } from "emdash";
+// A menu widget is checked too: core's WidgetRenderer prints the items, labels and titleAttr of the menu it names with
+// no clamp (components/WidgetRenderer.astro), and menus reach the database without a hook, so each named menu is read
+// here (the same getMenu call) and must pass menuIsSafe.
+import { getMenu, getWidgetArea } from "emdash";
 import { WidgetArea } from "emdash/ui";
-import { widgetAreaIsSafe } from "../lib/widgets.mjs";
+import { menuIsSafe, widgetAreaIsSafe } from "../lib/widgets.mjs";
 
 interface Props {
 	name: string;
@@ -15,8 +18,17 @@ const { name, class: className } = Astro.props;
 // Any throw (the check, or reading the area) counts as unsafe: this runs on every page
 let safe = false;
 try {
-	safe = widgetAreaIsSafe(await getWidgetArea(name));
+	const area = await getWidgetArea(name);
+	safe = widgetAreaIsSafe(area);
 	if (!safe) console.warn(`[web9-blocks] widget area "${name}" fails the widget check (a content widget, an unknown type, component or prop, a string over its length cap, or more than 20 widgets); not rendered`);
+	else {
+		for (const widget of area?.widgets ?? []) {
+			if (widget.type !== "menu" || !widget.menuName || typeof widget.menuName !== "string") continue;
+			if (menuIsSafe(await getMenu(widget.menuName))) continue;
+			safe = false;
+			console.warn(`[web9-blocks] widget area "${name}" holds menu "${widget.menuName}", which fails the menu check (more than 50 items, a label over 80 characters, a url over 2048 or a titleAttr over 200); not rendered`);
+		}
+	}
 } catch (error) {
 	console.warn(`[web9-blocks] widget area "${name}" could not be checked; not rendered`, error);
 }

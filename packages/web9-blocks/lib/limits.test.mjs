@@ -3,7 +3,7 @@ import { DATA_LIMITS, LIMITS, clampText, lengthProblem } from "./limits.mjs";
 
 describe("LIMITS", () => {
 	it("holds the limits of spec 2026-10-17 §3.1", () => {
-		expect(LIMITS).toEqual({ title: 200, description: 1000, excerpt: 1000, slug: 100, label: 80, url: 2048, menuItems: 50 });
+		expect(LIMITS).toEqual({ title: 200, description: 1000, excerpt: 1000, slug: 100, label: 80, url: 2048, menuItems: 50, titleAttr: 200, target: 32 });
 		expect(DATA_LIMITS).toEqual({ title: 200, description: 1000, excerpt: 1000 });
 		expect(Object.isFrozen(LIMITS)).toBe(true);
 		expect(Object.isFrozen(DATA_LIMITS)).toBe(true);

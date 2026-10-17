@@ -9,6 +9,10 @@ export const LIMITS = Object.freeze({
 	label: 80,
 	url: 2048,
 	menuItems: 50,
+	// A menu item's target renders in the Base.astro menu on every page; its titleAttr renders in a footer menu widget
+	// (core WidgetRenderer, no clamp), which SafeWidgetArea checks with menuIsSafe.
+	titleAttr: 200,
+	target: 32,
 });
 
 /** The `data` fields whose length the save and publish check limits, in every collection. */

@@ -126,3 +126,31 @@ describe("menu", () => {
 		expect(base).toContain("label: clampText(item.label, LIMITS.label)");
 	});
 });
+
+describe("footer menu widget", () => {
+	it("is checked by SafeWidgetArea before core renders it: getMenu, menuIsSafe, and an area that fails is not rendered", () => {
+		const source = raw("packages/web9-blocks/astro/SafeWidgetArea.astro");
+		expect(source).toMatch(/^import \{ getMenu, getWidgetArea \} from "emdash";$/m);
+		expect(source).toMatch(/^import \{ menuIsSafe, widgetAreaIsSafe \} from "\.\.\/lib\/widgets\.mjs";$/m);
+		expect(source).toContain("await getMenu(widget.menuName)");
+		expect(source).toContain("menuIsSafe(");
+		expect(source).toContain("{safe && <WidgetArea");
+	});
+});
+
+describe("write gate middleware", () => {
+	it("keys on the matched route pattern and never on the URL: the router and the gate agree by construction", () => {
+		const source = raw("src/middleware.ts");
+		expect(source).toMatch(/defineMiddleware\(async \(\{ request, routePattern \}, next\)/);
+		expect(source).toContain("gatedRequest(request.method, routePattern)");
+		expect(source).toContain("writeGateResponse(request.method, routePattern, body)");
+		expect(source).not.toMatch(/pathname/i);
+		expect(source).not.toMatch(/request\.url|\burl\b/);
+	});
+	it("reads the body through readGatedBody (capped at MAX_GATED_BODY_BYTES, BOM stripped), never request.text()", () => {
+		const source = raw("src/middleware.ts");
+		expect(source).toContain("readGatedBody(request.clone().body)");
+		expect(source).toContain("MAX_GATED_BODY_BYTES");
+		expect(source).not.toMatch(/\.text\(\)/);
+	});
+});

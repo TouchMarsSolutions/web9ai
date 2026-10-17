@@ -1,8 +1,10 @@
 // The write gate (lib/write-gate.mjs) knows core's write paths as of emdash 1.3. These snapshots fail when an emdash
-// upgrade adds an MCP tool or a REST route in a gated area: re-check the gate against it, then update the snapshot
-// (spec 2026-10-17 §3.1). emdash ships its src/, so the files are read from node_modules; a missing file fails the test.
+// upgrade adds an MCP tool or a REST route in a gated area, or renames a route pattern the gate keys on: re-check the
+// gate against it, then update the snapshot (spec 2026-10-17 §3.1). emdash ships its src/, so the files are read from
+// node_modules; a missing file fails the test.
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { GATED_PATTERNS } from "./lib/write-gate.mjs";
 
 const core = (p) => new URL(`../../node_modules/emdash/src/${p}`, import.meta.url);
 
@@ -38,6 +40,35 @@ describe("core write paths the gate was checked against", () => {
 		expect(routes("taxonomies")).toEqual([
 			"[name].ts", "[name]/reorder.ts", "[name]/terms/[slug].ts", "[name]/terms/[slug]/translations.ts", "[name]/terms/index.ts",
 			"[name]/translations.ts", "bulk-tag.ts", "index.ts",
+		]);
+		expect(routes("admin/bylines")).toEqual(["[id]/index.ts", "[id]/translations.ts", "index.ts"]);
+		expect(routes("widget-areas")).toEqual(["[name].ts", "[name]/reorder.ts", "[name]/widgets.ts", "[name]/widgets/[id].ts", "index.ts"]);
+	});
+	it("route patterns the gate keys on, and the patterns around them", () => {
+		// The gate matches context.routePattern against these strings, so a rename in emdash must fail here, not pass silently
+		const patterns = [...readFileSync(core("astro/integration/routes.ts"), "utf8").matchAll(/pattern:\s*"([^"]+)"/g)].map((m) => m[1]);
+		expect(patterns.length).toBeGreaterThan(100);
+		for (const pattern of GATED_PATTERNS) expect(patterns, pattern).toContain(pattern);
+		const prefixes = ["/_emdash/api/content", "/_emdash/api/menus", "/_emdash/api/taxonomies", "/_emdash/api/admin/bylines", "/_emdash/api/widget-areas", "/_emdash/api/mcp"];
+		expect(patterns.filter((p) => prefixes.some((prefix) => p.startsWith(prefix))).sort()).toEqual([
+			"/_emdash/api/admin/bylines", "/_emdash/api/admin/bylines/[id]", "/_emdash/api/admin/bylines/[id]/translations",
+			"/_emdash/api/content/[collection]", "/_emdash/api/content/[collection]/[id]", "/_emdash/api/content/[collection]/[id]/compare",
+			"/_emdash/api/content/[collection]/[id]/discard-draft", "/_emdash/api/content/[collection]/[id]/duplicate",
+			"/_emdash/api/content/[collection]/[id]/lock", "/_emdash/api/content/[collection]/[id]/permanent",
+			"/_emdash/api/content/[collection]/[id]/plugin-extensions/[pluginId]/[kind]/[extensionId]",
+			"/_emdash/api/content/[collection]/[id]/preview-url", "/_emdash/api/content/[collection]/[id]/publish",
+			"/_emdash/api/content/[collection]/[id]/references/[relation]/children", "/_emdash/api/content/[collection]/[id]/references/[relation]/parents",
+			"/_emdash/api/content/[collection]/[id]/restore", "/_emdash/api/content/[collection]/[id]/revisions",
+			"/_emdash/api/content/[collection]/[id]/schedule", "/_emdash/api/content/[collection]/[id]/terms/[taxonomy]",
+			"/_emdash/api/content/[collection]/[id]/translations", "/_emdash/api/content/[collection]/[id]/unpublish",
+			"/_emdash/api/content/[collection]/authors", "/_emdash/api/content/[collection]/trash", "/_emdash/api/mcp",
+			"/_emdash/api/menus", "/_emdash/api/menus/[name]", "/_emdash/api/menus/[name]/items", "/_emdash/api/menus/[name]/items/[id]",
+			"/_emdash/api/menus/[name]/reorder", "/_emdash/api/menus/[name]/translations",
+			"/_emdash/api/taxonomies", "/_emdash/api/taxonomies/[name]", "/_emdash/api/taxonomies/[name]/reorder",
+			"/_emdash/api/taxonomies/[name]/terms", "/_emdash/api/taxonomies/[name]/terms/[slug]",
+			"/_emdash/api/taxonomies/[name]/terms/[slug]/translations", "/_emdash/api/taxonomies/[name]/translations", "/_emdash/api/taxonomies/bulk-tag",
+			"/_emdash/api/widget-areas", "/_emdash/api/widget-areas/[name]", "/_emdash/api/widget-areas/[name]/reorder",
+			"/_emdash/api/widget-areas/[name]/widgets", "/_emdash/api/widget-areas/[name]/widgets/[id]",
 		]);
 	});
 });
