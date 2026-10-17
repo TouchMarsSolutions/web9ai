@@ -20,6 +20,22 @@ describe("guardPortableText: totals over the whole value (spec 2026-10-17 §3.6)
 			"at most 20000 spans are allowed in total",
 		]);
 	});
+	it("counts the spans of columns[].content and blockquoteGroup.blocks too", () => {
+		const full = (n) => para(Array.from({ length: n }, () => span()));
+		const columns = { _type: "columns", _key: "v", columns: [{ _key: "a", content: [full(1000)] }] };
+		const quote = { _type: "blockquoteGroup", _key: "v", blocks: [full(1000)] };
+		for (const container of [columns, quote]) {
+			expect(guardPortableText([...Array.from({ length: 19 }, () => full(1000)), container])).toEqual([]);
+			expect(guardPortableText([...Array.from({ length: 19 }, () => full(1000)), container, full(1)])).toEqual(["at most 20000 spans are allowed in total"]);
+		}
+	});
+	it("reports a total after an earlier problem as a second entry, without the final entry", () => {
+		const full = (n) => para(Array.from({ length: n }, () => span()));
+		expect(guardPortableText([{ _type: "htmlBlock", _key: "h" }, ...Array.from({ length: 20 }, () => full(1000)), full(1)])).toEqual([
+			"#0 htmlBlock: raw HTML blocks are not allowed; use Markdown or a Web9 block",
+			"at most 20000 spans are allowed in total",
+		]);
+	});
 	it("allows at most 5000 marks in total (render CPU grows with marks)", () => {
 		const marked = (n) => para(Array.from({ length: n }, () => span("a", ["strong", "em"])));
 		expect(guardPortableText([marked(1000), marked(1000), marked(500)])).toEqual([]);
@@ -57,6 +73,31 @@ describe("guardPortableText: tables (spec 2026-10-17 §3.6)", () => {
 	});
 });
 
+describe("guardPortableText: tables on core's normalized grid (normalizePortableTextTable pads rows and fills empty cells)", () => {
+	// Distinct keys: core's reserveKey is quadratic in cells that share a _key, and these tables have thousands of cells.
+	let seq = 0;
+	const fresh = () => ({ ...cell([]), _key: `k${seq++}` });
+	const grid = (rows, cols) => table(Array.from({ length: rows }, () => row(Array.from({ length: cols }, fresh))));
+	it("caps the grid core renders, not the cells written (a colspan of 100 and 199 empty rows)", () => {
+		const wide = table([row([{ ...cell([]), colspan: 100 }]), ...Array.from({ length: 199 }, () => ({ _type: "tableRow", _key: "r" }))]);
+		expect(guardPortableText([wide])).toEqual(["#0 table: at most 2000 cells are allowed (got 100×200 once core fills the grid)"]);
+	});
+	it("counts an empty cell as one span, as core renders it", () => {
+		expect(guardPortableText(Array.from({ length: 10 }, () => grid(50, 40)))).toEqual([]);
+		expect(guardPortableText(Array.from({ length: 11 }, () => grid(50, 40)))).toEqual(["at most 20000 spans are allowed in total"]);
+	});
+	it("counts the cells core pads a short row with", () => {
+		const ragged = table([row(Array.from({ length: 40 }, fresh)), ...Array.from({ length: 49 }, () => row([fresh()]))]);
+		expect(guardPortableText(Array.from({ length: 10 }, () => ragged))).toEqual([]);
+		expect(guardPortableText(Array.from({ length: 11 }, () => ragged))).toEqual(["at most 20000 spans are allowed in total"]);
+	});
+	it("rejects a table core cannot lay out", () => {
+		const huge = table(Array.from({ length: 500 }, () => row([{ ...cell([]), colspan: 100 }])));
+		expect(guardPortableText([huge])).toEqual(["#0 table: core cannot lay out this table (TABLE_TOO_LARGE)"]);
+		expect(guardPortableText([table([row([cell([span("a", ["nope"])])])])])).toEqual(["#0 table: core cannot lay out this table (UNSUPPORTED_MARK_DEFINITION)"]);
+	});
+});
+
 describe("guardPortableText: block shapes that crash their renderer (spec 2026-10-17 §3.6)", () => {
 	it("requires buttons, tabs and tools to be arrays of objects", () => {
 		for (const [type, field] of [["buttons", "buttons"], ["tabs", "tabs"], ["tool_grid", "tools"]]) {
@@ -66,8 +107,12 @@ describe("guardPortableText: block shapes that crash their renderer (spec 2026-1
 				`#0 ${type} ${field}[1]: must be an object`,
 				`#0 ${type} ${field}[2]: must be an object`,
 			]);
-			for (const ok of [undefined, null, []]) expect(guardPortableText([{ _type: type, _key: "k", [field]: ok }])).toEqual([]);
+			for (const ok of [undefined, []]) expect(guardPortableText([{ _type: type, _key: "k", [field]: ok }])).toEqual([]);
 		}
+	});
+	it("allows null tabs and tools, but not null buttons (core's Buttons.astro defaults only undefined)", () => {
+		for (const [type, field] of [["tabs", "tabs"], ["tool_grid", "tools"]]) expect(guardPortableText([{ _type: type, _key: "k", [field]: null }])).toEqual([]);
+		expect(guardPortableText([{ _type: "buttons", _key: "k", buttons: null }])).toEqual(["#0 buttons buttons: must be an array"]);
 	});
 	it("caps tabs at 20, tools at 100 and buttons at 10", () => {
 		const n = (k) => Array.from({ length: k }, () => ({}));

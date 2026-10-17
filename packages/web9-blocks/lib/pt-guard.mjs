@@ -15,13 +15,19 @@
 // `type` map is empty: a non-block node there is hidden at best, a prototype key crashes. It may hold
 // blocks only, and each is checked like a top-level block (a fixed depth: container -> block -> span).
 // Table cells (core: rows[] of { _type: "tableRow", cells[] }, a cell { _type: "tableCell", content: Span[], markDefs? })
-// are walked for shape and size: rows and cells must be arrays of objects, a cell's content spans only, with the span
-// caps below. Mark names and markDefs in cells are left to core's normalizePortableTextTable, which bounds them.
+// are walked for shape: rows and cells must be arrays of objects, a cell's content spans only, within the span and
+// mark caps below, and a table holds at most MAX_ROWS rows and MAX_CELLS written cells. Core's Table.astro renders what
+// normalizePortableTextTable returns, and that pads every row out to the grid width (a colspan counts for up to 100
+// columns) and turns empty content into one empty span, so a few hundred bytes can render thousands of cells. So a table
+// is also run through that normalizer (same module and specifier as Table.astro, which is a dependency of emdash and
+// pinned with it): a table core cannot lay out is rejected (that covers mark names and markDefs in cells), the grid it
+// fills (width × height) is capped at MAX_CELLS, and the spans it renders, padding included, are counted on that grid.
 // Totals over the whole value (spec 2026-10-17 §3.6): render CPU grows with every span and, most, with every mark
 // (plan 2 measured 0.3 s for one block of 1000 spans × 20 marks), so a value holds at most MAX_NODES top-level nodes,
-// MAX_SPANS spans and MAX_TOTAL_MARKS marks, counting blocks, container blocks and table cells; past a total the walk
-// stops with that one problem. Lists that a renderer maps (buttons.buttons, tabs.tabs, tool_grid.tools) must be arrays
-// of objects within a size cap, and their text fields strings: a null item or a number tagline throws at render time.
+// MAX_SPANS spans and MAX_TOTAL_MARKS marks, counting blocks, container blocks and table cells (on the normalized
+// grid); past a total the walk stops with that one problem. Lists that a renderer maps (buttons.buttons, tabs.tabs,
+// tool_grid.tools) must be arrays of objects within a size cap, and their text fields strings: a null item or a number
+// tagline throws at render time, and so does `buttons: null` (core's Buttons.astro defaults only undefined).
 // Output is bounded: collecting stops after MAX_PROBLEMS (plain pushes, never spreads of a long list, which
 // throw RangeError past ~120k items) and ends with MORE, so a hostile value cannot make the guard throw.
 // Messages print a value through show(): JSON.stringify overflows the stack on a value nested a few thousand levels
@@ -48,6 +54,7 @@
 // JSON string there (no plain-object lookup, so prototype names are harmless), and `listStart` becomes the
 // `<ol start>` of OrderedList.astro. Both are bounded when present: listId a string of at most MAX_LIST_ID
 // characters, listStart an integer from 1 to MAX_LIST_START.
+import { normalizePortableTextTable } from "@emdash-cms/admin/portable-text-table";
 import { blurhashToImageCssString } from "@unpic/placeholder";
 import { LOGO_SIZE } from "./tool-grid.mjs";
 
@@ -85,7 +92,9 @@ function collector() {
 		full: false,
 		spans: 0,
 		marks: 0,
+		added: 0,
 		add(problem) {
+			this.added++;
 			if (list.length < MAX_PROBLEMS) list.push(problem);
 			else dropped = this.full = true;
 		},
@@ -210,11 +219,15 @@ const MAX_SPANS = 20000;
 const MAX_TOTAL_MARKS = 5000;
 const MAX_ROWS = 500;
 const MAX_CELLS = 2000;
-/** Lists a renderer maps: [field, max items, string fields of an item, boolean fields of an item]. url/logo are in RULES. */
+/**
+ * Lists a renderer maps: [field, max items, string fields of an item, boolean fields of an item, null allowed].
+ * url/logo are in RULES. Core's Buttons.astro defaults the list only for undefined (`const { buttons = [] } = node`),
+ * so `buttons: null` throws there; web9's Tabs and ToolGrid tolerate null.
+ */
 const LISTS = {
-	buttons: ["buttons", 10, ["text"], []],
-	tabs: ["tabs", 20, ["label", "body"], []],
-	tool_grid: ["tools", 100, ["name", "tagline"], ["featured"]],
+	buttons: ["buttons", 10, ["text"], [], false],
+	tabs: ["tabs", 20, ["label", "body"], [], true],
+	tool_grid: ["tools", 100, ["name", "tagline"], ["featured"], true],
 };
 
 /** `_key` may be absent (undefined or null); when present it must be a string. */
@@ -284,24 +297,23 @@ function containerLists(node, type) {
 	return [];
 }
 
+const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+
 /** Columns.astro maps `columns` and reads column.width, so a non-array or a null column throws. */
 function checkColumns(node, i, out) {
 	if (node.columns == null) return;
 	if (!Array.isArray(node.columns)) return out.add(`#${i} columns columns: must be an array of columns`);
 	for (let k = 0; k < node.columns.length && !out.full; k++) {
 		const column = node.columns[k];
-		if (!column || typeof column !== "object" || Array.isArray(column)) out.add(`#${i} columns columns[${k}]: must be an object`);
+		if (!isObject(column)) out.add(`#${i} columns columns[${k}]: must be an object`);
 	}
 }
 
-const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
-
-/** A table cell's content: spans only (core renders them inline), within the span and mark caps. */
+/** A table cell's content: spans only (core renders them inline), within the span and mark caps. Spans are counted by checkTable. */
 function checkCell(cell, at, out) {
 	if (cell.content == null) return;
 	if (!Array.isArray(cell.content)) return out.add(`${at} content: must be an array of spans`);
 	if (cell.content.length > MAX_CHILDREN) return out.add(`${at} content: at most ${MAX_CHILDREN} spans are allowed`);
-	count(out, cell.content.length, 0);
 	for (let j = 0; j < cell.content.length && !out.full; j++) {
 		const span = cell.content[j];
 		const type = typeof span?._type === "string" ? span._type : "(no _type)";
@@ -317,13 +329,18 @@ function checkCell(cell, at, out) {
 	}
 }
 
-/** core's Table.astro maps rows[].cells[]: arrays of objects, within MAX_ROWS rows and MAX_CELLS cells. */
+/**
+ * core's Table.astro maps rows[].cells[]: arrays of objects, within MAX_ROWS rows and MAX_CELLS written cells (these bound
+ * the normalizer's work). Then core's own normalizer lays the table out: one it cannot lay out is rejected, the grid it
+ * fills is capped at MAX_CELLS, and the spans it renders (empty and padded cells are one span each) count toward the total.
+ */
 function checkTable(node, i, out) {
 	const where = `#${i} table`;
 	if (node.rows == null) return;
 	if (!Array.isArray(node.rows)) return out.add(`${where} rows: must be an array`);
 	if (node.rows.length > MAX_ROWS) return out.add(`${where} rows: at most ${MAX_ROWS} rows are allowed`);
 	let cells = 0;
+	const added = out.added;
 	for (let r = 0; r < node.rows.length && !out.full; r++) {
 		const row = node.rows[r];
 		if (!isObject(row)) {
@@ -343,14 +360,24 @@ function checkTable(node, i, out) {
 			else checkCell(row.cells[c], at, out);
 		}
 	}
+	// A table that already has a problem is rejected anyway; the normalizer would only repeat it as a failure.
+	if (out.full || out.added !== added) return;
+	let key = 0;
+	const normalized = normalizePortableTextTable(node, { path: "guard:table", createKey: () => `guard-${key++}` });
+	if (!normalized.ok) return out.stop(`${where}: core cannot lay out this table (${normalized.reason})`);
+	const { width, height } = normalized;
+	if (width * height > MAX_CELLS) return out.stop(`${where}: at most ${MAX_CELLS} cells are allowed (got ${width}×${height} once core fills the grid)`);
+	let spans = 0;
+	for (const row of normalized.table.rows) for (const cell of row.cells) spans += Math.max(1, cell.content?.length ?? 0);
+	count(out, spans, 0);
 }
 
-/** A list a renderer maps (LISTS): an array of objects within its cap, text fields strings, flags booleans. */
+/** A list a renderer maps (LISTS): an array of objects within its cap (null only where allowed), text fields strings, flags booleans. */
 function checkList(node, type, i, out) {
-	const [field, max, strings, booleans] = LISTS[type];
+	const [field, max, strings, booleans, nullable] = LISTS[type];
 	const list = node[field];
 	const where = `#${i} ${type} ${field}`;
-	if (list == null) return;
+	if (list === undefined || (list === null && nullable)) return;
 	if (!Array.isArray(list)) return out.add(`${where}: must be an array`);
 	if (list.length > max) return out.add(`${where}: at most ${max} items are allowed`);
 	for (let k = 0; k < list.length && !out.full; k++) {
