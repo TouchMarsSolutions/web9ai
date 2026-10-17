@@ -144,7 +144,14 @@
   1. 首次部署用本机 `wrangler deploy`（`CLOUDFLARE_API_TOKEN`）。Workers Builds（连接仓库，生产分支 `main`）在切换稳定后由 owner 在后台连接（2026-10-17 改定，理由见 `docs/superpowers/plans/2026-10-17-emdash-plan3-deploy-cutover.md` Task 5）；
   2. 在 `*.workers.dev` 上验证；
   3. 对生产环境跑迁移；
-  4. 在 Worker 上绑定 `www.web9.ai` 和 `web9.ai` 两个 Custom Domain（DNS 已经在 Cloudflare），`src/worker.ts` 把 apex 重定向到 www。**已完成**：`wrangler.jsonc` 的 `routes` 写成 `custom_domain: true`（不用普通 route，Change domain 只认 Custom Domain）。非交互的 `wrangler deploy` 会不提示、直接覆盖冲突的 DNS 记录，所以先按 id 删掉 GitHub Pages 的 5 条记录（apex 的 4 条 A、`www` 的 CNAME，备份在 `.local/dns-backup.json`），再部署，部署后比对全部记录，MX、TXT 不变（计划 3 Task 4）。上线日期和 version 由 Task 6 补上；
+  4. 在 Worker 上绑定 `www.web9.ai` 和 `web9.ai` 两个 Custom Domain（DNS 已经在 Cloudflare），`src/worker.ts` 把 apex 重定向到 www。做法：`wrangler.jsonc` 的 `routes` 写成 `custom_domain: true`。用 Custom Domain 而不是普通 route，是因为 Cloudflare 会为它建 DNS 记录和证书，删掉 GitHub Pages 的记录后不需要另建源站记录。EmDash 的 Change domain 对此没有要求，它只要新域名用 https 直接服务本站、不跳转。非交互的 `wrangler deploy` 会不提示、直接覆盖冲突的 DNS 记录，所以按计划 3 Task 4 Step 3 的顺序做：
+     - 合并、build；
+     - 用 changeset 接口预检；
+     - 按 id 删掉 GitHub Pages 的 5 条记录（apex 的 4 条 A、`www` 的 CNAME，备份在 `.local/dns-backup.json`）；
+     - 再预检一次，确认没有冲突后紧接着部署；
+     - 比对全部记录，MX、TXT 不变。
+
+     完成后由 Task 6 把这一步标成"已完成"，并补上日期和 version；
   5. GitHub Pages 保留作为回退：回退靠的是 `gh-pages` 分支上**已经构建好的产物**（Pages 设置：source `gh-pages`，custom domain `www.web9.ai`），可以随时把 DNS 切回去。确认稳定后再关闭。旧站源码完整保存在 tag `docusaurus-final`，需要时从它重建；`legacy/` **不能**重新构建出线上站点（静态资源已经移到 `public/`），不要从它重新部署到 `gh-pages`。原来的 `static/CNAME` 和 `deploy.yml` 也放在 `legacy/static/` 和 `legacy/.github/workflows/`，只作记录，workflow 不会运行。
 - **已定（2026-10-17）**：不开预览。`wrangler versions upload` 上传的版本（Workers Builds 给非生产分支构建时就是这样做的）和生产共用 D1、R2 binding，而 EmDash 在版本第一次收到请求时跑 core migration，所以一个升级了 emdash 的分支一旦能被访问，就会改生产库的 schema。真正起作用的是 Workers Builds 关掉非生产分支构建（计划 3 Task 5）。`preview_urls: false` 只是不给版本分配预览 URL，上传的版本照样带着生产 binding。`wrangler dev --remote` 也会连生产 D1，不要用。以后需要预览时，加一个用独立 D1、R2 的 staging environment。
 - **已验证（2026-10-17）**：wrangler 按 `wrangler.jsonc` 里的名字连接资源，找不到就创建。D1 `web9-ai`（`721318a8-ef7b-46b0-9e7c-423d1496882a`，WNAM，read replication `auto`，`d1({session:"auto"})` 需要它）和 R2 `web9-ai-media`（WNAM，没有公开访问）已于 2026-10-17 建好。KV `SESSION` 不写名字，首次部署时由 wrangler 建成 `web9-ai-session`。`IMAGES` 不需要另建资源。`wrangler.jsonc` 只写名字、不写 id，和同账号的 itouchmars、touchmars.technology 一样。

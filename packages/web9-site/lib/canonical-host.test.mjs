@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { unstable_readConfig } from "wrangler";
 import { CANONICAL_ORIGIN, canonicalRedirect, canonicalResponse } from "./canonical-host.mjs";
 
 describe("canonicalRedirect", () => {
@@ -63,9 +65,8 @@ describe("canonicalResponse", () => {
 });
 
 describe("wrangler.jsonc", () => {
-	// JSONC: whole-line comments and trailing commas only (no value in the file contains "//")
-	const source = readFileSync(new URL("../../../wrangler.jsonc", import.meta.url), "utf8");
-	const config = JSON.parse(source.replace(/^\s*\/\/.*$/gm, "").replace(/,(\s*[}\]])/g, "$1"));
+	// Read the way the build reads it, so wrangler also validates the route shape (an unknown key throws)
+	const config = unstable_readConfig({ config: fileURLToPath(new URL("../../../wrangler.jsonc", import.meta.url)) }, { hideWarnings: true });
 
 	it("binds exactly the two production hosts, as Custom Domains (Change domain accepts nothing else)", () => {
 		expect(config.routes).toEqual([
