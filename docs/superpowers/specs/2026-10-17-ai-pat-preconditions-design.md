@@ -66,7 +66,7 @@
 | content `data.excerpt` | 1000 | 20 | guard（保存、发布） |
 | content `slug` | 100 | 16 | 闸门；发布 hook（待生效 slug） |
 | 菜单项 `label` | 80 | 6 | 闸门；渲染截断 |
-| 菜单项 URL（REST `customUrl`，MCP `url`） | 2048 | 44 | 闸门 |
+| 菜单项 `customUrl` | 2048 | 44 | 闸门 |
 | `menu_set_items` 的项数 | 50 | 6 | 闸门；渲染只取前 50 |
 | term `label` | 80 | 11 | 闸门 |
 | term `slug` | 100 | 11 | 闸门 |
@@ -78,7 +78,7 @@
 **写入闸门**（`src/middleware.ts`，判定逻辑放在纯函数 `packages/web9-site/lib/write-gate.mjs`，单测覆盖）：
 
 - 只看 POST、PUT、PATCH，路径命中下表才读请求体。用 `request.clone().text()` 读，然后 `JSON.parse`，不看 Content-Type，因为 core 也不看。解析失败、请求体不是对象或数组、Content-Length 超过 10 MB 时一律放行，交给 core 报错。闸门只拦能确定超长的请求。
-- 路径按 `/` 切段，每段 `decodeURIComponent`（失败就放行），去掉尾部的空段。
+- 路径用 middleware 的 `context.url.pathname`，不用 `request.url`。Astro 7 已经把它解码过（反复 `decodeURI` 直到不再变化），也合并了重复斜杠（`astro/dist/core/util/normalized-url.js`），路由匹配用的也是同一个值。按 `/` 切段，去掉空段，不再自己解码：再解码一次可能在 `%` 上抛错，导致放行。
 - REST：
 
   | 路径 | 检查 |
@@ -92,12 +92,12 @@
   | 工具 | 检查 |
   |---|---|
   | `content_create`、`content_update` | `slug` |
-  | `menu_set_items` | `items` 的长度，以及每项的 `label`、`url` |
+  | `menu_set_items` | `items` 的长度，以及每项的 `label`、`customUrl`（items 是平铺的，没有嵌套） |
   | `taxonomy_create_term`、`taxonomy_update_term` | `label`、`slug` |
   | `byline_create`、`byline_update` | `displayName`、`slug` |
 
 - 超长时：
-  - REST 返回 400，body 用 core 的错误格式 `{ "error": { "code": "VALIDATION_ERROR", "message": … } }`；
+  - REST 返回 400，body 用 core 的错误格式 `{ "success": false, "error": { "code": "VALIDATION_ERROR", "message": … } }`，带 `Cache-Control: private, no-store`（同 core `api/error.ts`）；
   - MCP 单条消息返回 HTTP 200 加 JSON-RPC error（`code: -32602`），`id` 照抄请求；batch 返回 HTTP 400 加一个 `id: null` 的 JSON-RPC error。
 - 闸门认识的路径和工具会随 core 升级变化：
   - 一个测试把 `node_modules/emdash/src/mcp/server.ts` 注册的全部工具名，以及 `astro/routes/api/{content,menus,taxonomies}` 下的路由文件，钉成快照。
@@ -111,7 +111,8 @@
 - 插件的 `capabilities` 加 `hooks.content-policy:register`，用同一个 handler 注册 `content:beforePublish` 和 `content:beforeSchedule`。
 - handler 对 `event.content.data` 跑和 `beforeSave` 相同的检查（块、图片、长度），另外检查 `event.content.slug` 的长度。
 - 有问题时返回 `{ cancel: true, reason }`。`reason` 以 `Publish rejected (spec §10): ` 开头，控制字符换成空格，截到 500 个 code point 以内。
-- handler 内部出错也返回 cancel，也就是 fail closed。
+- handler 内部出错也返回 cancel，也就是 fail closed。整个 handler 包在 try/catch 里，从不抛错：抛错时 runtime 也会拒绝发布，但不会设 `cancellation`，于是定时发布的条目不会被取消排期，scheduler 每次都会重试（`handleContentPublish` 只在有 `cancellation` 时 unschedule）。清理后的 reason 为空时，用固定文案。
+- 检查本身是一个纯函数（`entryProblems`），`beforeSave`、发布 hook、`guard-scan` 共用；`search_text` 的生成留在 `beforeSave` 里。
 
 覆盖情况：
 - publish、schedule、MCP 带 `status: "published"` 的 create，都经过这个 hook。
@@ -169,10 +170,11 @@ runbook（写进上级 spec §9）：
 **body 总量**：
 - 顶层节点不超过 2000（141）；
 - 整个值里的 span 总数不超过 20000（203）：block 的 children、容器里 block 的 children、表格单元格的 content 都计入；
+- 整个值里的 mark 总数不超过 5000（77），同样的计入范围。单页 CPU 主要花在 mark 上：计划 2 实测 1000 span × 20 mark 的块约 0.3 s（`buildMarksTree`）。只限 span 总数时，一页仍可以有 40 万个 mark；限到 5000 个后，按实测比例估算约 0.08 s；
 - 一个 `tabs` 块的 tab 不超过 20（6），一个 `tool_grid` 块的 tool 不超过 100（8），一个 `buttons` 块的 button 不超过 10（0）。
 
 **表格**（core 结构：`table.rows[]` 是 `{ _type: "tableRow", cells[] }`，cell 是 `{ _type: "tableCell", content: Span[], markDefs?, ... }`）：
-- `rows` 存在时必须是数组，每张表不超过 500 行（13）、2000 个单元格（109）；
+- `rows` 存在时必须是数组，每张表不超过 500 行（13）、2000 个单元格（78）；
 - row 必须是对象，`cells` 存在时必须是数组；cell 必须是对象，`content` 存在时必须是数组；
 - `content` 里只能是 span，span 不能有 children，`marks` 存在时是数组且不超过 20 个；
 - mark 的名字和 markDefs 交给 core 的 `normalizePortableTextTable` 处理，它已经有边界。
@@ -216,4 +218,5 @@ runbook（写进上级 spec §9）：
 | title 不进闸门，改由 guard 检查，另加 description、excerpt | guard 覆盖所有写入路径（后台、REST、MCP、import），闸门只覆盖 REST 和 MCP；这两个字段也出现在列表页和 llms.txt | 上限不合适时，改 `limits.mjs` 一个数 |
 | 闸门另加菜单 URL、`menu_set_items` 项数、term slug、term 翻译、byline | 同属"渲染到很多页的字符串"，Editor token 都能写，走的也是同一套代码 | 多拒了合法写入：上限远高于现有值，可以调整 |
 | 渲染截断只做菜单，不做标题、term、byline | 标题和 slug 有发布 hook 做第二道关；term、byline 只出现在 post 列表和 tag 页，绕过闸门的存量由 `guard-scan` 发现；菜单在每一页、又没有第二道关 | 绕过闸门的超长 term 或 byline 会让列表页变长，直到扫描发现 |
+| 另加 mark 总数上限 5000 | 批准的设计只限 span 总数；单页 CPU 由 mark 数决定（计划 2 的测量），20000 个 span 各带 20 个 mark 时约 6 s | 合法内容的 mark 超过 5000（现有最大 77）时被拒，可以调高 |
 | AI 的 scope 改成 `content:read content:write media:read media:write` | `content:write` 不隐含 `content:read`，没有读权限 AI 无法 `content_list`；`menus:manage`、`taxonomies:manage` 已被 `content:write` 隐含 | AI 缺权限时报错，再按需加 |
