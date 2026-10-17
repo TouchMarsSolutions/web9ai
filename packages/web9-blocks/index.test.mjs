@@ -1,7 +1,20 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { isScheduledPolicyRejection } from "emdash";
+import { describe, expect, it, vi } from "vitest";
 import { localizeHref } from "../web9-site/lib/nav.mjs";
-import { BLOCK_IMAGE_FIELDS, HOME_ALTERNATES, IMAGE_FIELDS, PT_FIELDS, beforeSave, createPlugin, pageMetadata } from "./index.mjs";
+import {
+	BLOCK_IMAGE_FIELDS,
+	BLOCK_TEXT_FIELDS,
+	HOME_ALTERNATES,
+	IMAGE_FIELDS,
+	PT_FIELDS,
+	PUBLISH_REJECTED,
+	beforePublish,
+	beforeSave,
+	cancelDecision,
+	createPlugin,
+	pageMetadata,
+} from "./index.mjs";
 
 const seed = JSON.parse(readFileSync(new URL("../../seed/seed.json", import.meta.url), "utf8"));
 const callout = { _type: "callout", _key: "c1", tone: "tip", title: "T", body: "probe-word" };
@@ -73,6 +86,20 @@ describe("content:beforeSave", () => {
 		expect(BLOCK_IMAGE_FIELDS).toEqual(fromSeed);
 		expect(BLOCK_IMAGE_FIELDS).toEqual({ pages: { layout: { hero: ["image"], feature_grid: ["features[].image"] } } });
 	});
+	it("pins BLOCK_TEXT_FIELDS to the string, text and url values and image alts inside the seed's block types", () => {
+		const types = new Map(seed.blockTypes.map((t) => [t.slug, t]));
+		const at = (prefix, f) => (["string", "text", "url"].includes(f.type) ? [prefix + f.slug] : f.type === "image" ? [`${prefix}${f.slug}.alt`] : []);
+		const paths = (type) =>
+			type.versions
+				.find((v) => v.version === type.currentVersion)
+				.fields.flatMap((f) => (f.type === "repeater" ? (f.validation?.subFields ?? []).flatMap((sub) => at(`${f.slug}[].`, sub)) : at("", f)));
+		for (const c of seed.collections) {
+			for (const f of c.fields.filter((f) => f.type === "blocks")) {
+				for (const t of f.validation.allowedTypes) expect(Object.keys(BLOCK_TEXT_FIELDS[c.slug][f.slug][t]).sort(), `${c.slug}.${f.slug} ${t}`).toEqual(paths(types.get(t)).sort());
+			}
+		}
+		expect(Object.keys(BLOCK_TEXT_FIELDS)).toEqual(["pages"]);
+	});
 	const img = (over = {}) => ({ id: "", provider: "external", src: "/img/ai.svg", mimeType: "image/svg+xml", alt: "AI", ...over });
 	const layout = (heroImage, ...featureImages) => [
 		{ _type: "hero", _version: 1, _key: "home-hero", title: "Web9.AI", image: heroImage },
@@ -93,6 +120,20 @@ describe("content:beforeSave", () => {
 		});
 		await expect(save({ layout: layout(img({ meta: { storageKey: { toString: 1 } } })) })).rejects.toMatchObject({
 			message: expect.stringContaining('layout: #0 hero image.meta.storageKey: value {"toString":1} is not allowed'),
+		});
+	});
+	it("rejects pages.layout text that is not a string or is over its cap", async () => {
+		const save = (content) => beforeSave({ collection: "pages", content });
+		const home = layout(img(), img());
+		home[0].title = JSON.parse('{"toString":1}');
+		await expect(save({ layout: home })).rejects.toMatchObject({
+			name: "ContentSaveRejectedError",
+			message: 'Save rejected (spec §10): layout: #0 hero title: value {"toString":1} is not allowed',
+		});
+		const long = layout(img(), img());
+		long[1].features[0].description = "d".repeat(1001);
+		await expect(save({ layout: long })).rejects.toMatchObject({
+			message: "Save rejected (spec §10): layout: #1 feature_grid features[0].description: at most 1000 characters (got 1001)",
 		});
 	});
 	it("accepts the home page layout and saves without a layout, and guards layout and body together", async () => {
@@ -152,8 +193,13 @@ describe("content:beforeSave", () => {
 		await expect(beforeSave({ collection: "posts", content: { featured_image: { id: "x", meta: { storageKey: deep(20000) } } } })).rejects.toMatchObject(rejected);
 		const hero = { _type: "hero", _version: 1, _key: "h", title: "T", image: { id: "", src: "/img/ai.svg", meta: { storageKey: deep(20000) } } };
 		await expect(beforeSave({ collection: "pages", content: { title: "Home", layout: [hero] } })).rejects.toMatchObject(rejected);
-		// text of a web9 block is walked for search_text after the guard passed it (callout has no field rules)
-		const saved = await beforeSave({ collection: "docs", content: { body: [{ _type: "callout", _key: "c", body: deep(50000) }] } });
+		// a printed text field must be a string, so a deep callout body is rejected (it used to throw at render)
+		await expect(beforeSave({ collection: "docs", content: { body: [{ _type: "callout", _key: "c", body: deep(50000) }] } })).rejects.toMatchObject({
+			name: "ContentSaveRejectedError",
+			message: "Save rejected (spec §10): body: #0 callout body: value [unprintable array] is not allowed",
+		});
+		// a field no renderer prints passes the guard and is still walked for search_text without overflowing
+		const saved = await beforeSave({ collection: "docs", content: { body: [{ _type: "callout", _key: "c", note: deep(50000) }] } });
 		expect(saved.search_text).toBe("x");
 	});
 	it("drops a caller-sent search_text from saves without the body field", async () => {
@@ -166,6 +212,107 @@ describe("content:beforeSave", () => {
 	it("replaces a caller-sent search_text when the body is saved", async () => {
 		const saved = await beforeSave({ collection: "docs", content: { body: [callout], search_text: "spam" } });
 		expect(saved.search_text).toBe("T\nprobe-word");
+	});
+	it("rejects an over-long title, description or excerpt in any collection (spec 2026-10-17 §3.1)", async () => {
+		await expect(beforeSave({ collection: "docs", content: { title: "t".repeat(201) } })).rejects.toMatchObject({
+			name: "ContentSaveRejectedError",
+			message: "Save rejected (spec §10): title: at most 200 characters (got 201)",
+		});
+		await expect(beforeSave({ collection: "docs", content: { description: "d".repeat(1001) } })).rejects.toMatchObject({
+			message: expect.stringContaining("description: at most 1000 characters (got 1001)"),
+		});
+		await expect(beforeSave({ collection: "posts", content: { excerpt: "e".repeat(1001) } })).rejects.toMatchObject({ message: expect.stringContaining("excerpt: at most 1000") });
+		await expect(beforeSave({ collection: "other", content: { title: "t".repeat(201) } })).rejects.toMatchObject({ name: "ContentSaveRejectedError" });
+		const ok = { title: "t".repeat(200), description: "d".repeat(1000), search_text: "kept" };
+		expect(await beforeSave({ collection: "other", content: ok })).toBe(ok);
+	});
+	it("guards the live schema's portableText and image fields too (ctx.schema, schema:read)", async () => {
+		const schema = { getCollection: async (slug) => ({ slug, fields: [{ slug: "summary", type: "portableText" }, { slug: "cover", type: "image" }] }) };
+		await expect(beforeSave({ collection: "docs", content: { summary: [{ _type: "htmlBlock" }] } }, { schema })).rejects.toMatchObject({
+			message: expect.stringContaining("summary: #0 htmlBlock"),
+		});
+		await expect(beforeSave({ collection: "products", content: { cover: { dominantColor: "red;position:fixed" } } }, { schema })).rejects.toMatchObject({
+			message: expect.stringContaining("cover: dominantColor"),
+		});
+		// search_text still comes from the pinned field only: a collection without one keeps its content as it is
+		const products = { summary: [] };
+		expect(await beforeSave({ collection: "products", content: products }, { schema })).toBe(products);
+	});
+	it("falls back to the pinned fields when the schema read fails", async () => {
+		const schema = { getCollection: async () => { throw new Error("db down"); } };
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			await expect(beforeSave({ collection: "docs", content: { body: [{ _type: "htmlBlock" }] } }, { schema })).rejects.toMatchObject({
+				message: expect.stringContaining("body: #0 htmlBlock"),
+			});
+			expect((await beforeSave({ collection: "docs", content: { body: [callout] } }, { schema })).search_text).toBe("T\nprobe-word");
+			expect(warn).toHaveBeenCalled();
+		} finally {
+			warn.mockRestore();
+		}
+	});
+	it("declares schema:read (ctx.schema exists only with it) besides content:write", () => {
+		expect(createPlugin().capabilities).toEqual(expect.arrayContaining(["content:write", "schema:read"]));
+	});
+});
+
+describe("content:beforePublish / content:beforeSchedule (spec 2026-10-17 §3.2)", () => {
+	const entry = (data, slug = "ok") => ({ collection: "docs", content: { id: "x", slug, data } });
+	const CHECK_FAILED = `${PUBLISH_REJECTED}the content check failed`;
+	// What core stores for a rejected scheduled publish (plugins/content-policy.ts): the reason must pass its own check
+	const scheduled = (decision) => isScheduledPolicyRejection({ collection: "docs", id: "x", pluginId: "web9-blocks", rejectedAt: new Date().toISOString(), reason: decision.reason });
+	it("prefixes every reason with the publish prefix", () => {
+		expect(PUBLISH_REJECTED).toBe("Publish rejected (spec §10): ");
+	});
+	it("allows an entry the save check passes", async () => {
+		expect(await beforePublish(entry({ title: "T", body: [callout] }))).toBeUndefined();
+		expect(await beforePublish({ collection: "docs", content: { id: "x", slug: null } })).toBeUndefined();
+	});
+	it("cancels a draft the save check rejects, and a staged slug over the limit", async () => {
+		const html = await beforePublish(entry({ body: [{ _type: "htmlBlock", _key: "h" }] }));
+		expect(html).toEqual({ cancel: true, reason: `${PUBLISH_REJECTED}body: #0 htmlBlock: raw HTML blocks are not allowed; use Markdown or a Web9 block` });
+		const slug = await beforePublish(entry({ title: "T" }, "s".repeat(101)));
+		expect(slug).toEqual({ cancel: true, reason: `${PUBLISH_REJECTED}slug: at most 100 characters (got 101)` });
+		for (const d of [html, slug]) expect(scheduled(d)).toBe(true);
+	});
+	it("guards the live schema's fields through ctx.schema", async () => {
+		const schema = { getCollection: async () => ({ fields: [{ slug: "summary", type: "portableText" }] }) };
+		const d = await beforePublish({ collection: "docs", content: { id: "x", data: { summary: [{ _type: "iframe" }] } } }, { schema });
+		expect(d.reason).toContain("summary: #0 iframe");
+	});
+	it("answers only with a decision core accepts: two keys, at most 500 code points, no control characters", async () => {
+		const many = Array.from({ length: 60 }, (_, k) => ({ _type: "htmlBlock", _key: `h${k}` }));
+		const d = await beforePublish(entry({ body: many }));
+		expect(Object.keys(d)).toEqual(["cancel", "reason"]);
+		expect(Array.from(d.reason).length).toBeLessThanOrEqual(500);
+		expect(d.reason.endsWith("…")).toBe(true);
+		expect(cancelDecision("a\u0007b\tc\nd\u007f")).toEqual({ cancel: true, reason: "a b\tc\nd" });
+		expect(Array.from(cancelDecision("😀".repeat(600)).reason)).toHaveLength(500);
+		expect(cancelDecision(" \u0001 ")).toEqual({ cancel: true, reason: CHECK_FAILED });
+		// core's own check accepts each of them as the stored reason of a rejected schedule
+		for (const decision of [d, cancelDecision("a\u0007b\tc\nd\u007f"), cancelDecision("😀".repeat(600)), cancelDecision(" \u0001 "), cancelDecision(`${"x".repeat(499)}\u0000 `)]) {
+			expect(scheduled(decision), decision.reason.slice(0, 20)).toBe(true);
+		}
+	});
+	it("cancels instead of throwing when the check itself fails (a throw would leave a scheduled entry scheduled)", async () => {
+		const error = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			const ctx = { get schema() { throw new Error("boom"); } };
+			const failed = await beforePublish(entry({ title: "T" }), ctx);
+			expect(failed).toEqual({ cancel: true, reason: CHECK_FAILED });
+			expect(scheduled(failed)).toBe(true);
+			expect(await beforePublish(undefined)).toBeUndefined();
+			expect(error).toHaveBeenCalledOnce();
+		} finally {
+			error.mockRestore();
+		}
+	});
+	it("is registered for publish and schedule, with the content-policy capability", () => {
+		const plugin = createPlugin();
+		expect(plugin.hooks["content:beforePublish"]).toMatchObject({ handler: beforePublish });
+		expect(plugin.hooks["content:beforeSchedule"]).toMatchObject({ handler: beforePublish });
+		// definePlugin normalizes: content:write adds the implied content:read (plugins/types.ts PLUGIN_CAPABILITY_IMPLICATIONS)
+		expect(plugin.capabilities).toEqual(expect.arrayContaining(["content:write", "schema:read", "hooks.content-policy:register"]));
 	});
 });
 

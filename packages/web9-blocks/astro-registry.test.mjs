@@ -20,3 +20,41 @@ describe("astro/index.mjs registry", () => {
 		expect(source).toMatch(/export \{ default as SafeWidgetArea \} from "\.\/SafeWidgetArea\.astro";/);
 	});
 });
+
+describe("Tabs and ToolGrid", () => {
+	const component = (name) => readFileSync(new URL(`./astro/${name}`, import.meta.url), "utf8");
+	it("render the lists tabItems and toolItems give (a null item or a number tagline used to throw)", () => {
+		const tabs = component("Tabs.astro");
+		expect(tabs).toMatch(/^import \{ activeTab, tabItems \} from "\.\.\/lib\/tabs\.mjs";$/m);
+		expect(tabs).toContain("const tabs = tabItems(node);");
+		// the open tab comes from activeTab only (a non-integer default_tab used to give a NaN index that hid every panel)
+		expect(tabs).toContain("const active = activeTab(node, tabs.length);");
+		expect(tabs).not.toMatch(/node\?\.default_tab/);
+		const grid = component("ToolGrid.astro");
+		expect(grid).toMatch(/^import \{ logoSize, toolItems \} from "\.\.\/lib\/tool-grid\.mjs";$/m);
+		expect(grid).toContain("const tools = toolItems(node);");
+		for (const source of [tabs, grid]) expect(source).not.toMatch(/Array\.isArray\(node\?\.(tabs|tools)\)/);
+	});
+});
+
+describe("printed block text", () => {
+	const component = (name) => readFileSync(new URL(`./astro/${name}`, import.meta.url), "utf8");
+	it("goes through text() or the Markdown sinks, so a stored non-string renders as nothing instead of throwing", () => {
+		const mermaid = component("Mermaid.astro");
+		expect(mermaid).toMatch(/^import \{ text \} from "\.\.\/lib\/text\.mjs";$/m);
+		expect(mermaid).toContain('<pre class="mermaid">{text(node?.code)}</pre>');
+		const grid = component("ToolGrid.astro");
+		expect(grid).toMatch(/^import \{ text \} from "\.\.\/lib\/text\.mjs";$/m);
+		expect(grid).toContain("const title = text(node?.title);");
+		expect(grid).not.toMatch(/node\??\.title\b(?!\))/);
+		// Callout and Details read their text only inside text(), renderMarkdown and renderInlineMarkdown (both give "" for a
+		// non-string)
+		const callout = component("Callout.astro");
+		expect(callout).toContain("const title = text(node?.title);");
+		expect(callout).toContain("set:html={renderInlineMarkdown(title)}");
+		for (const name of ["Callout.astro", "Details.astro"]) {
+			const rest = component(name).replace(/\b(text|renderMarkdown|renderInlineMarkdown)\(node\?\.(title|body|summary)[^)]*\)/g, "");
+			expect(rest, name).not.toMatch(/node\??\.(title|body|summary)/);
+		}
+	});
+});

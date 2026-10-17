@@ -7,6 +7,7 @@ import LiveSearch from "emdash/ui/search";
 import WebMcpSearch from "emdash/ui/webmcp-search";
 import { Font } from "astro:assets";
 import { linkRel, localizeHref } from "../../packages/web9-site/lib/nav.mjs";
+import { LIMITS, clampText } from "../../packages/web9-blocks/lib/limits.mjs";
 import { resolveBlogSiteIdentity } from "../utils/site-identity";
 import "../styles/global.css";
 import "../styles/tokens.css";
@@ -41,8 +42,11 @@ const fullTitle = titleIncludesSiteName ? title : `${title} — ${siteTitle}`;
 
 const locale = Astro.currentLocale ?? "en";
 const localePrefix = locale === "en" ? "" : `/${locale}`;
-// One en menu; on zh-CN pages links that have a zh-CN route get the prefix (spec §5).
-const menuItems = (menuResult.data?.items ?? []).map((item) => ({ ...item, href: localizeHref(item.url, locale) }));
+// One en menu; on zh-CN pages links that have a zh-CN route get the prefix (spec §5). The menu is on every page and
+// has no hook, so the render keeps it bounded too: at most LIMITS.menuItems items, labels cut to LIMITS.label.
+const menuItems = (menuResult.data?.items ?? [])
+	.slice(0, LIMITS.menuItems)
+	.map((item) => ({ ...item, label: clampText(item.label, LIMITS.label), href: localizeHref(item.url, locale) }));
 const homeHref = localizeHref("/", locale);
 
 // Build public page context for plugin contributions; SEO data is rendered securely by EmDashHead

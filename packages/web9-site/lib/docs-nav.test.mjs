@@ -32,6 +32,16 @@ describe("groupDocs", () => {
 	});
 });
 
+describe("groupLabel bounds what it prints", () => {
+	it("cuts a stored category or section to 80 characters, never the grouping key", () => {
+		const category = "c".repeat(500);
+		expect(groupLabel("ai", category, "en")).toBe(`${"c".repeat(79)}…`);
+		expect(groupLabel("s".repeat(500), "general", "zh-CN")).toBe(`${"s".repeat(79)}…`);
+		expect(groupDocs([doc("x", "ai", category, 1)], "en")[0]).toMatchObject({ key: `ai/${category}`, label: `${"c".repeat(79)}…` });
+		expect(groupLabel("ai", "c".repeat(80), "en")).toBe("c".repeat(80));
+	});
+});
+
 describe.skipIf(!existsSync("legacy/docs"))("labels match the legacy inventory", () => {
 	it("has every category label from the legacy _category_.yml files, in both locales", () => {
 		const tree = readLegacyTree();

@@ -3,7 +3,8 @@
 // reports "unchanged" for everything already in place and writes nothing.
 //
 //   node scripts/migrate.mjs <step>... [--dry-run] [--overwrite]
-//   steps: docs, menu, terms, posts, redirects, home, verify (reads only), all (every write step, in order)
+//   steps: docs, menu, terms, posts, redirects, home, verify (reads only; reports schema drift, scripts/lib/schema-drift.mjs),
+//   all (every write step, in order)
 // Fail closed: an entry or menu that exists and differs from the migration stops the run ([WOULD_OVERWRITE])
 // unless --overwrite is given; a dry run lists the differences. A pending draft that differs always stops it
 // ([PENDING_DRAFT]). Redirect rules of the legacy-docusaurus group follow the same rule. See scripts/lib/sync.mjs
@@ -16,9 +17,10 @@ import { docPayloads } from "./lib/docs-payloads.mjs";
 import { homePageChecks, homePayload } from "./lib/home-content.mjs";
 import { readLegacyTree } from "./lib/legacy-tree.mjs";
 import { checkMarkers } from "./lib/markers.mjs";
-import { callTool, defaultToken } from "./lib/mcp.mjs";
+import { callTool, defaultToken, listOf } from "./lib/mcp.mjs";
 import { postPayloads } from "./lib/posts.mjs";
 import { legacyRedirects, restRequest, syncRedirects } from "./lib/redirects.mjs";
+import { schemaDrift } from "./lib/schema-drift.mjs";
 import { upsertEntry, upsertMenu } from "./lib/sync.mjs";
 import { seedTerms, syncTerms } from "./lib/terms.mjs";
 import { docPageChecks } from "./lib/verify-pages.mjs";
@@ -113,7 +115,21 @@ const STEPS = {
 		for (const f of failures) console.error(`verify: ${JSON.stringify(f)}`);
 		console.log(`verify: ${checks.length - pageFailures}/${checks.length} pages ok`);
 		console.log(`verify: ${hops.length - (failures.length - pageFailures)}/${hops.length} redirects ok`);
-		if (failures.length) process.exitCode = 1;
+		// Read last, so a failed read leaves the results above; a drift that could not be read is a failure, never "none"
+		const drift = [];
+		let driftRead = true;
+		try {
+			for (const { slug } of listOf("schema_list_collections", await callTool("schema_list_collections", {}))) {
+				const schema = await callTool("schema_get_collection", { slug });
+				drift.push(...schemaDrift({ ...schema, fields: listOf("schema_get_collection", schema, "fields") }));
+			}
+		} catch (error) {
+			driftRead = false;
+			console.error(`verify: schema drift could not be read: ${error.message}`);
+		}
+		for (const d of drift) console.error(`verify: ${d}`);
+		if (driftRead) console.log(`verify: ${drift.length ? `${drift.length} schema drift` : "no schema drift"}`);
+		if (failures.length || drift.length || !driftRead) process.exitCode = 1;
 		return [];
 	},
 };

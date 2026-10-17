@@ -53,3 +53,11 @@ describe("heroButtons", () => {
 		expect(heroButtons(hero())).toEqual([]);
 	});
 });
+
+describe("heroButtons labels", () => {
+	it("drop a button whose label is not a string (it would be printed through String())", () => {
+		for (const bad of [JSON.parse('{"toString":1}'), 5, true, {}, ["a"]]) {
+			expect(heroButtons(hero({ primary_label: bad, primary_href: "/a", secondary_label: "S", secondary_href: "/b" }))).toEqual([{ label: "S", href: "/b", primary: false }]);
+		}
+	});
+});

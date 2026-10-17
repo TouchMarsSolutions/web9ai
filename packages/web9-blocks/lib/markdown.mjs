@@ -13,25 +13,36 @@ export const safeTone = (tone) => (TONES.has(tone) ? tone : "info");
 const escapeHtml = (s) =>
 	s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
+// An admonition opens only at the start of a block. There is no `start()`: marked called it on the rest of the field
+// before each paragraph and cut the paragraph where it pointed, so ":::" at line starts made one block per position
+// (25000 ":" took 3.6 s). The search for the closing line stops at the next opener line, which leaves this one
+// unclosed: the searches then cover disjoint stretches of the field instead of each running to its end
+// (":::note\n\n" repeated to 25000 characters took 0.6 s). A nested opener never rendered as an admonition anyway.
+const OPENER = /:::(\w+)[ \t]*([^\n]*)\n/y;
+const CLOSER_OR_OPENER = /^:::(?:[ \t]*(?:\n|$)|(\w))/gm;
+
 const admonition = {
 	name: "admonition",
 	level: "block",
-	start(src) {
-		return src.match(/^:::/m)?.index;
-	},
 	tokenizer(src) {
-		const match = /^:::(\w+)[ \t]*([^\n]*)\n([\s\S]*?)\n?^:::[ \t]*(?:\n|$)/m.exec(src);
-		if (!match || match.index !== 0 || !TONES.has(match[1])) return undefined;
+		if (!src.startsWith(":::")) return undefined;
+		OPENER.lastIndex = 0;
+		const open = OPENER.exec(src);
+		if (!open || !TONES.has(open[1])) return undefined;
+		CLOSER_OR_OPENER.lastIndex = open[0].length;
+		const close = CLOSER_OR_OPENER.exec(src);
+		if (!close || close[1]) return undefined;
+		const body = src.slice(open[0].length, close.index);
 		const token = {
 			type: "admonition",
-			raw: match[0],
-			tone: match[1],
-			title: match[2].trim(),
+			raw: src.slice(0, close.index + close[0].length),
+			tone: open[1],
+			title: open[2].trim(),
 			titleTokens: [],
 			tokens: [],
 		};
 		this.lexer.inlineTokens(token.title, token.titleTokens);
-		this.lexer.blockTokens(match[3], token.tokens);
+		this.lexer.blockTokens(body.endsWith("\n") ? body.slice(0, -1) : body, token.tokens);
 		return token;
 	},
 	renderer(token) {
@@ -121,12 +132,29 @@ function dedent(src) {
 	return lines.map((l) => l.slice(min)).join("\n");
 }
 
-export function renderMarkdown(src = "") {
-	if (!src) return "";
-	return sanitizeHtml(marked.parse(dedent(String(src))), SANITIZE);
+// marked recurses once per nested list or quote, so a deep enough nest overflows the stack (about 1900 markers on one line
+// on Node's main thread). The save check caps markers per line (markdown-density.mjs); a field that throws anyway, stored
+// before the cap or nested some other way, renders as nothing instead of taking the page down.
+const failed = (e) => {
+	console.warn(`web9-blocks: a Markdown field did not render (${e instanceof Error ? e.name : typeof e})`);
+	return "";
+};
+
+// A stored field that is not a string renders as nothing (lib/text.mjs): String() on it could throw and take the page down
+export function renderMarkdown(src) {
+	if (typeof src !== "string" || !src) return "";
+	try {
+		return sanitizeHtml(marked.parse(dedent(src)), SANITIZE);
+	} catch (e) {
+		return failed(e);
+	}
 }
 
-export function renderInlineMarkdown(src = "") {
-	if (!src) return "";
-	return sanitizeHtml(marked.parseInline(String(src)), SANITIZE);
+export function renderInlineMarkdown(src) {
+	if (typeof src !== "string" || !src) return "";
+	try {
+		return sanitizeHtml(marked.parseInline(src), SANITIZE);
+	} catch (e) {
+		return failed(e);
+	}
 }

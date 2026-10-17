@@ -180,6 +180,18 @@ describe("guardPortableText: rules and boundaries", () => {
 		for (const columns of [1, 6]) expect(one({ _type: "gallery", _key: "g", columns })).toEqual([]);
 		for (const columns of [0, 7, 2.5]) expect(one({ _type: "gallery", _key: "g", columns })).toEqual(["#0 gallery columns"]);
 	});
+	it("checks tabs.default_tab: an integer from 1 to the number of tabs, absent or null otherwise", () => {
+		const tabs = (n, default_tab) => ({ _type: "tabs", _key: "t", tabs: Array.from({ length: n }, (_, k) => ({ label: `T${k}`, body: "" })), default_tab });
+		for (const [n, d] of [[3, 1], [3, 3], [6, 3], [20, 20]]) expect(one(tabs(n, d)), `${n} ${d}`).toEqual([]);
+		for (const d of [undefined, null]) for (const n of [0, 3]) expect(one(tabs(n, d))).toEqual([]);
+		for (const [n, d] of [[3, 0], [3, 4], [3, -1], [3, 1.5], [3, "2"], [3, Number.NaN], [3, Number.POSITIVE_INFINITY], [3, true], [3, [1]], [0, 1]]) {
+			expect(one(tabs(n, d)), `${n} ${String(d)}`).toEqual(["#0 tabs default_tab"]);
+		}
+		// no tabs list to choose from
+		expect(one({ _type: "tabs", _key: "t", default_tab: 1 })).toEqual(["#0 tabs default_tab"]);
+		expect(one({ _type: "tabs", _key: "t", tabs: null, default_tab: 1 })).toEqual(["#0 tabs default_tab"]);
+		expect(guardPortableText([tabs(3, 4)])).toEqual(["#0 tabs default_tab: value 4 is not allowed"]);
+	});
 	it("reports the full message for a rejected value", () => {
 		expect(guardPortableText([{ _type: "button", _key: "b", style: "default fixed" }])).toEqual(['#0 button style: value "default fixed" is not allowed']);
 		expect(guardPortableText([{ _type: "embed", _key: "e", html: "<b>x</b>" }])).toEqual(['#0 embed html: value "<b>x</b>" is not allowed']);
@@ -491,16 +503,17 @@ describe("guardPortableText: bounded output", () => {
 	it("does not throw on 200k bad top-level nodes, markDefs, container blocks or gallery images", () => {
 		const bad = (n, make) => Array.from({ length: n }, make);
 		for (const blocks of [
-			bad(200000, () => ({ _type: "marquee" })),
-			[para({ markDefs: bad(200000, () => ({ _type: "x" })) })],
 			[{ _type: "cover", _key: "c", content: bad(200000, () => ({ _type: "iframe" })) }],
-			[{ _type: "gallery", _key: "g", images: bad(200000, () => ({ blurhash: 1 })) }],
+			[{ _type: "gallery", _key: "g", images: bad(500, () => ({ blurhash: 1 })) }],
 		]) {
 			let problems;
 			expect(() => (problems = guardPortableText(blocks))).not.toThrow();
 			expect(problems.length).toBeLessThanOrEqual(51);
 			expect(problems.at(-1)).toBe(MORE);
 		}
+		expect(guardPortableText(bad(200000, () => ({ _type: "marquee" })))).toEqual(["at most 2000 top-level blocks are allowed (got 200000)"]);
+		expect(guardPortableText([para({ markDefs: bad(200000, () => ({ _type: "x" })) })])).toEqual(["at most 5000 markDefs are allowed in total"]);
+		expect(guardPortableText([{ _type: "gallery", _key: "g", images: bad(200000, () => ({ blurhash: 1 })) }])).toEqual(["at most 500 images are allowed in total"]);
 	});
 	it("adds the final entry only when problems were left out", () => {
 		const nodes = (n) => Array.from({ length: n }, () => ({ _type: "marquee" }));
@@ -534,7 +547,7 @@ describe("guardPortableText: string urls (sanitizeHref throws on non-strings)", 
 		for (const node of [{ _type: "button" }, { _type: "buttons", buttons: [{}] }, { _type: "file" }, { _type: "embed" }]) expect(one(node)).toEqual([]);
 		for (const node of [{ _type: "button", url: "/a" }, { _type: "file", url: "https://example.com/a.pdf" }, { _type: "embed", url: "https://youtu.be/SKS-URw9a18" }]) expect(one(node)).toEqual([]);
 	});
-	it("requires tools[].url and tools[].logo to be strings when present on tool_grid (ToolGrid.astro:29, :34)", () => {
+	it("requires tools[].url and tools[].logo to be strings when present on tool_grid (ToolGrid.astro's link href and logo src)", () => {
 		expect(one({ _type: "tool_grid", _key: "g", tools: [{ name: "a", url: 5, logo: {} }, { name: "b", url: "https://example.com", logo: "/img/a.png" }, { name: "c" }] })).toEqual([
 			"#0 tool_grid tools[].url: value 5 is not allowed",
 			"#0 tool_grid tools[].logo: value {} is not allowed",

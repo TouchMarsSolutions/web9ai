@@ -1,15 +1,17 @@
 ---
 import { renderInlineMarkdown, renderMarkdown, safeTone } from "../lib/markdown.mjs";
+import { text } from "../lib/text.mjs";
 
 interface Props {
 	node: { _type: "callout"; _key: string; tone?: string; title?: string; body?: string };
 }
 const { node } = Astro.props;
 const tone = safeTone(node?.tone);
+const title = text(node?.title);
 ---
 
 <aside class={`callout callout--${tone}`}>
-	{node?.title && <p class="callout__title" set:html={renderInlineMarkdown(node.title)} />}
+	{title && <p class="callout__title" set:html={renderInlineMarkdown(title)} />}
 	<div set:html={renderMarkdown(node?.body)} />
 </aside>
 

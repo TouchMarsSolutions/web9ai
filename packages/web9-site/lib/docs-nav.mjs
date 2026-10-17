@@ -1,6 +1,8 @@
 // Docs sidebar groups (spec §2): section -> category, in sort_order. `category` is stored as the legacy
 // folder name (plan 2 rulings); these labels are the legacy _category_.yml ones, en and zh-CN
 // (docs-nav.test.mjs checks them against the inventory while legacy/ exists).
+import { LIMITS, clampText } from "../../web9-blocks/lib/limits.mjs";
+
 export const SECTION_LABELS = { ai: "AI", dev: "Dev" };
 export const CATEGORY_LABELS = {
 	usecase: { en: "Use Case", "zh-CN": "神兵利器" },
@@ -10,8 +12,15 @@ export const CATEGORY_LABELS = {
 	model: { en: "Model" },
 };
 
-/** Group heading: the section name for docs at the section root, else the category name. Unknown values show as stored. */
+/**
+ * Group heading: the section name for docs at the section root, else the category name. Unknown values show as stored,
+ * cut to LIMITS.label (the save check limits category; the heading prints on every docs page, so it is clamped anyway).
+ */
 export function groupLabel(section, category, locale) {
+	return clampText(storedLabel(section, category, locale), LIMITS.label);
+}
+
+function storedLabel(section, category, locale) {
 	if (!category || category === "general") return Object.hasOwn(SECTION_LABELS, section) ? SECTION_LABELS[section] : section;
 	const labels = Object.hasOwn(CATEGORY_LABELS, category) ? CATEGORY_LABELS[category] : {};
 	return Object.hasOwn(labels, locale) ? labels[locale] : labels.en ?? category;

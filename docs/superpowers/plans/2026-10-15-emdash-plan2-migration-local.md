@@ -6374,7 +6374,7 @@ Expected：`git status --short` 没有输出（`.local/`、`.wrangler/`、`dist/
 3. **生产首次启动**：空 D1 上 EmDash 自动应用 seed（块类型、字段、`settings.url`；tag terms 不写，由第 4 步 runner 的 `terms` 步骤建）。setup 向导会用 owner 填的 title、tagline 覆盖 seed 里的 settings（`emdash/dist/astro/routes/api/setup/index.mjs`），所以向导里要填 `Web9.AI` 和原来的 tagline。如果生产库不是从空库建的，先 `schema_create_field` 补 `search_text`，再上线带 hook 的插件（hook 的 `errorPolicy` 是 abort）。
 4. **生产迁移**：owner 建管理员账号（passkey），拿 admin token；设好 `EMDASH_URL=https://<worker>.workers.dev` 和 `EMDASH_TOKEN=<admin token>` 后，先 `node scripts/migrate.mjs all --dry-run`，再 `node scripts/migrate.mjs menu --overwrite`（seed 的菜单与目标不同），然后 `node scripts/migrate.mjs all`，再跑一次 `all` 确认 0 写入，再 `verify`（`verify` 也读 `EMDASH_URL`）。
 5. **切换**：Worker 绑定 `www.web9.ai`，apex 重定向到 www；GitHub Pages（`gh-pages` 上已构建的旧站）保留作回退，稳定后关闭。
-6. **AI 账号**：owner 邀请 Editor 账号、passkey 注册、创建 PAT（spec §8）。计划 2 只落地了写入 guard；创建 PAT 之前，spec §12「AI PAT 之前」的每一项都要先做到。
+6. **AI 账号**：owner 邀请 Editor 账号、passkey 注册，再按 spec §8 的 runbook 走 device flow 取 token（不用 PAT：Editor 拿不到 PAT）。spec §12「AI PAT 之前」的 7 项已于 2026-10-17 完成（`docs/superpowers/plans/2026-10-17-ai-pat-preconditions.md`）。
 7. **切换后**：看 `/_emdash/api/redirects/404s`，给还在被访问的旧 URL 补规则（doc 的 `/tags/*`、`/markdown-page` 等现在会 404）。`site_import_*` 等导入路径不经过 `content:beforeSave`（已确认，见 spec §12「AI PAT 之前」），AI 账号不能有导入权限。
 8. **清理**：生产迁移验证完以后删掉 `legacy/`。依赖它的测试都有 `skipIf`，删掉后自动跳过；同时删掉只为迁移存在的代码和测试：`scripts/lib/legacy-tree.mjs`、`docs-payloads.mjs`、`posts.mjs`、`redirects.mjs` 及其测试、`scripts/lib/legacy-convert.test.mjs`，`migrate.mjs` 只保留 `menu`、`home`、`verify`（或整个删掉）；`docs-nav.test.mjs` 里对照 legacy 的那组也删掉。
 
@@ -6403,9 +6403,9 @@ Expected：`git status --short` 没有输出（`.local/`、`.wrangler/`、`dist/
 - `width`、`max-width` 的 `%` 上限是 2000，嵌套时会叠加（只在文档流里横向溢出，盖不住站点框架）；可以改成 100。
 - `img` 不在可设盒属性的标签里（`img` 上的 width、padding、border 会被去掉），`hr`、`menu` 也没有盒属性。
 - ruby 过滤只作用于 sanitize-html 的默认标签数组：以后 concat 进 ruby 标签，或 sanitize-html 升级加了 ruby 类标签，就会绕过（`markdown.test.mjs` 钉住了今天的集合）。
-- **AI PAT 之前修**：单页 CPU。在现有上限内，一个 1000 span × 20 mark 的块约 0.3 s（`buildMarksTree`），每个顶满上限的块约 0.7 s；body 没有总量上限。
-- **AI PAT 之前修**：guard 不进表格单元格。core 的 normalize 保留 3000 个 mark、2 万个 span，那一页会 RangeError 或耗时 13 s；单元格内容也要加上限。
-- **AI PAT 之前修**：块形状错误会让本页 500：`buttons.buttons` 是 null、字符串、数字或对象，`tabs` 里有 null，`tools` 里有 null 或 `tagline` 是数字（`Buttons.astro`、`Tabs.astro`、`ToolGrid.astro`）。
+- **已修（2026-10-17）**：单页 CPU。在现有上限内，一个 1000 span × 20 mark 的块约 0.3 s（`buildMarksTree`），每个顶满上限的块约 0.7 s；body 没有总量上限。修法：每个值最多 20000 个 span、5000 个 mark（另有表格网格格子 20000、markDefs 5000、换行 5000 三项总量）。
+- **已修（2026-10-17）**：guard 不进表格单元格。core 的 normalize 保留 3000 个 mark、2 万个 span，那一页会 RangeError 或耗时 13 s；单元格内容也要加上限。修法：guard 检查单元格（形状、span 和 mark 的数量、`_key` 不重复、记录字段数），并跑 core 自己的表格 normalizer。
+- **已修（2026-10-17）**：块形状错误会让本页 500：`buttons.buttons` 是 null、字符串、数字或对象，`tabs` 里有 null，`tools` 里有 null 或 `tagline` 是数字（`Buttons.astro`、`Tabs.astro`、`ToolGrid.astro`）。修法：guard 拒绝错误形状（`buttons.buttons: null` 也拒），`Tabs`、`ToolGrid` 渲染时跳过错误项。
 - `embedSrc` 丢掉 Vimeo 的 `h=`（unlisted 视频的 hash）和 `t=`，unlisted 的 Vimeo 视频放不出来。
 - 样式小问题（Task 4）：footer widget 标题的样式丢了；≤640px 时 header 仍有 `border-b`；`sm` 断点和 640px 的规则重叠。
 - `verify` 没有正文标记（body 为空也通过）；runner 不比较 `publishedAt`（taxonomy 见上文）；菜单比较忽略 `parentId`、`cssClasses`、`titleAttr`（`cssClasses` 不渲染）。

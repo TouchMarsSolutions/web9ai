@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { describe, expect, it, vi } from "vitest";
 import { renderInlineMarkdown, renderMarkdown, safeTone } from "./markdown.mjs";
 
 describe("renderMarkdown sanitizer", () => {
@@ -35,6 +36,37 @@ describe("renderMarkdown sanitizer", () => {
 		expect(renderMarkdown(":::tip Title\nbody **bold**\n:::")).toBe(
 			'<aside class="callout callout--tip"><p class="callout__title">Title</p><p>body <strong>bold</strong></p>\n</aside>',
 		);
+	});
+	describe("admonitions open only at the start of a block, in time linear in the field", () => {
+		const elapsed = (src) => {
+			const t0 = performance.now();
+			renderMarkdown(src);
+			return performance.now() - t0;
+		};
+		const fill = (unit) => unit.repeat(Math.ceil(25000 / unit.length)).slice(0, 25000);
+		it("opens at the start of the field, after a blank line and after another block", () => {
+			const tip = '<aside class="callout callout--tip"><p>x</p>\n</aside>';
+			expect(renderMarkdown(":::tip\nx\n:::")).toBe(tip);
+			expect(renderMarkdown("para\n\n:::tip\nx\n:::")).toBe(`<p>para</p>\n${tip}`);
+			expect(renderMarkdown("# h\n:::tip\nx\n:::")).toBe(`<h1>h</h1>\n${tip}`);
+		});
+		it("stays text when glued to a paragraph line", () => {
+			expect(renderMarkdown("para\n:::note\nx\n:::")).toBe("<p>para\n:::note\nx\n:::</p>\n");
+		});
+		it("leaves an opener unclosed when the next opener line comes before a closing line", () => {
+			expect(renderMarkdown(":::note\nx\n\n:::tip\ny\n:::")).toBe(
+				'<p>:::note\nx</p>\n<aside class="callout callout--tip"><p>y</p>\n</aside>',
+			);
+		});
+		it("renders 25000 \":\" and 105 dense unclosed openers in well under 200 ms (3.6 s and 0.46 s before)", () => {
+			renderMarkdown(":::tip\nwarm up\n:::");
+			expect(elapsed(":".repeat(25000))).toBeLessThan(200);
+			expect(elapsed(fill(`${":::note a\n".repeat(105)}${"lorem ipsum ".repeat(2000)}`))).toBeLessThan(200);
+		});
+		it("renders unclosed openers, each at a block start, in well under 200 ms (0.6 s with a search to the field's end)", () => {
+			expect(elapsed(fill(":::note\n\n"))).toBeLessThan(200);
+			expect(elapsed(fill(":::x\n\n"))).toBeLessThan(200);
+		});
 	});
 	it("renders mermaid fences as escaped <pre class=mermaid>", () => {
 		expect(renderMarkdown("```mermaid\ngraph TD; A-->B\n```")).toBe('<pre class="mermaid">graph TD; A--&gt;B</pre>');
@@ -152,5 +184,35 @@ describe("safeTone", () => {
 	it("refuses anything else, so block data cannot inject classes", () => {
 		expect(safeTone("x fixed inset-0 z-50")).toBe("info");
 		expect(safeTone(undefined)).toBe("info");
+	});
+});
+
+describe("renderMarkdown and renderInlineMarkdown when marked throws", () => {
+	it("render nothing and warn without the field: 3000 nested quotes overflow marked's recursion", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			expect(renderMarkdown(`${"> ".repeat(3000)}a`)).toBe("");
+			expect(warn).toHaveBeenCalledExactlyOnceWith("web9-blocks: a Markdown field did not render (RangeError)");
+		} finally {
+			warn.mockRestore();
+		}
+	});
+	it("keep both renderers' parse and sanitize inside a try (source pin; it is the inline renderer's only coverage)", () => {
+		const src = readFileSync(new URL("./markdown.mjs", import.meta.url), "utf8");
+		for (const [name, parse] of [["renderMarkdown", "marked.parse(dedent(src))"], ["renderInlineMarkdown", "marked.parseInline(src)"]]) {
+			const body = src.slice(src.indexOf(`export function ${name}(src) {`)).split("\n}\n")[0];
+			expect(body, name).toMatch(new RegExp(`try \\{\\n\\t\\treturn sanitizeHtml\\(${parse.replace(/[()]/g, "\\$&")}, SANITIZE\\);\\n\\t\\} catch \\(e\\) \\{\\n\\t\\treturn failed\\(e\\);`));
+		}
+	});
+});
+
+describe("renderMarkdown and renderInlineMarkdown on a value that is not a string", () => {
+	it("render nothing: a stored {toString:1} or deep array used to throw in String() and take the page down", () => {
+		let deep = [];
+		for (let i = 0; i < 3000; i++) deep = [deep];
+		for (const v of [JSON.parse('{"toString":1}'), deep, 5, true, null, undefined, { a: 1 }, ["a"]]) {
+			expect(renderMarkdown(v), JSON.stringify(v)?.slice(0, 20)).toBe("");
+			expect(renderInlineMarkdown(v), JSON.stringify(v)?.slice(0, 20)).toBe("");
+		}
 	});
 });

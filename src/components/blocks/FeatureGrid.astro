@@ -1,6 +1,8 @@
 ---
-// `feature_grid` block of pages.layout (seed blockTypes): up to 12 features, three per row from md up.
+// `feature_grid` block of pages.layout (seed blockTypes): up to 12 features, three per row from md up. Text and the
+// feature list come from featureGridItems: object features only, "" for a stored text value that is not a string.
 import { Image } from "emdash/ui";
+import { featureGridItems } from "../../../packages/web9-site/lib/layout-blocks.mjs";
 import type { PageLayoutFeatureGridBlock } from "../../../emdash-env";
 
 interface Props {
@@ -9,15 +11,16 @@ interface Props {
 	blockKey: string;
 }
 const { value: b } = Astro.props;
+const { title, features } = featureGridItems(b);
 ---
 
 <section class="mx-auto max-w-5xl px-4 py-12">
-	{b.title && <h2 class="mb-8 text-center text-3xl font-semibold text-text">{b.title}</h2>}
+	{title && <h2 class="mb-8 text-center text-3xl font-semibold text-text">{title}</h2>}
 	<div class="grid gap-10 md:grid-cols-3">
 		{
-			(b.features ?? []).map((f) => (
+			features.map((f) => (
 				<div class="text-center">
-					{f.image && <Image image={f.image} alt={f.image.alt ?? f.title} class="mx-auto size-48" />}
+					{f.image && <Image image={f.image} alt={f.alt} class="mx-auto size-48" />}
 					<h3 class="mt-4 text-xl font-semibold text-text">{f.title}</h3>
 					{f.description && <p class="mt-2 text-text-secondary">{f.description}</p>}
 				</div>

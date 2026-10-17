@@ -29,6 +29,17 @@ export function unwrapToolResult(name, res) {
 	}
 }
 
+/**
+ * The array an answer should hold: `answer[key]`, or the answer itself when `key` is null. Anything else throws, so a
+ * script never reads a wrong-shaped answer (an error text, a renamed key) as an empty list.
+ */
+export function listOf(tool, answer, key = "items") {
+	const list = key === null ? answer : answer?.[key];
+	if (Array.isArray(list)) return list;
+	const what = key === null ? "an array" : `${/^[aeiou]/.test(key) ? "an" : "a"} ${key} array`;
+	throw new Error(`${tool}: expected ${what}`);
+}
+
 export function defaultToken() {
 	if (process.env.EMDASH_TOKEN) return process.env.EMDASH_TOKEN;
 	return readFileSync(new URL("../../.local/dev-token", import.meta.url), "utf8").trim();

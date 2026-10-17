@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { widgetAreaIsSafe } from "./widgets.mjs";
+import { LIMITS } from "./limits.mjs";
+import { menuIsSafe, widgetAreaIsSafe } from "./widgets.mjs";
 
 const seed = JSON.parse(readFileSync(new URL("../../../seed/seed.json", import.meta.url), "utf8"));
 const area = (name) => seed.widgetAreas.find((a) => a.name === name);
@@ -163,5 +164,47 @@ describe("widgetAreaIsSafe", () => {
 		expect(widgetAreaIsSafe({ widgets: [{ id: "x", get type() { return boom(); } }] })).toBe(false);
 		expect(widgetAreaIsSafe({ widgets: [{ id: "c", type: "component", componentId: "core:search", componentProps: { get placeholder() { return boom(); } } }] })).toBe(false);
 		expect(widgetAreaIsSafe({ widgets: "not an array" })).toBe(false);
+	});
+});
+
+describe("menuIsSafe", () => {
+	const item = (extra = {}) => ({ id: "i", label: "Docs", url: "/docs", children: [], ...extra });
+	const menu = (items) => ({ id: "m", name: "primary", label: "Primary", items });
+	it("passes a missing menu (a menu widget renders nothing without one) and an empty or ordinary menu", () => {
+		expect(menuIsSafe(null)).toBe(true);
+		expect(menuIsSafe(undefined)).toBe(true);
+		expect(menuIsSafe(menu([]))).toBe(true);
+		expect(menuIsSafe(menu([item(), item({ titleAttr: "Read the docs", target: "_blank" }), item({ titleAttr: null }), item({ titleAttr: undefined })]))).toBe(true);
+	});
+	it("caps the number of items at LIMITS.menuItems", () => {
+		expect(menuIsSafe(menu(Array.from({ length: LIMITS.menuItems }, () => item())))).toBe(true);
+		expect(menuIsSafe(menu(Array.from({ length: LIMITS.menuItems + 1 }, () => item())))).toBe(false);
+	});
+	it("caps a label at LIMITS.label, a url at LIMITS.url and a titleAttr at LIMITS.titleAttr, and a label must be a string", () => {
+		expect(menuIsSafe(menu([item({ label: "x".repeat(LIMITS.label) })]))).toBe(true);
+		expect(menuIsSafe(menu([item({ label: "x".repeat(LIMITS.label + 1) })]))).toBe(false);
+		expect(menuIsSafe(menu([item({ url: "/" + "x".repeat(LIMITS.url - 1) })]))).toBe(true);
+		expect(menuIsSafe(menu([item({ url: "/" + "x".repeat(LIMITS.url) })]))).toBe(false);
+		expect(menuIsSafe(menu([item({ titleAttr: "x".repeat(LIMITS.titleAttr) })]))).toBe(true);
+		expect(menuIsSafe(menu([item({ titleAttr: "x".repeat(LIMITS.titleAttr + 1) })]))).toBe(false);
+		for (const label of [undefined, null, 5, ["a"], {}]) expect(menuIsSafe(menu([item({ label })])), String(label)).toBe(false);
+	});
+	it("treats an absent url as fine and any other non-string url, or non-string titleAttr, as unsafe", () => {
+		expect(menuIsSafe(menu([{ label: "a" }]))).toBe(true);
+		for (const url of [null, 5, ["/a"], {}]) expect(menuIsSafe(menu([item({ url })])), String(url)).toBe(false);
+		for (const titleAttr of [5, ["a"], {}, true]) expect(menuIsSafe(menu([item({ titleAttr })])), String(titleAttr)).toBe(false);
+	});
+	it("fails on a menu or item that is not shaped as core returns it", () => {
+		for (const bad of ["x", 5, [], {}, { items: null }, { items: "x" }, { items: {} }]) expect(menuIsSafe(bad), JSON.stringify(bad)).toBe(false);
+		for (const badItem of [null, undefined, 5, "x", []]) expect(menuIsSafe(menu([badItem])), String(badItem)).toBe(false);
+	});
+	it("fails closed instead of throwing", () => {
+		const boom = () => {
+			throw new Error("boom");
+		};
+		let result;
+		expect(() => (result = menuIsSafe({ get items() { return boom(); } }))).not.toThrow();
+		expect(result).toBe(false);
+		expect(menuIsSafe(menu([{ get label() { return boom(); } }]))).toBe(false);
 	});
 });

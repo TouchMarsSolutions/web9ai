@@ -2,9 +2,13 @@
 // guard never sees them (spec §10). SafeWidgetArea runs this check before rendering an area, and a widget area
 // renders in the footer of every page, so the check fails closed: false on anything it does not recognise, and
 // false (never a throw) on anything it cannot read.
+// A menu widget renders the items of a menu, and core's WidgetRenderer prints every item's label and titleAttr with no
+// clamp, so SafeWidgetArea also checks each menu a widget names (menuIsSafe), as the menu in Base.astro is clamped.
 // Content widgets are not rendered at all: their Portable Text renders inside core <WidgetArea>, where a renderer
 // throw (deep mark nesting, a non-string _key, ...) cannot be caught and takes down every page. The site uses no
 // content widgets (the seed footer is empty, the sidebar holds core components); text goes in a doc or page.
+
+import { LIMITS } from "./limits.mjs";
 
 const TYPES = new Set(["menu", "component"]);
 
@@ -72,6 +76,33 @@ export function widgetAreaIsSafe(area) {
 		const componentIds = widgets.filter((w) => w.type === "component").map((w) => w.componentId);
 		const menus = widgets.filter((w) => w.type === "menu").length;
 		return new Set(componentIds).size === componentIds.length && menus <= MAX_MENUS;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * @param {{ items?: Array<object> } | null | undefined} menu what core's getMenu returns for a menu widget (null when
+ *   there is no such menu, which renders nothing)
+ * @returns {boolean} true only if the menu is missing, or holds at most LIMITS.menuItems items, each with a string
+ *   label of at most LIMITS.label characters, a url that is absent or a string of at most LIMITS.url, and a titleAttr
+ *   that is absent, null or a string of at most LIMITS.titleAttr (what WidgetRenderer.astro prints, unclamped)
+ */
+export function menuIsSafe(menu) {
+	try {
+		if (menu === null || menu === undefined) return true;
+		const items = menu.items;
+		if (!Array.isArray(items) || items.length > LIMITS.menuItems) return false;
+		return items.every((item) => {
+			if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+			const { label, url, titleAttr } = item;
+			return (
+				typeof label === "string" &&
+				label.length <= LIMITS.label &&
+				(url === undefined || (typeof url === "string" && url.length <= LIMITS.url)) &&
+				(titleAttr === undefined || titleAttr === null || (typeof titleAttr === "string" && titleAttr.length <= LIMITS.titleAttr))
+			);
+		});
 	} catch {
 		return false;
 	}
