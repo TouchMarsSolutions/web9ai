@@ -68,7 +68,7 @@ describe("wrangler.jsonc", () => {
 	// Read the way the build reads it, so wrangler also validates the route shape (an unknown key throws)
 	const config = unstable_readConfig({ config: fileURLToPath(new URL("../../../wrangler.jsonc", import.meta.url)) }, { hideWarnings: true });
 
-	it("binds exactly the two production hosts, as Custom Domains (Change domain accepts nothing else)", () => {
+	it("binds exactly the two production hosts, as Custom Domains (Cloudflare creates their DNS records and certificates)", () => {
 		expect(config.routes).toEqual([
 			{ pattern: "www.web9.ai", custom_domain: true },
 			{ pattern: "web9.ai", custom_domain: true },

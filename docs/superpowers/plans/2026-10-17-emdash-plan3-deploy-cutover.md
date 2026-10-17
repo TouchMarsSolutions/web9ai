@@ -406,9 +406,11 @@ access token 1 小时过期。过期后按 Step 1 用 refresh token 换新的，
 - [ ] **Step 2: 备份 DNS**（只读）
 
 ```bash
-umask 077; API=https://api.cloudflare.com/client/v4; H="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-ZONE=$(curl -s -H "$H" "$API/zones?name=web9.ai" | jq -r '.result[0].id')
-curl -s -H "$H" "$API/zones/$ZONE/dns_records?per_page=100" | jq '.result' > .local/dns-full-before.json
+umask 077; API=https://api.cloudflare.com/client/v4; H="Authorization: Bearer ${CLOUDFLARE_API_TOKEN:?}"
+ZONE=$(curl -s -H "$H" "$API/zones?name=web9.ai" | jq -r '.result[0].id // empty'); : "${ZONE:?zone lookup failed}"
+R=$(curl -s -H "$H" "$API/zones/$ZONE/dns_records?per_page=100")
+printf '%s' "$R" | jq -e .success >/dev/null || { printf '%s' "$R" | jq -c .errors; exit 1; }
+printf '%s' "$R" | jq '.result' > .local/dns-full-before.json
 jq '[.[] | select((.type=="A" and .name=="web9.ai" and (.content|startswith("185.199.")))
   or (.type=="CNAME" and .name=="www.web9.ai" and .content=="touchmarssolutions.github.io"))
   | {id, type, name, content, proxied, ttl}]' .local/dns-full-before.json > .local/dns-backup.json
@@ -428,12 +430,12 @@ jq length .local/dns-full-before.json .local/dns-backup.json   # 15（2026-10-17
 - 预检成功，就证明它能访问 Workers 的 domains 接口；
 - 这两件事都在 GitHub Pages 还在服务、或者刚删完还能马上重建的时候得到验证。
 
-预检命令如下（第 2、4 步都用它）：
+预检命令如下（第 2、4 步都用它）。下面每个代码块都是自包含的：环境变量不会在 Bash 调用之间保留，查不到 zone 或 account 时 `${VAR:?}` 会立刻退出，不会拿 `null` 继续执行。`ACCOUNT` 从 zone 取，2026-10-17 已和 `wrangler whoami` 的 account 核对一致。
 
 ```bash
-API=https://api.cloudflare.com/client/v4; H="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-ZONE=$(curl -s -H "$H" "$API/zones?name=web9.ai" | jq -r '.result[0].id')
-ACCOUNT=$(curl -s -H "$H" "$API/zones/$ZONE" | jq -r '.result.account.id')
+API=https://api.cloudflare.com/client/v4; H="Authorization: Bearer ${CLOUDFLARE_API_TOKEN:?}"
+ZONE=$(curl -s -H "$H" "$API/zones?name=web9.ai" | jq -r '.result[0].id // empty'); : "${ZONE:?zone lookup failed}"
+ACCOUNT=$(curl -s -H "$H" "$API/zones/$ZONE" | jq -r '.result.account.id // empty'); : "${ACCOUNT:?account lookup failed}"
 curl -s -X POST -H "$H" -H 'Content-Type: application/json' \
   "$API/accounts/$ACCOUNT/workers/scripts/web9-ai/domains/changeset?replace_state=true" \
   -d '[{"hostname":"www.web9.ai"},{"hostname":"web9.ai"}]' \
@@ -445,7 +447,9 @@ curl -s -X POST -H "$H" -H 'Content-Type: application/json' \
    - `git checkout main && git pull --ff-only`，停 dev，`npm run build`；
    - 确认 `dist/server/wrangler.json` 里有两条 `custom_domain: true` 的 routes，以及 `workers_dev: true`、`preview_urls: false`。
 
-   从这一刻起 `main` 带着 `routes`。下面任何一步停下时，都要在离开前 revert PR #7（Global Constraints）。
+   从这一刻起，`main` 和 `dist/` 都带着 `routes`。下面任何一步停下时，都要：
+   - 先 `rm -rf dist .wrangler/deploy`；
+   - 离开前 revert PR #7（见"回退"第 1 步，Global Constraints）。
 2. **预检（校准）**：要求 `success: true`，且 `conflicting` 正好是 `www.web9.ai` 和 `web9.ai`。这时旧记录还在，预检必须能看到它们。
    - 如果 `conflicting` 是 `[]`，说明这个预检看不到我们关心的东西，第 4 步的结果也就没有意义：停下。
    - 如果返回 403 或其他错误，说明 token 缺 Workers 权限：停下。
@@ -454,10 +458,16 @@ curl -s -X POST -H "$H" -H 'Content-Type: application/json' \
 3. **删 5 条记录**：
 
    ```bash
-   for id in $(jq -r '.[].id' .local/dns-backup.json); do curl -s -X DELETE -H "$H" "$API/zones/$ZONE/dns_records/$id" | jq -c '{success, errors}'; done
+   API=https://api.cloudflare.com/client/v4; H="Authorization: Bearer ${CLOUDFLARE_API_TOKEN:?}"
+   ZONE=$(curl -s -H "$H" "$API/zones?name=web9.ai" | jq -r '.result[0].id // empty'); : "${ZONE:?zone lookup failed}"
+   for id in $(jq -r '.[].id' .local/dns-backup.json); do
+     R=$(curl -s -X DELETE -H "$H" "$API/zones/$ZONE/dns_records/$id")
+     echo "$id $(printf '%s' "$R" | jq -c '{success, errors}')"
+     printf '%s' "$R" | jq -e .success >/dev/null || break
+   done
    ```
 
-   只要有一条失败，就停下，按"回退"第 3 步重建已经删掉的记录。
+   循环在第一条失败处停下。这时停下，按"回退"第 3 步只重建已经删掉的那几条（看输出里哪些 id 是 `success: true`）。
 
    从这里开始站点不可用，直到第 5 步完成并签好证书。所以第 3 到第 5 步要连着做。
 4. **预检（确认）**：要求 `conflicting: []`。如果不为空，说明服务端还打算覆盖别的记录，"MX、TXT 不变"就保证不了。这时不部署，按"回退"第 3 步重建 5 条记录，然后停下。
@@ -542,7 +552,16 @@ owner 的操作：在 Workers & Pages › `web9-ai` › Settings › Build 里�
 ## 回退
 
 切换后出问题时，按顺序：
-1. **先撤掉 routes**：在 `main` 上 revert PR #7 的 merge commit，一次撤掉 `routes` 和钉住它的测试。如果只撤 `routes`，测试会失败，CI 也就挡住了回退。这个 revert PR 不用等评审，CI 绿了就合并。
+1. **先撤掉 routes**：开一个 PR，只撤代码，`routes` 和钉住它的测试一起撤：
+
+   ```bash
+   git checkout -b revert-routes origin/main
+   git checkout <PR #7 的 merge commit>^1 -- wrangler.jsonc packages/web9-site/lib/canonical-host.test.mjs
+   ```
+
+   - 如果只撤 `routes`，测试会失败，CI 也就挡住了回退。
+   - 不要 `git revert -m 1` 整个 merge commit：那样会把 plan 和 spec 也退回合并前的样子，包括正在照着执行的这份回退步骤和 Task 2 的完成记录。
+   - 这个 revert PR 不用等评审，CI 绿了就合并。
    - 不撤的话，下一次 `wrangler deploy`（或者连上 Workers Builds 之后的任何一次合并）又会不提示地覆盖恢复好的记录，回退就白做了。
    - 在本地删掉 `routes` 只是为了能马上手动部署；revert PR 还是必须合并。
    - 在这一步完成之前，不从任何带 `routes` 的 `dist/` 部署。
