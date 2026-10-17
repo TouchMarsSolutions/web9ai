@@ -1,6 +1,6 @@
 // Size limits for the raster images served from public/ (spec §9 "图片"), shared by scripts/optimize-images.mjs and its
 // guard test. Doc images show at most ~900 CSS px wide (DocsPage's 1200 px grid minus the sidebar), so 1600 px stays
-// sharp on a 2x screen.
+// sharp on a 2x screen. Only PNG and JPEG are checked; there is no height limit (a tall screenshot is bounded by bytes).
 import { readdir } from "node:fs/promises";
 import { extname, join } from "node:path";
 
@@ -38,6 +38,11 @@ export function rasterSize(buf) {
 			const marker = buf[i + 1];
 			if (marker === 0xff) {
 				i++;
+				continue;
+			}
+			// TEM and RST0-RST7 stand alone, with no length field
+			if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+				i += 2;
 				continue;
 			}
 			const length = buf.readUInt16BE(i + 2);

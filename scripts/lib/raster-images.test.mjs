@@ -20,6 +20,9 @@ describe("rasterSize", () => {
 		expect(rasterSize(Buffer.from("not an image"))).toBeNull();
 		expect(rasterSize((await blank(8, 8).png().toBuffer()).subarray(0, 20))).toBeNull();
 		expect(rasterSize(jpeg.subarray(0, 12))).toBeNull();
+		// a standalone TEM and RST marker before the frame header are stepped over, not read as segments
+		const withMarkers = Buffer.concat([jpeg.subarray(0, 2), Buffer.from([0xff, 0x01, 0xff, 0xd3]), jpeg.subarray(2)]);
+		expect(rasterSize(withMarkers)).toEqual({ width: 8, height: 8 });
 		const broken = Buffer.from(jpeg);
 		broken[2] = 0; // the first segment no longer starts with 0xFF
 		expect(rasterSize(broken)).toBeNull();

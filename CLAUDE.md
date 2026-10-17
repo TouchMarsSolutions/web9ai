@@ -13,7 +13,7 @@ Read `AGENTS.md` for EmDash conventions; agent skills are in `.agents/skills/`.
 - First run on an empty DB: `all --dry-run`, then `menu --overwrite` (the seed menu differs), then `all`; a re-run of `all` writes nothing (every step `unchanged`)
 - Guard scan (after tightening a guard rule, before deploying; exits 1 on any problem or any answer it cannot read): `node scripts/guard-scan.mjs` (all entries incl. trashed, all revisions, menus, terms, bylines, widget areas; admin token; the summary counts the problems in revisions apart, as no edit fixes them)
 - Tests: `npm test` (vitest; `*.test.mjs` under scripts/, packages/, seed/)
-- Images: after adding a PNG or JPEG under `public/img` or `public/cover`, run `node scripts/optimize-images.mjs` (in place, same URL; `scripts/lib/raster-images.test.mjs` fails on any file over 1600 px wide or 1 MB)
+- Images: after adding a PNG or JPEG under `public/img` or `public/cover`, run `node scripts/optimize-images.mjs` (in place, same URL; it exits 1 and prints `over` for a file it cannot bring under 1600 px wide and 1 MiB, which `scripts/lib/raster-images.test.mjs` then fails on)
 - Build: `npm run build` · Type check: `npm run typecheck` (both need the dev server stopped) · Content types: `npx emdash types`
 - Local D1/R2 state lives in `.wrangler/state` (delete it to start over); secrets in `.dev.vars`
 
