@@ -159,7 +159,7 @@
 - type 为 `portableText` 的字段并入要检查的 Portable Text 字段；
 - type 为 `image` 的字段并入要检查的图片字段。
 
-没有 `ctx.schema`（例如单测）、读取出错或超过 1500 ms（`SCHEMA_TIMEOUT_MS`）还没返回时，只用钉死的表，并用 `console.warn` 记一行。钉死的表覆盖今天所有字段，所以不因此拒绝保存。超时的原因：core 给每个 hook 5 s（`plugins/define-plugin.ts:293`），超时由 `hooks.ts` 的 `executeWithTimeout` 在 handler 外面抛错，handler 的 try/catch 接不住，发布 hook 就会失败而不设 `cancellation`（§3.2 "从不抛错"的保证在这里失效）。读 schema 让出 1500 ms 后，剩下的时间够检查本身跑完：在 node 上量 10 MiB 的值（闸门的上限），最慢的是一个带约 12 万个 feature 的 `feature_grid`，检查 1.1 s；`search_text` 最慢 0.11 s（一个 500 万项的 `tabs`）；合计约 2.7 s，低于 5 s。这是 node 上的数，workerd 会有出入。计时器在读取返回或出错时清掉。
+没有 `ctx.schema`（例如单测）、读取出错或超过 1500 ms（`SCHEMA_TIMEOUT_MS`）还没返回时，只用钉死的表，并用 `console.warn` 记一行。钉死的表覆盖今天所有字段，所以不因此拒绝保存。超时的原因：core 给每个 hook 5 s（`plugins/define-plugin.ts:293`），超时由 `hooks.ts` 的 `executeWithTimeout` 在 handler 外面抛错，handler 的 try/catch 接不住，发布 hook 就会失败而不设 `cancellation`（§3.2 "从不抛错"的保证在这里失效）。读 schema 让出 1500 ms 后，剩下的时间够检查本身跑完：在 node 上量 10 MiB 的值（闸门的上限），最慢的是一个带约 12 万个 feature 的 `feature_grid`，检查 1.1 s；`search_text` 只在检查通过后才生成，通过检查的值上它在 5 ms 以内；加上读 schema 的 1.5 s，合计约 2.6 s，低于 5 s。这是 node 上的数，workerd 会有出入。计时器在读取返回或出错时清掉。
 
 `BLOCK_IMAGE_FIELDS`（`blocks` 字段里各 block type 的 image 路径）和 `BLOCK_TEXT_FIELDS`（各 block type 打印的文字路径和上限，§3.6）仍然钉死。`migrate verify` 新增 schema 漂移检查：
 - 对线上每个 collection，portableText 字段、image 字段，以及每个 `blocks` 字段里每个 block type 的每个版本中的 image 路径（image 字段，加 repeater 子字段里的 image）和文字路径（string、text、url 字段，repeater 子字段里的同类字段，以及每个 image 路径的 `.alt`），都必须在钉死的表里；
