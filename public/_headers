@@ -1,0 +1,7 @@
+# Files under /img and /cover keep the old site's URLs, with no content hash in their names, so they get a day of caching
+# plus a week of stale-while-revalidate instead of the immutable rule the build adds for /_astro/*. A replaced image
+# can show its old version for up to a day. Never add a rule that matches /_astro/*: the build then skips its own.
+/img/*
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+/cover/*
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800

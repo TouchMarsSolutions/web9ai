@@ -54,8 +54,8 @@
 | B | Task 3 开头（2026-10-17 完成） | 在 `https://web9-ai.jhcao23.workers.dev/_emdash/admin/device` 输入我给的 user code 并批准 | 1 分钟 |
 | C | Task 4（2026-10-17 完成） | 说"可以切换"：我合并 routes PR、build、预检，删掉 5 条 GitHub Pages DNS 记录，再预检、部署（绑 Custom Domain） | 1 句话 |
 | D | Task 4 之后（2026-10-17 完成） | 后台 Settings › General › Change domain，填 `www.web9.ai` → **Use … anyway** → **Continue on www.web9.ai** → 在 `www.web9.ai` 注册新 passkey | 3 分钟 |
-| E | 切换稳定后 | Cloudflare 后台给 Worker `web9-ai` 连接 Workers Builds（设置见 Task 5） | 5 分钟 |
-| F | 之后任意时间 | 按 spec §8 runbook 邀请 AI 的 Editor 账号并走 device flow | 10 分钟 |
+| E | 切换稳定后（2026-10-17 完成，我用 API 连接） | 不用做了（见 Task 5 状态） | — |
+| F | 之后任意时间（2026-10-17 完成） | 按 spec §8 runbook 邀请 AI 的 Editor 账号并走 device flow | 10 分钟 |
 
 ## Global Constraints
 
@@ -605,11 +605,23 @@ owner 的操作：在 Workers & Pages › `web9-ai` › Settings › Build 里�
 
 连上后，下一次合并到 `main` 的部署日志里应该能看到 `check-public-css: ok`，部署的 version 和本地部署的一致。
 
+**状态（2026-10-17，已完成，用 API 连接，owner 没有操作）**：
+- Cloudflare 的 GitHub App 早已装在 `TouchMarsSolutions` 上（installation `20239202`，仓库 id `638111631`），所以不用 owner 授权。
+- 接口：`PUT /accounts/{account}/builds/repos/connections` 建仓库连接，`POST /accounts/{account}/builds/triggers` 建 trigger，`PATCH /accounts/{account}/builds/triggers/{trigger}/environment_variables` 设环境变量。
+- 只有一个 trigger `Deploy main`（`4354954d…`）：`branch_includes: ["main"]`，build `npm run build`，deploy `npx wrangler deploy`，root `/`，build cache 关，`NODE_VERSION` 起初是 `22.22.0`，同日改成 `24.16.0`（owner 问为什么不用 24：Worker 在生产里跑在 workerd 上，Node 只用来构建；本机的构建和测试都在 24.16.0 上跑，CI 仍用 22，检查 engines 的下限 `>=22.22.0`）。没有非生产分支的 trigger，别的分支 push 不会构建，效果等于后台的 "Builds for non-production branches: off"。
+- owner 之后在后台 Settings › Build 又试了一次 Connect，报 "An internal error prevented the form from submitting"，原因可能是连接已经存在，没有核实。核对过，那次尝试没留下任何东西：仍然只有这一个 trigger，修改时间等于创建时间，环境变量没变。要改设置，编辑现有的 trigger，不要再点 Connect。
+- 第一次自动部署是图片 PR（spec §9"图片"）合并到 `main` 时，检查结果记在那个 PR 的评论里。
+
 ---
 
 ### Task 6: 切换后
 
-- [ ] **AI 账号**（检查点 F）：按 spec §8 的 runbook，域名用 `https://www.web9.ai`。runbook 第 4 步的核对（`content_list` 能用，其他应被拒）我可以用 owner 给的 token 跑；token 只放 `.local/`，跑完删掉。
+- [x] **AI 账号**（检查点 F，2026-10-17）：按 spec §8 的 runbook，域名用 `https://www.web9.ai`。
+  - owner 邀请了 `ai-agent@web9.ai`（Editor），在无痕窗口用 passkey 注册，再以这个用户批准 device code。
+  - 发出的 token 的 scope 正好是 `content:read content:write media:read media:write`，access token 3600 s。
+  - 第 4 步核对：MCP `content_list` 成功；`schema_list_collections`、`settings_update` 被拒（`INSUFFICIENT_SCOPE`），`site_export_start`、`site_import_analyze`、`site_import_status`、`site_export_status` 被拒（`INSUFFICIENT_PERMISSIONS`）；REST `GET /_emdash/api/admin/api-tokens`、`GET /_emdash/api/redirects` 都是 403 `INSUFFICIENT_SCOPE`。
+  - 第 5 步续期：refresh 返回新的 access token，scope 不变；旧的 access token 立即 401，新的 200；refresh token 没有轮换。
+  - 和原计划不同：token 不是跑完就删。AI 的运行环境就是这台 Mac，refresh token 和 access token 放在 `.local/ai-refresh-token`、`.local/ai-access-token`（mode 600，不进 git），refresh token 约 2027-01-15 到期。不需要另存副本：丢了重新走一次 device flow 就行。
 - [ ] **观察一周**：
   - 每天看 `/_emdash/api/redirects/404s`，给还在被访问的旧 URL 补规则；
   - 第一次采样（切换前后共 47 分钟，20:42–21:29Z）：
@@ -638,7 +650,7 @@ owner 的操作：在 Workers & Pages › `web9-ai` › Settings › Build 里�
    - 如果只撤 `routes`，测试会失败，CI 也就挡住了回退。
    - 不要 `git revert -m 1` 整个 merge commit：那样会把 plan 和 spec 也退回合并前的样子，包括正在照着执行的这份回退步骤和 Task 2 的完成记录。
    - 这个 revert PR 不用等评审，CI 绿了就合并。
-   - 不撤的话，下一次 `wrangler deploy`（或者连上 Workers Builds 之后的任何一次合并）又会不提示地覆盖恢复好的记录，回退就白做了。
+   - 不撤的话，下一次 `wrangler deploy` 又会不提示地覆盖恢复好的记录，回退就白做了。Workers Builds 已经连上（Task 5），所以任何一次合并到 `main` 都是一次部署：revert PR 之前不要合并别的 PR。
    - 在本地删掉 `routes` 只是为了能马上手动部署；revert PR 还是必须合并。
    - 在这一步完成之前，不从任何带 `routes` 的 `dist/` 部署。
 2. 删掉两个 Custom Domain：`GET /accounts/{account}/workers/domains/records`（和 wrangler 用的是同一个列表）找到 id，再 `DELETE`。删 Custom Domain 会连带删掉 Cloudflare 为它建的 DNS 记录，所以下一步是在空的名字上重建。
