@@ -140,6 +140,17 @@ describe("footer menu widget", () => {
 		const frontmatter = raw("packages/web9-blocks/astro/SafeWidgetArea.astro").split("---")[1];
 		// Every assignment to `safe`: the initial false, and the verdict `ok` (so a throw from getMenu leaves it false)
 		expect([...frontmatter.matchAll(/\bsafe = ([^;]+);/g)].map((m) => m[1])).toEqual(["false", "ok"]);
+		// ...and no other write in any spelling the pattern above misses: `safe=true`, a logical or arithmetic assignment
+		// (`safe ||= true`, `safe += 1`), or an increment (false + 1 is truthy)
+		const writes = (source) =>
+			[...source.matchAll(/\bsafe\s*(?:\*\*|<<|>>>?|&&|\|\||\?\?|[-+*/%&|^])?=(?!=)|\bsafe\s*(?:\+\+|--)|(?:\+\+|--)\s*safe\b/g)].length;
+		expect(writes(frontmatter)).toBe(2);
+		for (const extra of ["safe=true;", "safe ||= true;", "safe &&= ok;", "safe ??= true;", "safe |= 1;", "safe += 1;", "safe **= 1;", "safe >>>= 0;", "safe++;", "++safe;", "safe--;"]) {
+			expect(writes(`${frontmatter}\n${extra}`), extra).toBe(3);
+		}
+		for (const read of ["if (safe === true) {}", "if (safe == ok) {}", "if (safe !== ok) {}", "if (safe <= ok) {}", "if (safe >= ok) {}", "unsafe = 1;", "isSafe = 1;"]) {
+			expect(writes(`${frontmatter}\n${read}`), read).toBe(2);
+		}
 		// `ok` starts as the widget check and can only be set to false afterwards
 		expect([...frontmatter.matchAll(/\bok = ([^;]+);/g)].map((m) => m[1])).toEqual(["widgetAreaIsSafe(area)", "false"]);
 		// `safe = ok;` is the last statement of the try block: nothing but whitespace between it and the catch
