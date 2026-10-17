@@ -148,15 +148,15 @@
      - 合并、build；
      - 用 changeset 接口预检；
      - 按 id 删掉 GitHub Pages 的 5 条记录（apex 的 4 条 A、`www` 的 CNAME，备份在 `.local/dns-backup.json`）；
-     - 再预检一次，确认没有冲突后紧接着部署；
+     - 再预检一次，确认没有冲突后紧接着部署（2026-10-17 实际：校准没通过，这次预检跳过了，见下）；
      - 比对全部记录，MX、TXT 不变。
 
      **已完成（2026-10-17 13:57 PDT，version `e1a8b99b-6bf8-419c-98f0-ea1aea8b404f`，`main` 的 `e7c40ac7`）**：
      - 删记录到部署完成用了 18 s，13:57:43 时 www 已经返回 200。
      - DNS 比对：只少了备份里的那 5 条，多了两条 Custom Domain 的 `AAAA 100::`（proxied），MX ×5、TXT ×5 逐字节不变。
-     - 和计划不同的一处：changeset 预检的校准没通过。旧的 A 和 CNAME 还在时，它返回 `conflicting: []`、`added` 两个域名，也就是说这个接口不报 DNS 冲突。Cloudflare 文档写明，已有 CNAME 的 hostname 不能直接建 Custom Domain，所以 `www` 本该出现在 `conflicting` 里。
+     - 和计划不同的一处：changeset 预检的校准没通过。旧的 A 和 CNAME 还在时，它返回 `conflicting: []`、`added` 两个域名，也就是说它没有把这些记录报成冲突。Cloudflare 文档写明，已有 CNAME 的 hostname 不能直接建 Custom Domain，所以 `www` 本该出现在 `conflicting` 里。
      - 按计划这时应该停下。owner 看过证据后决定继续（检查点 C）。依据：同账号的 itouchmars.com 和 touchmars.technology 走过同样的流程（先删冲突记录，再以非 TTY 方式部署，带 override），两个 zone 的 apex MX、TXT 的修改时间都早于各自的切换，之后的每次重新部署也没碰过它们。
-     - 以后每次部署都会带 `override_existing_dns_record=true`：不要在 `www` 或 apex 上加 A、AAAA、CNAME 记录，否则下一次部署会不提示地把它换掉；
+     - 以后每次非 TTY 的部署（agent 的 shell、Workers Builds）都会带 `override_existing_dns_record=true`，可能会不提示地换掉同名的 A、AAAA、CNAME 记录；服务端具体换哪些，没有核实。所以不要在 `www` 或 apex 上加这类记录；
   5. GitHub Pages 保留作为回退：回退靠的是 `gh-pages` 分支上**已经构建好的产物**（Pages 设置：source `gh-pages`，custom domain `www.web9.ai`），可以随时把 DNS 切回去。确认稳定后再关闭。旧站源码完整保存在 tag `docusaurus-final`，需要时从它重建；`legacy/` **不能**重新构建出线上站点（静态资源已经移到 `public/`），不要从它重新部署到 `gh-pages`。原来的 `static/CNAME` 和 `deploy.yml` 也放在 `legacy/static/` 和 `legacy/.github/workflows/`，只作记录，workflow 不会运行。
 - **已定（2026-10-17）**：不开预览。`wrangler versions upload` 上传的版本（Workers Builds 给非生产分支构建时就是这样做的）和生产共用 D1、R2 binding，而 EmDash 在版本第一次收到请求时跑 core migration，所以一个升级了 emdash 的分支一旦能被访问，就会改生产库的 schema。真正起作用的是 Workers Builds 关掉非生产分支构建（计划 3 Task 5）。`preview_urls: false` 只是不给版本分配预览 URL，上传的版本照样带着生产 binding。`wrangler dev --remote` 也会连生产 D1，不要用。以后需要预览时，加一个用独立 D1、R2 的 staging environment。
 - **已验证（2026-10-17）**：wrangler 按 `wrangler.jsonc` 里的名字连接资源，找不到就创建。D1 `web9-ai`（`721318a8-ef7b-46b0-9e7c-423d1496882a`，WNAM，read replication `auto`，`d1({session:"auto"})` 需要它）和 R2 `web9-ai-media`（WNAM，没有公开访问）已于 2026-10-17 建好。KV `SESSION` 不写名字，首次部署时由 wrangler 建成 `web9-ai-session`。`IMAGES` 不需要另建资源。`wrangler.jsonc` 只写名字、不写 id，和同账号的 itouchmars、touchmars.technology 一样。
