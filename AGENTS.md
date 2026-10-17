@@ -84,7 +84,7 @@ The article layout is the standout feature: a three-column reading view with a l
 
 Design tokens live in `src/styles/tokens.css` with their default values. To restyle the site, override tokens in `src/styles/theme.css` -- declarations there are unlayered, so they always beat the `@layer base` defaults. Don't edit `tokens.css` or `Base.astro` for visual changes.
 
-Colours are defined with `light-dark(<light>, <dark>)`, so each token carries both modes. Overriding with a plain colour changes light and dark at once; use `light-dark()` in the override to keep them distinct. There is no separate dark palette to maintain.
+Colours are plain values: light ones in `@theme static` in `src/styles/global.css`, dark ones in `:root.dark` and in `@media (prefers-color-scheme: dark) { :root:not(.light) }` right below it (keep the two dark blocks identical; a test checks it). Never use `light-dark()`: the production CSS minifier lowers it and the footer theme switcher stops working.
 
 Webfonts are configured in `astro.config.mjs` under `fonts:`. To swap the body face, change the `name:` for the entry bound to `cssVariable: "--font-body"`. Good alternatives: Geist, IBM Plex Sans, Söhne (if you have a licence), Public Sans. If you want a serif-bodied blog, swap to a humanist serif like Source Serif, Crimson Pro, or Lora -- but then also raise `--font-size-base` to `1.0625rem` for readability. To give headings their own face (or use a system font) without touching the font pipeline, override `--font-heading` or `--font-body` in `theme.css`.
 

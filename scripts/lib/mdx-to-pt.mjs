@@ -8,9 +8,40 @@
 //   ```mermaid                      -> mermaid
 //   <InvestmentWarning />           -> investment_warning
 //   tables with logos/images        -> tool_grid; text-only tables -> core `table`
+//   <div className="tools-gallery"> -> one tool_grid per category
+//   <YouTube youTubeId>             -> core `embed` (prose) or a Markdown link (inside a block body)
+//   images in prose                 -> core `image` blocks after the text block they were in
+//   <Tabs> inside <details>         -> bold tab labels + the tab bodies, in the details Markdown
+//   <MDXTemplate>, <AlignedText>, <TwitterFollowButton>, <style> -> dropped (children kept)
+//   code fences, <details>, HTML in a list item -> the same blocks as at top level, right after the item
+//   bilibili <iframe> player        -> dropped when the list item or the next block links to its video,
+//                                      else a paragraph linking to the player (never an iframe)
 //   everything else (prose)         -> standard Portable Text via the marked lexer
+// Any other raw HTML in prose, block or inline (<img> and <br> aside), is an error: the site rejects htmlBlock
+// on save (spec §10).
+//
+// Output is deterministic: block keys come from the slug and the traversal order (fnv1a), so the
+// same source always gives the same JSON and the migration runner can skip unchanged entries.
 
 import { marked } from "marked";
+import { parseFrontmatter } from "./frontmatter.mjs";
+import { YOUTUBE_TOKEN, dropWrappers, imgAttributes, parseToolsGallery, youtubeToTokens, youtubeUrl } from "./mdx-jsx.mjs";
+
+/** 32-bit FNV-1a; no dependencies, same result in Node and workerd. */
+export function fnv1a(str) {
+	let h = 0x811c9dc5;
+	for (let i = 0; i < str.length; i++) {
+		h ^= str.charCodeAt(i);
+		h = Math.imul(h, 0x01000193) >>> 0;
+	}
+	return h >>> 0;
+}
+
+/** Entry slug: frontmatter `slug` (leading "/" dropped, other "/" -> "-"), else the file name without its number prefix. */
+export function deriveSlug(frontmatter, path) {
+	const raw = frontmatter.slug ?? path.split("/").pop().replace(/\.mdx?$/, "").replace(/^\d+[-_]/, "");
+	return String(raw).replace(/^\//, "").replace(/\//g, "-");
+}
 
 /** Split on `sep` at the top level only: separators inside (...) or quotes don't count. */
 export function splitTopLevel(text, sep = ",") {
@@ -70,20 +101,89 @@ export function parseTabs(jsx) {
 	return { tabs, defaultIndex: Math.max(0, tabs.findIndex((t) => t.value === defaultValue)) };
 }
 
+/** Apply `fn` to the parts of one paragraph outside inline code spans (a span never crosses a blank line). */
+function outsideInlineCode(paragraph, fn) {
+	let out = "";
+	let last = 0;
+	const ticks = /`+/g;
+	for (let open; (open = ticks.exec(paragraph)); ) {
+		const n = open[0].length;
+		const closing = new RegExp(`(?<!\`)\`{${n}}(?!\`)`, "g");
+		closing.lastIndex = ticks.lastIndex;
+		const close = closing.exec(paragraph);
+		if (!close) continue; // an unmatched backtick run is literal text
+		const end = close.index + n;
+		out += fn(paragraph.slice(last, open.index)) + paragraph.slice(open.index, end);
+		last = ticks.lastIndex = end;
+	}
+	return out + fn(paragraph.slice(last));
+}
+
+/** Apply `fn` to the Markdown outside fenced code blocks and inline code spans. */
+function outsideCode(text, fn) {
+	const out = [];
+	let plain = [];
+	let fence = null;
+	const flushPlain = () => {
+		if (!plain.length) return;
+		const chunk = plain.join("\n");
+		plain = [];
+		out.push(chunk.split(/(\n[ \t]*\n)/).map((part, i) => (i % 2 ? part : outsideInlineCode(part, fn))).join(""));
+	};
+	for (const line of text.split("\n")) {
+		if (fence) {
+			out.push(line);
+			if (new RegExp(`^\\s*${fence[0]}{${fence.length},}\\s*$`).test(line)) fence = null;
+			continue;
+		}
+		const open = /^\s*(`{3,}(?=[^`]*$)|~{3,})/.exec(line);
+		if (!open) {
+			plain.push(line);
+			continue;
+		}
+		flushPlain();
+		fence = open[1];
+		out.push(line);
+	}
+	flushPlain();
+	return out.join("\n");
+}
+
+/** Markdown links and href attributes in `text`, passed through `rewriteHref`. Code is left alone. */
+function rewriteLinks(text, rewriteHref) {
+	return outsideCode(text, (part) =>
+		part
+			.replace(/(\]\()([^)\s]+)((?:\s+"[^"]*")?\))/g, (_, open, href, close) => `${open}${rewriteHref(href)}${close}`)
+			.replace(/(\bhref=")([^"]+)(")/g, (_, open, href, close) => `${open}${rewriteHref(href)}${close}`),
+	);
+}
+
 /**
- * Convert one Docusaurus MDX doc into an EmDash `docs` payload.
- * `site` prefixes /img/... URLs; the default "" keeps them site-relative (served from public/img).
+ * Parse one Docusaurus MDX file into Portable Text blocks. Shared by docs (convertMdx) and posts.
+ * - `slug` overrides the derived slug (the legacy inventory de-duplicates slugs).
+ * - `lang` is the InvestmentWarning language when the file does not import one (the import decides:
+ *   `InvestmentWarning.cn.mdx` -> "zh", `InvestmentWarning.mdx` -> "en").
+ * - `site` prefixes /img/... URLs; the default "" keeps them site-relative (served from public/img).
+ * - `rewriteHref(href)` maps legacy links to new URLs; it must return unknown hrefs unchanged. It is not applied
+ *   inside code (fences, inline code, mermaid), nor to table cells and tool_grid urls.
+ * Returns { frontmatter, slug, title, blocks }. Title = frontmatter title, else the first H1;
+ * the first H1 is always removed from the body (Docusaurus pages repeat the title as an H1), except that
+ * a link inside it stays behind as a normal paragraph (a few pages carry their only link to the product there).
  */
-export function convertMdx(src, { path, section = "ai", category = "general", order = 0, lang = "zh", site = "" }) {
+export function mdxToBlocks(src, { path, slug: slugOption, lang = "en", site = "", rewriteHref = (href) => href }) {
+	const { data: frontmatter, body: afterFrontmatter } = parseFrontmatter(src);
+	const slug = slugOption ?? deriveSlug(frontmatter, path);
+	const warningImport = /^import\s+InvestmentWarning\s+from\s+['"]([^'"]+)['"]/m.exec(src)?.[1];
+	const warningLang = warningImport ? (/\.cn\.mdx$/.test(warningImport) ? "zh" : "en") : lang;
+
 	let keySeq = 0;
-	const key = () => `k${(keySeq++).toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+	const key = () => {
+		const n = keySeq++; // key() call order is the converter's deterministic traversal order
+		return `k${n.toString(36)}${fnv1a(`${slug}:${n}`).toString(36).padStart(7, "0").slice(-4)}`;
+	};
 
 	// ---------------------------------------------------------------- MDX -> Markdown helpers
-	const fm = /^---\n([\s\S]*?)\n---\n/.exec(src);
-	const frontmatter = Object.fromEntries(
-		(fm?.[1] ?? "").split("\n").map((l) => l.match(/^(\w+):\s*(.*)$/)).filter(Boolean).map((m) => [m[1], m[2]]),
-	);
-	let body = fm ? src.slice(fm[0].length) : src;
+	let body = afterFrontmatter;
 
 	const images = {};
 	body = body.replace(/^import\s+(\w+)\s+from\s+['"]([^'"]+)['"];?\s*$/gm, (_, name, path) => {
@@ -92,10 +192,13 @@ export function convertMdx(src, { path, section = "ai", category = "general", or
 	});
 	body = body.replace(/^import\s+.*$/gm, "");
 	const img = (name) => images[name] ?? "";
+	body = dropWrappers(body);
+	const { body: withTokens, videos } = youtubeToTokens(body);
+	body = withTokens;
 
-	/** Rewrite MDX/JSX inline constructs into plain Markdown/HTML. */
-	function mdxToMarkdown(text) {
-		return (
+	/** Rewrite MDX/JSX inline constructs into plain Markdown/HTML; `links: false` leaves hrefs alone (mermaid source). */
+	function mdxToMarkdown(text, { links = true } = {}) {
+		const markdown =
 			text
 				// <Image img={X} .../>  and  <XSvg width={w} height={h} />
 				.replace(/<Image\s+img=\{(\w+)\}[^>]*\/>/g, (_, n) => `![${n}](${img(n)})`)
@@ -107,8 +210,20 @@ export function convertMdx(src, { path, section = "ai", category = "general", or
 				.replace(/style=\{\{([\s\S]*?)\}\}/g, (_, obj) => `style="${cssObjectToString(obj)}"`)
 				.replace(/img:\s*'(\/img\/[^']+)'/g, (_, p) => `img: '${site}${p}'`) // mermaid image nodes
 				.replace(/\s*\{#[\w-]+\}\s*$/gm, "") // Docusaurus heading ids
-				.replace(/^\s*<!--.*?-->\s*$/gm, "")
-		);
+				.replace(/^\s*<!--.*?-->\s*$/gm, "");
+		return links ? rewriteLinks(markdown, rewriteHref) : markdown;
+	}
+
+	/** Markdown for a block body (callout, details, tabs): videos become links, there is no block to put them in. */
+	const videoLinks = (markdown) => markdown.replace(YOUTUBE_TOKEN, (_, n) => `[YouTube](${youtubeUrl(videos[n])})`);
+	const bodyMarkdown = (text) => videoLinks(mdxToMarkdown(text));
+
+	/** Docusaurus Tabs inside Markdown: each tab becomes `**label**` + its dedented content (no label for a single tab). */
+	function tabsToMarkdown(text) {
+		return text.replace(/^[ \t]*<Tabs\b[\s\S]*?^[ \t]*<\/Tabs>[ \t]*$/gm, (jsx) => {
+			const { tabs } = parseTabs(jsx);
+			return tabs.map((t) => `${tabs.length > 1 ? `**${t.label}**\n\n` : ""}${dedent(t.content)}`).join("\n\n");
+		});
 	}
 
 	function dedent(text) {
@@ -118,10 +233,41 @@ export function convertMdx(src, { path, section = "ai", category = "general", or
 		return lines.map((l) => l.slice(min)).join("\n").trim();
 	}
 
+	/**
+	 * `<details>` content (what lies between the tags) -> details block. `toMarkdown` is bodyMarkdown for source
+	 * lines, videoLinks for HTML met in prose (the prose went through mdxToMarkdown already).
+	 */
+	function detailsBlock(inner, toMarkdown = bodyMarkdown) {
+		const summary = inner.match(/<summary>([\s\S]*?)<\/summary>/)?.[1].trim() ?? "Details";
+		const rest = inner.replace(/<summary>[\s\S]*?<\/summary>/, "").replace(/^\s*<\/?div>\s*$/gm, "");
+		// A details body is Markdown, so Tabs inside it become bold labels followed by each tab's content
+		return { _type: "details", _key: key(), summary, body: toMarkdown(tabsToMarkdown(dedent(rest))) };
+	}
+
 	// ---------------------------------------------------------------- Markdown -> Portable Text
+	// Portable Text has no inline images or videos: inlineToSpans collects them here and they are emitted
+	// as blocks right after the text block (or list item) they were in.
+	// Indented admonitions inside list items (`  :::tip`) take the same route: callouts after the item.
+	const media = [];
+	const nestedCallouts = [];
+	const mediaBlocks = () =>
+		media.splice(0).map((m) => {
+			if (m.video) return { _type: "embed", _key: key(), url: youtubeUrl(m.video) };
+			if (m.callout) return { _type: "callout", _key: key(), ...m.callout };
+			return { _type: "image", _key: key(), asset: { _ref: "", url: m.src }, alt: m.alt };
+		});
+	const hasText = (block) => block.children.some((c) => c.text.trim());
+
 	function inlineToSpans(tokens = [], markDefs, marks = []) {
 		const spans = [];
 		const push = (text, m = marks) => text && spans.push({ _type: "span", _key: key(), text, marks: [...m] });
+		const pushText = (text) =>
+			text.split(/(%%(?:youtube|callout):\d+%%)/).forEach((part) => {
+				const token = /^%%(youtube|callout):(\d+)%%$/.exec(part);
+				if (token?.[1] === "youtube") media.push({ video: videos[token[2]] });
+				else if (token) media.push({ callout: nestedCallouts[token[2]] });
+				else push(part);
+			});
 		for (const t of tokens) {
 			switch (t.type) {
 				case "strong":
@@ -146,14 +292,16 @@ export function convertMdx(src, { path, section = "ai", category = "general", or
 					push("\n");
 					break;
 				case "html":
-					push(/^<br\s*\/?>$/i.test(t.raw.trim()) ? "\n" : t.raw);
+					if (/^<br\s*\/?>$/i.test(t.raw.trim())) push("\n");
+					else if (/^<img\s/i.test(t.raw.trim())) media.push(imgAttributes(t.raw));
+					else throw new Error(`${path}: unsupported HTML in prose: ${t.raw.trim().slice(0, 120)}`);
 					break;
 				case "image":
-					push(t.text || "image");
+					media.push({ src: t.href, alt: t.text ?? "" });
 					break;
 				case "text":
 					if (t.tokens?.length) spans.push(...inlineToSpans(t.tokens, markDefs, marks));
-					else push(t.text);
+					else pushText(t.text);
 					break;
 				default:
 					push(t.raw ?? "");
@@ -162,20 +310,44 @@ export function convertMdx(src, { path, section = "ai", category = "general", or
 		return spans;
 	}
 
+	/** Drops trailing whitespace from the last spans; a trailing "\n" would render as <br>. */
+	function trimEnd(spans) {
+		while (spans.length) {
+			const last = spans.at(-1);
+			last.text = last.text.trimEnd();
+			if (last.text) return;
+			spans.pop();
+		}
+	}
+
 	const textBlock = (tokens, extra = {}) => {
 		const markDefs = [];
+		const pulled = media.length;
 		const children = inlineToSpans(tokens, markDefs);
+		// the line break before an image, video or callout moved out of the block stays behind otherwise
+		if (media.length > pulled) trimEnd(children);
 		if (!children.length) children.push({ _type: "span", _key: key(), text: "", marks: [] });
 		return { _type: "block", _key: key(), style: "normal", markDefs, children, ...extra };
 	};
 
-	function listToBlocks(list, level = 1) {
+	// Numbered items carry listId + listStart (their own number) so a list split by an image, video, callout or
+	// code block keeps counting instead of restarting at 1 (emdash/src/content/portable-text-lists.ts).
+	// `after` is the Markdown that follows the list, for the HTML rules of its last item.
+	let listSeq = 0;
+	function listToBlocks(list, level = 1, after = "") {
 		const out = [];
-		for (const item of list.items) {
+		const listId = list.ordered ? `${slug}:list-${listSeq++}` : undefined;
+		const start = Number(list.start) || 1;
+		for (const [n, item] of list.items.entries()) {
+			const extra = list.ordered ? { listItem: "number", level, listId, listStart: start + n } : { listItem: "bullet", level };
+			const near = `${item.raw}\n${list.items[n + 1]?.raw ?? after}`;
 			for (const t of item.tokens) {
-				if (t.type === "list") out.push(...listToBlocks(t, level + 1));
-				else if (t.type === "text" || t.type === "paragraph")
-					out.push(textBlock(t.tokens ?? [t], { listItem: list.ordered ? "number" : "bullet", level }));
+				if (t.type === "list") out.push(...listToBlocks(t, level + 1, near));
+				else if (t.type === "text" || t.type === "paragraph") {
+					const block = textBlock(t.tokens ?? [t], extra);
+					if (hasText(block) || !media.length) out.push(block);
+				} else out.push(...tokenBlocks(t, near)); // code, details, other HTML: blocks of their own after the item
+				out.push(...mediaBlocks());
 			}
 		}
 		return out;
@@ -197,40 +369,65 @@ export function convertMdx(src, { path, section = "ai", category = "general", or
 		};
 	}
 
-	function markdownToBlocks(md) {
-		const blocks = [];
-		for (const t of marked.lexer(md)) {
-			switch (t.type) {
-				case "heading":
-					blocks.push(textBlock(t.tokens, { style: `h${t.depth}` }));
-					break;
-				case "paragraph":
-					blocks.push(textBlock(t.tokens));
-					break;
-				case "list":
-					blocks.push(...listToBlocks(t));
-					break;
-				case "blockquote":
-					for (const p of t.tokens) if (p.tokens) blocks.push(textBlock(p.tokens, { style: "blockquote" }));
-					break;
-				case "hr":
-					blocks.push({ _type: "break", _key: key(), style: "line" });
-					break;
-				case "code":
-					blocks.push({ _type: "code", _key: key(), language: t.lang || undefined, code: t.text });
-					break;
-				case "table":
-					blocks.push(tableToCoreTable(t));
-					break;
-				case "html":
-					if (t.raw.trim()) blocks.push({ _type: "htmlBlock", _key: key(), html: t.raw.trim() });
-					break;
-				case "space":
-					break;
-				default:
-					console.error(`[convert] unhandled markdown token: ${t.type}`);
+	/** Blocks for one Markdown token, at top level or inside a list item; `near` is the Markdown around it. */
+	function tokenBlocks(t, near = "") {
+		switch (t.type) {
+			case "heading":
+				return [textBlock(t.tokens, { style: `h${t.depth}` })];
+			case "paragraph": {
+				const block = textBlock(t.tokens);
+				return hasText(block) || !media.length ? [block] : [];
 			}
+			case "list":
+				return listToBlocks(t, 1, near);
+			case "blockquote":
+				return t.tokens.filter((p) => p.tokens).map((p) => textBlock(p.tokens, { style: "blockquote" }));
+			case "hr":
+				return [{ _type: "break", _key: key(), style: "line" }];
+			case "code":
+				return [{ _type: "code", _key: key(), language: t.lang || undefined, code: t.text }];
+			case "table":
+				return [tableToCoreTable(t)];
+			case "html":
+				return htmlBlocks(t.raw.trim(), near);
+			case "space":
+				return [];
+			default:
+				console.error(`[convert] unhandled markdown token: ${t.type}`);
+				return [];
 		}
+	}
+
+	const PLAYER = /^<iframe\s[^>]*\bsrc="((?:https:)?\/\/player\.bilibili\.com\/player\.html\?[^"]*)"[^>]*>\s*<\/iframe>$/i;
+
+	/**
+	 * Block-level HTML in prose. `<details>` -> details block; a bilibili player -> nothing when `near` (the list
+	 * item and the next one, or the blocks around it) already links to its video, else a paragraph linking to the
+	 * player; images, also in a styled wrapper div -> image blocks. Anything else needs a converter rule.
+	 */
+	function htmlBlocks(html, near) {
+		const details = /^<details>([\s\S]*)<\/details>$/i.exec(html);
+		if (details) return [detailsBlock(details[1], videoLinks)];
+		const player = PLAYER.exec(html);
+		if (player) {
+			const url = new URL(player[1], "https://player.bilibili.com").href;
+			const bvid = /[?&]bvid=(BV\w+)/.exec(url)?.[1];
+			const aid = /[?&]aid=(\d+)/.exec(url)?.[1];
+			const video = bvid ?? (aid && `av${aid}`);
+			if (video && near.includes(`bilibili.com/video/${video}`)) return [];
+			return [textBlock([{ type: "link", href: url, tokens: [{ type: "text", text: "Bilibili" }] }])];
+		}
+		const tags = html.match(/<img\s[^>]*>/gi) ?? [];
+		const rest = html.replace(/<img\s[^>]*>/gi, "").replace(/<\/?(?:div|p|center)\b[^>]*>/gi, "").replace(/<br\s*\/?>/gi, "");
+		if (rest.trim()) throw new Error(`${path}: unsupported HTML in prose: ${html.slice(0, 120)}`);
+		for (const tag of tags) media.push(imgAttributes(tag));
+		return [];
+	}
+
+	function markdownToBlocks(md) {
+		const tokens = marked.lexer(md).filter((t) => t.type !== "space");
+		const blocks = [];
+		tokens.forEach((t, i) => blocks.push(...tokenBlocks(t, `${tokens[i - 1]?.raw ?? ""}\n${tokens[i + 1]?.raw ?? ""}`), ...mediaBlocks()));
 		return blocks;
 	}
 
@@ -286,9 +483,21 @@ export function convertMdx(src, { path, section = "ai", category = "general", or
 		if (prose.join("").trim()) blocks.push(...markdownToBlocks(mdxToMarkdown(prose.join("\n"))));
 		prose = [];
 	};
+	/** Lines from i up to the first line matching endRe; lines inside fenced code never end the run. */
 	const collectUntil = (i, endRe) => {
 		const out = [];
-		while (i < lines.length && !endRe.test(lines[i])) out.push(lines[i++]);
+		let fence = null;
+		for (; i < lines.length; i++) {
+			const line = lines[i];
+			if (fence) {
+				if (new RegExp(`^\\s*${fence[0]}{${fence.length},}\\s*$`).test(line)) fence = null;
+			} else if (endRe.test(line)) {
+				break;
+			} else {
+				fence = /^\s*(`{3,}|~{3,})/.exec(line)?.[1] ?? null;
+			}
+			out.push(line);
+		}
 		return [out, i];
 	};
 
@@ -298,20 +507,33 @@ export function convertMdx(src, { path, section = "ai", category = "general", or
 		if (/^\s*<!--.*-->\s*$/.test(line) || /^\s*<TOCInline/.test(line)) continue;
 		if (/^\s*<InvestmentWarning\s*\/>/.test(line)) {
 			flush();
-			blocks.push({ _type: "investment_warning", _key: key(), lang });
+			blocks.push({ _type: "investment_warning", _key: key(), lang: warningLang });
+		} else if ((m = line.match(/^::::(\w+)[ \t]*(.*)$/))) {
+			// 4-colon admonition wrapping a 3-colon one: a callout body is Markdown and cannot nest a callout,
+			// so the outer one ends at the first nested `:::tone` line and the inner one follows as its own block.
+			flush();
+			const [inner, end] = collectUntil(i + 1, /^:{3,4}(?:\w+.*)?\s*$/);
+			i = /^::::\s*$/.test(lines[end] ?? "") ? end : end - 1;
+			blocks.push({ _type: "callout", _key: key(), tone: m[1], title: m[2].trim(), body: bodyMarkdown(dedent(inner.join("\n"))) });
+		} else if (/^::::\s*$/.test(line)) {
+			// closing line of a 4-colon admonition whose nested callout was emitted separately
 		} else if ((m = line.match(/^:::(\w+)[ \t]*(.*)$/))) {
 			flush();
 			const [inner, end] = collectUntil(i + 1, /^:::\s*$/);
 			i = end;
-			blocks.push({ _type: "callout", _key: key(), tone: m[1], title: m[2].trim(), body: mdxToMarkdown(dedent(inner.join("\n"))) });
+			blocks.push({ _type: "callout", _key: key(), tone: m[1], title: m[2].trim(), body: bodyMarkdown(dedent(inner.join("\n"))) });
 		} else if (/^\s*<details>/.test(line)) {
 			flush();
 			const [inner, end] = collectUntil(i + 1, /^\s*<\/details>/);
 			i = end;
-			const joined = inner.join("\n");
-			const summary = joined.match(/<summary>([\s\S]*?)<\/summary>/)?.[1].trim() ?? "Details";
-			const rest = joined.replace(/<summary>[\s\S]*?<\/summary>/, "").replace(/^\s*<\/?div>\s*$/gm, "");
-			blocks.push({ _type: "details", _key: key(), summary, body: mdxToMarkdown(dedent(rest)) });
+			blocks.push(detailsBlock(inner.join("\n")));
+		} else if (/^\s*<div className="tools-gallery">/.test(line)) {
+			flush();
+			const [inner, end] = collectUntil(i + 1, /^<\/div>\s*$/);
+			i = end;
+			for (const { title, tools } of parseToolsGallery(inner.join("\n"), img)) {
+				blocks.push({ _type: "tool_grid", _key: key(), title, tools, logo_size: 100 });
+			}
 		} else if (/^\s*<FullscreenWrapper>/.test(line)) {
 			fullscreen = true;
 		} else if (/^\s*<\/FullscreenWrapper>/.test(line)) {
@@ -324,7 +546,7 @@ export function convertMdx(src, { path, section = "ai", category = "general", or
 			blocks.push({
 				_type: "tabs",
 				_key: key(),
-				tabs: tabs.map((t) => ({ label: t.label, body: mdxToMarkdown(dedent(t.content)) })),
+				tabs: tabs.map((t) => ({ label: t.label, body: bodyMarkdown(dedent(t.content)) })),
 				default_tab: defaultIndex + 1,
 				fullscreen,
 			});
@@ -332,7 +554,7 @@ export function convertMdx(src, { path, section = "ai", category = "general", or
 			flush();
 			const [inner, end] = collectUntil(i + 1, /^```\s*$/);
 			i = end;
-			blocks.push({ _type: "mermaid", _key: key(), code: mdxToMarkdown(inner.join("\n")) });
+			blocks.push({ _type: "mermaid", _key: key(), code: mdxToMarkdown(inner.join("\n"), { links: false }) });
 		} else if ((m = line.match(/^\s*(`{3,}|~{3,})/))) {
 			// A fenced code block is prose: `|`, `:::`, `<details>` or `<Tabs` lines inside it are code, not blocks
 			const close = new RegExp(`^\\s*${m[1][0]}{${m[1].length},}\\s*$`);
@@ -345,27 +567,38 @@ export function convertMdx(src, { path, section = "ai", category = "general", or
 			flush();
 			const [inner, end] = collectUntil(i, /^(?!\s*\|)/);
 			i = end - 1;
-			blocks.push(tableToBlock(inner));
+			blocks.push(tableToBlock(inner), ...mediaBlocks()); // images from text-only table cells follow the table
+		} else if ((m = line.match(/^(\s+):::(\w+)[ \t]*(.*)$/))) {
+			// Indented admonition (inside a list item): becomes a callout right after that item
+			const [inner, end] = collectUntil(i + 1, /^\s*:::\s*$/);
+			i = end;
+			nestedCallouts.push({ tone: m[2], title: m[3].trim(), body: bodyMarkdown(dedent(inner.join("\n"))) });
+			prose.push(`${m[1]}%%callout:${nestedCallouts.length - 1}%%`);
 		} else {
 			prose.push(line);
 		}
 	}
 	flush();
 
-	// The first H1 becomes the entry title (Docusaurus pages repeat the title as an H1)
+	// The first H1 is dropped (the page title replaces it); if it carries a link, that link survives as a normal paragraph
 	const h1 = blocks.findIndex((b) => b.style === "h1");
-	const title = h1 >= 0 ? blocks.splice(h1, 1)[0].children.map((c) => c.text).join("") : frontmatter.title;
+	const h1Block = h1 >= 0 ? blocks[h1] : undefined;
+	if (h1Block?.markDefs.length) blocks[h1] = { ...h1Block, style: "normal" };
+	else if (h1Block) blocks.splice(h1, 1);
+	const h1Text = h1Block?.children.map((c) => c.text).join("");
+	const title = String(frontmatter.title ?? h1Text ?? slug);
+	return { frontmatter, slug, title, blocks };
+}
 
-	const slug = (frontmatter.slug ?? path.split("/").pop().replace(/\.mdx?$/, "").replace(/^\d+[-_]/, ""))
-		.replace(/^\//, "")
-		.replace(/\//g, "-");
-
+/** Convert one Docusaurus MDX doc into an EmDash `docs` payload (options as for mdxToBlocks, plus the doc fields). */
+export function convertMdx(src, { section = "ai", category = "general", order = 0, ...options }) {
+	const { frontmatter, slug, title, blocks } = mdxToBlocks(src, options);
 	return {
 		collection: "docs",
 		slug,
 		data: {
 			title,
-			description: frontmatter.description ?? frontmatter.title ?? "",
+			description: String(frontmatter.description ?? frontmatter.title ?? ""),
 			section,
 			category,
 			sort_order: Number(order),

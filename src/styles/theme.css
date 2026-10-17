@@ -7,9 +7,9 @@
   of them here: declarations in this file are unlayered, so they always
   beat the @layer base defaults in tokens.css.
 
-  Colors are defined with light-dark(). Overriding with a plain color
-  changes light and dark mode at once; use light-dark(<light>, <dark>)
-  to set different values per mode.
+  Colors: set the light value in :root here, and the dark value in
+  both :root.dark and @media (prefers-color-scheme: dark)
+  { :root:not(.light) { ... } } (see global.css).
 
   Webfonts are loaded in astro.config.mjs (--font-body, --font-mono).
   Swap the loaded font there; use overrides here for system fonts or a
@@ -18,16 +18,11 @@
   Example:
 
   :root {
-    --color-brand: light-dark(#0f766e, #2dd4bf);
+    --color-brand: #0f766e;
     --font-heading: "Iowan Old Style", Georgia, serif;
     --radius: 8px;
   }
 */
 
 :root {
-}
-
-/* Keep the signed-in Admin link separated from the primary navigation. */
-.nav-admin {
-	margin-inline-start: var(--spacing-5);
 }

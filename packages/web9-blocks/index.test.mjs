@@ -1,0 +1,215 @@
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import { localizeHref } from "../web9-site/lib/nav.mjs";
+import { BLOCK_IMAGE_FIELDS, HOME_ALTERNATES, IMAGE_FIELDS, PT_FIELDS, beforeSave, createPlugin, pageMetadata } from "./index.mjs";
+
+const seed = JSON.parse(readFileSync(new URL("../../seed/seed.json", import.meta.url), "utf8"));
+const callout = { _type: "callout", _key: "c1", tone: "tip", title: "T", body: "probe-word" };
+
+describe("content:beforeSave", () => {
+	it("guards every portableText field the seed defines", () => {
+		const fromSeed = Object.fromEntries(
+			seed.collections
+				.map((c) => [c.slug, c.fields.filter((f) => f.type === "portableText").map((f) => f.slug)])
+				.filter(([, fields]) => fields.length),
+		);
+		expect(PT_FIELDS).toEqual(fromSeed);
+	});
+	it("mirrors web9 block text into search_text for docs, posts and pages", async () => {
+		expect((await beforeSave({ collection: "docs", content: { body: [callout] } })).search_text).toBe("T\nprobe-word");
+		expect((await beforeSave({ collection: "posts", content: { content: [callout] } })).search_text).toBe("T\nprobe-word");
+		expect((await beforeSave({ collection: "pages", content: { content: [callout] } })).search_text).toBe("T\nprobe-word");
+	});
+	it("leaves saves without the body field, and unknown collections, alone", async () => {
+		const c = { title: "x" };
+		expect(await beforeSave({ collection: "posts", content: c })).toBe(c);
+		const other = { body: [{ _type: "htmlBlock" }] };
+		expect(await beforeSave({ collection: "other", content: other })).toBe(other);
+	});
+	it("rejects a Portable Text field that is not an array, and passes an empty one", async () => {
+		await expect(beforeSave({ collection: "docs", content: { body: "<b>x</b>" } })).rejects.toMatchObject({
+			name: "ContentSaveRejectedError",
+			message: 'Save rejected (spec §10): body: value "<b>x</b>" is not allowed: a Portable Text field must be an array of blocks',
+		});
+		await expect(beforeSave({ collection: "posts", content: { content: { _type: "block" } } })).rejects.toMatchObject({ name: "ContentSaveRejectedError" });
+		for (const empty of [null, [], ""]) expect((await beforeSave({ collection: "docs", content: { body: empty } })).search_text).toBe("");
+	});
+	it("rejects a save with a message the editor sees", async () => {
+		await expect(
+			beforeSave({ collection: "docs", content: { body: [{ _type: "htmlBlock", _key: "h", html: "<b>x</b>" }] } }),
+		).rejects.toMatchObject({ name: "ContentSaveRejectedError", message: expect.stringContaining("body: #0 htmlBlock") });
+	});
+	it("pins IMAGE_FIELDS to the image fields the seed defines", () => {
+		const fromSeed = Object.fromEntries(
+			seed.collections
+				.map((c) => [c.slug, c.fields.filter((f) => f.type === "image").map((f) => f.slug)])
+				.filter(([, fields]) => fields.length),
+		);
+		expect(IMAGE_FIELDS).toEqual(fromSeed);
+		expect(IMAGE_FIELDS).toEqual({ posts: ["featured_image"] });
+	});
+	it("pins BLOCK_IMAGE_FIELDS to the image values inside the seed's block types", () => {
+		const types = new Map(seed.blockTypes.map((t) => [t.slug, t]));
+		const paths = (type) => {
+			const current = type.versions.find((v) => v.version === type.currentVersion);
+			return current.fields.flatMap((f) => {
+				if (f.type === "image") return [f.slug];
+				if (f.type === "repeater") return (f.validation?.subFields ?? []).filter((sub) => sub.type === "image").map((sub) => `${f.slug}[].${sub.slug}`);
+				return [];
+			});
+		};
+		const fromSeed = Object.fromEntries(
+			seed.collections
+				.map((c) => [
+					c.slug,
+					Object.fromEntries(
+						c.fields
+							.filter((f) => f.type === "blocks")
+							.map((f) => [f.slug, Object.fromEntries(f.validation.allowedTypes.map((t) => [t, paths(types.get(t))]).filter(([, list]) => list.length))]),
+					),
+				])
+				.filter(([, fields]) => Object.keys(fields).length),
+		);
+		expect(BLOCK_IMAGE_FIELDS).toEqual(fromSeed);
+		expect(BLOCK_IMAGE_FIELDS).toEqual({ pages: { layout: { hero: ["image"], feature_grid: ["features[].image"] } } });
+	});
+	const img = (over = {}) => ({ id: "", provider: "external", src: "/img/ai.svg", mimeType: "image/svg+xml", alt: "AI", ...over });
+	const layout = (heroImage, ...featureImages) => [
+		{ _type: "hero", _version: 1, _key: "home-hero", title: "Web9.AI", image: heroImage },
+		{ _type: "feature_grid", _version: 1, _key: "home-features", features: featureImages.map((image, k) => ({ title: `F${k}`, image })) },
+	];
+	it("rejects a pages.layout image whose dominantColor is pasted into style", async () => {
+		const evil = "red;position:fixed;inset:0;z-index:99999";
+		const save = (content) => beforeSave({ collection: "pages", content });
+		await expect(save({ title: "Home", layout: layout(img({ dominantColor: evil }), img()) })).rejects.toMatchObject({
+			name: "ContentSaveRejectedError",
+			message: `Save rejected (spec §10): layout: #0 hero image.dominantColor: value "${evil}" is not allowed`,
+		});
+		await expect(save({ layout: layout(img(), img(), img({ darkVariant: img({ dominantColor: evil }) })) })).rejects.toMatchObject({
+			message: `Save rejected (spec §10): layout: #1 feature_grid features[1].image.darkVariant.dominantColor: value "${evil}" is not allowed`,
+		});
+		await expect(save({ layout: layout(img({ blurhash: "x" })) })).rejects.toMatchObject({
+			message: expect.stringContaining('layout: #0 hero image.blurhash: value "x" is not allowed'),
+		});
+		await expect(save({ layout: layout(img({ meta: { storageKey: { toString: 1 } } })) })).rejects.toMatchObject({
+			message: expect.stringContaining('layout: #0 hero image.meta.storageKey: value {"toString":1} is not allowed'),
+		});
+	});
+	it("accepts the home page layout and saves without a layout, and guards layout and body together", async () => {
+		const clean = { title: "Web9.AI", layout: layout(img(), img(), img(), img()) };
+		expect(await beforeSave({ collection: "pages", content: clean })).toEqual(clean);
+		const noLayout = { title: "x" };
+		expect(await beforeSave({ collection: "pages", content: noLayout })).toBe(noLayout);
+		await expect(
+			beforeSave({ collection: "pages", content: { layout: layout(img({ blurhash: "x" })), content: [{ _type: "htmlBlock", _key: "h" }] } }),
+		).rejects.toMatchObject({ message: expect.stringMatching(/content: #0 htmlBlock.*layout: #0 hero image\.blurhash/) });
+		// docs and posts have no blocks field: a layout key there is not looked at
+		const other = { title: "x", layout: layout(img({ dominantColor: "a b" })) };
+		expect(await beforeSave({ collection: "docs", content: other })).toEqual(other);
+	});
+	it("does not throw on a layout core's normalizeBlocksData would reject afterwards", async () => {
+		for (const bad of [null, "x", 5, {}, [null], [5], [{}], [{ _type: "constructor" }], [{ _type: "__proto__", image: img({ dominantColor: "a b" }) }]]) {
+			const content = { title: "x", layout: bad };
+			expect(await beforeSave({ collection: "pages", content })).toEqual(content);
+		}
+	});
+	it("rejects an image field whose dominantColor is pasted into style", async () => {
+		const featured_image = { id: "x", provider: "external", src: "https://example.com/a.png", dominantColor: "red;position:fixed;inset:0;z-index:99999" };
+		await expect(beforeSave({ collection: "posts", content: { title: "x", featured_image } })).rejects.toMatchObject({
+			name: "ContentSaveRejectedError",
+			message: expect.stringContaining('featured_image: dominantColor: value "red;position:fixed;inset:0;z-index:99999" is not allowed'),
+		});
+	});
+	it("rejects a bad darkVariant colour and a blurhash that does not decode", async () => {
+		const save = (featured_image) => beforeSave({ collection: "posts", content: { featured_image } });
+		await expect(save({ id: "x", darkVariant: { id: "y", dominantColor: "red;position:fixed" } })).rejects.toMatchObject({
+			message: expect.stringContaining("featured_image: darkVariant.dominantColor"),
+		});
+		await expect(save({ id: "x", blurhash: "x" })).rejects.toMatchObject({ message: expect.stringContaining('featured_image: blurhash: value "x"') });
+	});
+	it("accepts a clean image field and an empty one, and guards image and body together", async () => {
+		const clean = { id: "x", provider: "external", src: "https://example.com/a.png", dominantColor: "#aabbcc", blurhash: "LEHV6nWB2yk8pyo0adR*.7kCMdnj" };
+		expect((await beforeSave({ collection: "posts", content: { featured_image: clean } })).featured_image).toBe(clean);
+		const empty = { title: "x", featured_image: null };
+		expect(await beforeSave({ collection: "posts", content: empty })).toBe(empty);
+		await expect(
+			beforeSave({ collection: "posts", content: { featured_image: { id: "x", blurhash: "x" }, content: [{ _type: "htmlBlock", _key: "h" }] } }),
+		).rejects.toMatchObject({ message: expect.stringMatching(/content: #0 htmlBlock.*featured_image: blurhash/) });
+	});
+	it("rejects inline objects in block children on save", async () => {
+		const content = [{ _type: "block", _key: "p", children: [{ _type: "iframe", _key: "f", src: "https://evil.example" }] }];
+		await expect(beforeSave({ collection: "posts", content: { content } })).rejects.toMatchObject({
+			message: expect.stringContaining("content: #0 block children[0] iframe"),
+		});
+	});
+	it("answers a deeply nested value with a rejection, never an exception", async () => {
+		const deep = (n) => {
+			let v = "x";
+			for (let i = 0; i < n; i++) v = [v];
+			return v;
+		};
+		const rejected = { name: "ContentSaveRejectedError", message: expect.stringContaining("meta.storageKey: value [unprintable array] is not allowed") };
+		await expect(beforeSave({ collection: "posts", content: { featured_image: { id: "x", meta: { storageKey: deep(20000) } } } })).rejects.toMatchObject(rejected);
+		const hero = { _type: "hero", _version: 1, _key: "h", title: "T", image: { id: "", src: "/img/ai.svg", meta: { storageKey: deep(20000) } } };
+		await expect(beforeSave({ collection: "pages", content: { title: "Home", layout: [hero] } })).rejects.toMatchObject(rejected);
+		// text of a web9 block is walked for search_text after the guard passed it (callout has no field rules)
+		const saved = await beforeSave({ collection: "docs", content: { body: [{ _type: "callout", _key: "c", body: deep(50000) }] } });
+		expect(saved.search_text).toBe("x");
+	});
+	it("drops a caller-sent search_text from saves without the body field", async () => {
+		const saved = await beforeSave({ collection: "docs", content: { title: "x", search_text: "spam" } });
+		expect(saved).toEqual({ title: "x" });
+		expect(await beforeSave({ collection: "posts", content: { title: "x", search_text: "spam" } })).toEqual({ title: "x" });
+		const unknown = { title: "x", search_text: "kept" };
+		expect(await beforeSave({ collection: "other", content: unknown })).toBe(unknown);
+	});
+	it("replaces a caller-sent search_text when the body is saved", async () => {
+		const saved = await beforeSave({ collection: "docs", content: { body: [callout], search_text: "spam" } });
+		expect(saved.search_text).toBe("T\nprobe-word");
+	});
+});
+
+// Core builds hreflang alternates from the collection's urlPattern (/pages/{slug}), which for the home page is a
+// redirect (and /zh-CN/pages/home is a 302 to the English one). Plugin links win the dedupe (page/metadata.ts).
+describe("page:metadata", () => {
+	const SITE = "https://www.web9.ai";
+	const event = (content, siteUrl = SITE) => ({ page: { url: `${SITE}/`, path: "/", locale: "en", kind: content ? "content" : "custom", pageType: "website", title: "x", description: null, canonical: null, image: null, content, siteUrl } });
+	const home = { collection: "pages", id: "01HOME", slug: "home" };
+	const link = (hreflang, path) => ({ kind: "link", rel: "alternate", hreflang, href: `${SITE}${path}` });
+	const wanted = [link("en", "/"), link("zh-CN", "/zh-CN/"), link("x-default", "/")];
+
+	it("gives both home pages alternates at / and /zh-CN/ and x-default /", () => {
+		expect(pageMetadata(event(home))).toEqual(wanted);
+		expect(pageMetadata({ page: { ...event(home).page, locale: "zh-CN", path: "/zh-CN/" } })).toEqual(wanted);
+	});
+	it("uses the site origin it is given, never a fixed host", () => {
+		expect(pageMetadata(event(home, "https://staging.web9.ai"))).toEqual([
+			{ kind: "link", rel: "alternate", hreflang: "en", href: "https://staging.web9.ai/" },
+			{ kind: "link", rel: "alternate", hreflang: "zh-CN", href: "https://staging.web9.ai/zh-CN/" },
+			{ kind: "link", rel: "alternate", hreflang: "x-default", href: "https://staging.web9.ai/" },
+		]);
+	});
+	it("leaves every other page to core", () => {
+		for (const content of [
+			undefined,
+			{ collection: "docs", id: "1", slug: "home" },
+			{ collection: "posts", id: "1", slug: "home" },
+			{ collection: "pages", id: "1", slug: "about" },
+			{ collection: "pages", id: "1", slug: null },
+			{ collection: "pages", id: "1" },
+		]) {
+			expect(pageMetadata(event(content))).toBeNull();
+		}
+		for (const siteUrl of [undefined, "", "not a url", "javascript:alert(1)"]) expect(pageMetadata({ page: { ...event(home).page, siteUrl } })).toBeNull();
+		expect(pageMetadata({})).toBeNull();
+		expect(pageMetadata({ page: null })).toBeNull();
+	});
+	it("points at the routes the site serves (localizeHref) and is registered by the plugin", () => {
+		expect(HOME_ALTERNATES).toEqual([
+			{ hreflang: "en", path: localizeHref("/", "en") },
+			{ hreflang: "zh-CN", path: localizeHref("/", "zh-CN") },
+			{ hreflang: "x-default", path: "/" },
+		]);
+		expect(createPlugin().hooks["page:metadata"]).toMatchObject({ handler: pageMetadata });
+	});
+});

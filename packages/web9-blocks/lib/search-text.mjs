@@ -2,13 +2,21 @@
 // Core nodes (block, table, code, image, ...) are left to core search, which already indexes them.
 const SKIP_KEYS = new Set(["_type", "_key", "_version", "url", "logo", "tone", "lang", "marks", "markDefs", "code"]);
 
-function collect(value, out) {
-	if (typeof value === "string") {
-		if (value.trim()) out.push(value.trim());
-	} else if (Array.isArray(value)) {
-		for (const v of value) collect(v, out);
-	} else if (value && typeof value === "object") {
-		for (const [k, v] of Object.entries(value)) if (!SKIP_KEYS.has(k)) collect(v, out);
+// An explicit stack, not recursion: this runs inside content:beforeSave on raw request data, and a value
+// nested a few thousand levels deep would overflow the call stack. Children are pushed in reverse, so the
+// text comes out in document order.
+function collect(root, out) {
+	const stack = [root];
+	while (stack.length) {
+		const value = stack.pop();
+		if (typeof value === "string") {
+			if (value.trim()) out.push(value.trim());
+		} else if (Array.isArray(value)) {
+			for (let i = value.length - 1; i >= 0; i--) stack.push(value[i]);
+		} else if (value && typeof value === "object") {
+			const entries = Object.entries(value);
+			for (let i = entries.length - 1; i >= 0; i--) if (!SKIP_KEYS.has(entries[i][0])) stack.push(entries[i][1]);
+		}
 	}
 }
 

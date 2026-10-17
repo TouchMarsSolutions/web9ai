@@ -9,22 +9,106 @@
 
 /*
  * Template color tokens, names unchanged, exposed as utilities (bg-surface, text-muted, border-border...).
- * light-dark() follows the template's theme toggle, so never use the `dark:` variant.
+ * Theme B (spec §11): light values here; dark values below. Never use the `dark:` variant: the footer
+ * switcher sets html.light / html.dark, which `dark:` would not see.
  * `static` keeps every variable on :root because template CSS outside Tailwind reads them too.
  */
 @theme static {
-	--color-bg: light-dark(#ffffff, #0d0d0d);
-	--color-bg-subtle: light-dark(#fafafa, #141414);
-	--color-text: light-dark(#1a1a1a, #ededed);
-	--color-text-secondary: light-dark(#525252, #a0a0a0);
-	--color-muted: light-dark(#8b8b8b, #6b6b6b);
-	--color-border: light-dark(#e5e5e5, #2a2a2a);
-	--color-border-subtle: light-dark(#f0f0f0, #1f1f1f);
-	--color-surface: light-dark(#f7f7f7, #181818);
-	--color-brand: light-dark(#0066cc, #4d9fff);
-	--color-brand-hover: light-dark(#0052a3, #6eb0ff);
+	--color-bg: #ffffff;
+	--color-bg-subtle: #fafafa;
+	--color-text: #1a1a1a;
+	--color-text-secondary: #525252;
+	--color-muted: #8b8b8b;
+	--color-border: #e5e5e5;
+	--color-border-subtle: #f0f0f0;
+	--color-surface: #f7f7f7;
+	--color-brand: #0066cc;
+	--color-brand-hover: #0052a3;
 	--color-on-brand: white;
 	--color-brand-ring: color-mix(in srgb, var(--color-brand) 25%, transparent);
+}
+
+/*
+ * Dark palette. Tailwind puts @theme into @layer theme; these rules are unlayered, so they win.
+ * html.dark = explicit choice; no class = follow the OS; html.light = explicit light.
+ * Keep the two blocks identical (packages/web9-site/theme.test.mjs).
+ */
+:root {
+	color-scheme: light;
+}
+
+:root.dark {
+	color-scheme: dark;
+	--color-bg: #0d0d0d;
+	--color-bg-subtle: #141414;
+	--color-text: #ededed;
+	--color-text-secondary: #a0a0a0;
+	--color-muted: #6b6b6b;
+	--color-border: #2a2a2a;
+	--color-border-subtle: #1f1f1f;
+	--color-surface: #181818;
+	--color-brand: #4d9fff;
+	--color-brand-hover: #6eb0ff;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root:not(.light) {
+		color-scheme: dark;
+		--color-bg: #0d0d0d;
+		--color-bg-subtle: #141414;
+		--color-text: #ededed;
+		--color-text-secondary: #a0a0a0;
+		--color-muted: #6b6b6b;
+		--color-border: #2a2a2a;
+		--color-border-subtle: #1f1f1f;
+		--color-surface: #181818;
+		--color-brand: #4d9fff;
+		--color-brand-hover: #6eb0ff;
+	}
+}
+
+/* Page defaults that used to live in Base.astro's global style (Tailwind preflight covers the resets). */
+@layer base {
+	html {
+		scroll-behavior: smooth;
+	}
+	body {
+		font-family: var(--font-body);
+		font-size: var(--font-size-base);
+		line-height: var(--leading-relaxed);
+		color: var(--color-text);
+		background: var(--color-bg);
+		-webkit-font-smoothing: antialiased;
+		-moz-osx-font-smoothing: grayscale;
+		min-height: 100vh;
+	}
+	a:where(:not([class*="emdash"]):not([class*="ec-"])) {
+		color: var(--color-brand);
+		text-decoration: none;
+		transition: color var(--transition-fast);
+	}
+	a:where(:not([class*="emdash"]):not([class*="ec-"])):hover {
+		color: var(--color-brand-hover);
+	}
+	h1,
+	h2,
+	h3,
+	h4,
+	h5,
+	h6 {
+		font-family: var(--font-heading);
+		line-height: var(--leading-tight);
+		font-weight: var(--font-weight-heading);
+		letter-spacing: var(--tracking-snug);
+	}
+	h1 {
+		font-weight: var(--font-weight-display);
+		letter-spacing: var(--tracking-tight);
+	}
+	::selection {
+		background: var(--color-brand);
+		color: var(--color-on-brand);
+	}
 }
 
 /* prose colors follow the same tokens, so prose-invert is never needed. */
@@ -46,5 +130,17 @@
 		--tw-prose-pre-bg: var(--color-surface);
 		--tw-prose-th-borders: var(--color-border);
 		--tw-prose-td-borders: var(--color-border-subtle);
+	}
+
+	/* Typography adds backticks around inline code; the old site had none. (0,1,2) beats the plugin's (0,1,1). */
+	.prose code::before,
+	.prose code::after {
+		content: none;
+	}
+
+	/* Typography sizes headings in em, so headings nested in headings (the Markdown sanitizer keeps `<h1><div><h1>`) would
+	   compound at every level. Inherit instead; (0,1,2) beats the plugin's (0,1,0). */
+	.prose :is(h1, h2, h3, h4, h5, h6) :is(h1, h2, h3, h4, h5, h6) {
+		font-size: inherit;
 	}
 }

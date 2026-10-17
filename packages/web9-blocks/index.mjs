@@ -1,4 +1,5 @@
-import { definePlugin } from "emdash";
+import { ContentSaveRejectedError, definePlugin } from "emdash";
+import { guardBlockImages, guardImageValue, guardPortableText } from "./lib/pt-guard.mjs";
 import { extractBlockText } from "./lib/search-text.mjs";
 
 const ID = "web9-blocks";
@@ -101,8 +102,74 @@ export const BLOCKS = [
 	},
 ];
 
-/** `_type`s of this plugin's blocks; only their text is mirrored into docs.search_text. */
+/** `_type`s of this plugin's blocks; only their text is mirrored into search_text. */
 const BLOCK_TYPES = new Set(BLOCKS.map((b) => b.type));
+
+/** Portable Text fields per collection: all are guarded on every save; the first one feeds search_text. */
+export const PT_FIELDS = { docs: ["body"], posts: ["content"], pages: ["content"] };
+
+/** `image` fields per collection: guarded on every save (colour and blurhash values reach style and a decoder). */
+export const IMAGE_FIELDS = { posts: ["featured_image"] };
+
+/**
+ * `blocks` fields per collection, and in each the paths of the `image` values inside a block type (the same
+ * colour and blurhash values, rendered by <Image> in the hero and feature_grid components). Pinned to the seed.
+ */
+export const BLOCK_IMAGE_FIELDS = { pages: { layout: { hero: ["image"], feature_grid: ["features[].image"] } } };
+
+/**
+ * content:beforeSave. Rejects unsafe blocks and image values (spec §10), then mirrors this plugin's block
+ * text into search_text, because core search only indexes text/alt/caption/code strings (spec §4).
+ */
+export async function beforeSave({ content, collection }) {
+	const fields = PT_FIELDS[collection] ?? [];
+	const imageFields = IMAGE_FIELDS[collection] ?? [];
+	const blockFields = Object.entries(BLOCK_IMAGE_FIELDS[collection] ?? {});
+	if (!fields.length && !imageFields.length && !blockFields.length) return content;
+	const problems = [
+		...fields.flatMap((f) => guardPortableText(content[f]).map((p) => `${f}: ${p}`)),
+		...imageFields.flatMap((f) => guardImageValue(content[f]).map((p) => `${f}: ${p}`)),
+		...blockFields.flatMap(([f, paths]) => guardBlockImages(content[f], paths).map((p) => `${f}: ${p}`)),
+	];
+	if (problems.length) throw new ContentSaveRejectedError(`Save rejected (spec §10): ${problems.join("; ")}`.slice(0, 1000));
+	const [main] = fields;
+	// Updates pass only the changed fields; when the body didn't change, keep the stored search_text
+	// (so a caller-sent one is dropped, not stored).
+	if (main === undefined || content[main] === undefined) {
+		if (!("search_text" in content)) return content;
+		const { search_text: _dropped, ...rest } = content;
+		return rest;
+	}
+	return { ...content, search_text: extractBlockText(content[main], BLOCK_TYPES) };
+}
+
+/**
+ * hreflang alternates of the home pages. Core derives them from the collection's urlPattern, `/pages/{slug}`,
+ * which for the home page is a redirect to `/` (and `/zh-CN/pages/home` redirects to the English home), and a
+ * crawler drops hreflang that points at a redirect. These paths are the routes HomePage.astro serves; the test
+ * pins them to localizeHref.
+ */
+export const HOME_ALTERNATES = [
+	{ hreflang: "en", path: "/" },
+	{ hreflang: "zh-CN", path: "/zh-CN/" },
+	{ hreflang: "x-default", path: "/" },
+];
+
+/**
+ * page:metadata. A contribution from a plugin sits before core's in the list, and the first link per hreflang
+ * wins (page/metadata.ts resolvePageMetadata), so these replace core's three home alternates. The home page is
+ * the `pages` entry with slug `home` (HomePage.astro passes it as `content`, which keeps the SEO-panel overlay);
+ * every other page, and a page without an absolute site URL, is left to core.
+ */
+export function pageMetadata(event) {
+	const page = event?.page;
+	if (page?.content?.collection !== "pages" || page.content.slug !== "home") return null;
+	try {
+		return HOME_ALTERNATES.map(({ hreflang, path }) => ({ kind: "link", rel: "alternate", hreflang, href: new URL(path, page.siteUrl).href }));
+	} catch {
+		return null;
+	}
+}
 
 export function web9Blocks() {
 	return {
@@ -122,13 +189,8 @@ export function createPlugin() {
 		// content:beforeSave is skipped without this capability
 		capabilities: ["content:write"],
 		hooks: {
-			// Spec §4: core search does not index custom-block text; mirror it into docs.search_text.
-			// Only this plugin's block types are walked; core nodes are left to core search.
-			"content:beforeSave": async ({ content, collection }) => {
-				// Updates pass only the changed fields; when body didn't change, keep search_text as is.
-				if (collection !== "docs" || content.body === undefined) return content;
-				return { ...content, search_text: extractBlockText(content.body, BLOCK_TYPES) };
-			},
+			"content:beforeSave": beforeSave,
+			"page:metadata": pageMetadata,
 		},
 		admin: { portableTextBlocks: BLOCKS },
 	});

@@ -1,0 +1,39 @@
+---
+// Replaces core's embed renderer (spec §10): core passes embed.html through a sanitizer that keeps
+// class/id/data-*. Only YouTube and Vimeo urls become an iframe; any other url is a plain external link.
+import { sanitizeHref } from "emdash";
+import { embedSrc } from "../lib/embed-url.mjs";
+
+interface Props {
+	node: { _type: "embed"; _key: string; url?: string; caption?: string };
+}
+const { node } = Astro.props;
+// sanitizeHref throws on a non-string; the save guard rejects those, this covers rows that bypassed it
+const url = typeof node?.url === "string" ? node.url : "";
+const src = embedSrc(url);
+const href = url ? sanitizeHref(url) : "#";
+const caption = typeof node?.caption === "string" ? node.caption : "";
+---
+
+{
+	src ? (
+		<figure class="not-prose my-6">
+			<div class="aspect-video w-full overflow-hidden rounded-lg bg-surface">
+				<iframe
+					class="size-full"
+					src={src}
+					title={caption || "Video"}
+					loading="lazy"
+					allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+					allowfullscreen
+					referrerpolicy="strict-origin-when-cross-origin"
+				/>
+			</div>
+			{caption && <figcaption class="mt-2 text-sm text-muted">{caption}</figcaption>}
+		</figure>
+	) : href !== "#" ? (
+		<p class="my-4">
+			<a href={href} rel="noopener noreferrer" target="_blank">{caption || url}</a>
+		</p>
+	) : null
+}

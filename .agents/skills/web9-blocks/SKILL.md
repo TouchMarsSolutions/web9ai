@@ -19,11 +19,12 @@ Endpoint: `<site>/_emdash/api/mcp` with `Authorization: Bearer <token>`. In this
 - `section` is `ai` or `dev`. `sort_order` orders the sidebar within a category.
 - Chinese translation of an existing doc: same payload with `"locale": "zh-CN"` and `"translationOf": "<id of the en doc>"`.
 - `search_text` is generated automatically from block text on every save that includes a `body`; never write it.
+- Posts and pages work the same way: their block text also goes into an auto-generated `search_text` (field `content` instead of `body`).
 - Updating: `content_get` (slug as `id`) → `content_update` with `id`, `_rev` and only the changed `data` fields (this writes a draft; `status` still reads "published") → `content_get` again for the new `_rev` → `content_publish`.
 - Editing an existing body: `content_get` with `"markdown": true` returns `body` as Markdown plus `ec:block` lines; edit that and send the whole `body` back.
 - Translations share the slug with the en doc. `content_get` and `content_update` take `"locale": "zh-CN"` to scope the slug lookup; `content_publish` and `revision_list` have no `locale`, so for a translation use the item's ULID `id` (from `content_get`) in every call.
 - Locking: an update or publish fails with `ENTRY_LOCKED` while someone has the doc open in the admin. Tell the user who holds it; use `overrideLock` only if they ask.
-- Undo: `revision_list` {collection, id} → `revision_restore` {revisionId} (replaces the draft only) → `content_get` for the new `_rev` → `content_publish`.
+- Undo: `revision_list` {collection, id} returns each revision's `data`; send the earlier `body` back with `content_update` (the save check runs on it) → `content_get` for the new `_rev` → `content_publish`. Do not use `revision_restore`: like `content_publish`, `content_duplicate` and `content_restore`, it copies stored data without re-running the save check, so a revision saved under older rules would come back unchecked.
 
 ## Body = Markdown + block lines
 
@@ -43,9 +44,18 @@ Always include a unique `_key` in every ec:block JSON, unique within the doc: ke
 
 ## Block reference
 
-Full Markdown (GFM, `:::tip Title … :::` admonitions, ```` ```mermaid ```` fences) works only in callout `body`, details `body` and tab `body`. Callout `title`, details `summary` and tool `tagline` are inline Markdown only (bold, links, code); tool_grid `title`, tab `label` and tool `name` are plain text. Raw HTML is sanitized: inline `style` keeps only cosmetic properties (no `position`, no `url()`), and `class`/`id` are removed. Do not try to style content with classes.
+Full Markdown (GFM, `:::tip Title … :::` admonitions, ```` ```mermaid ```` fences) works only in callout `body`, details `body` and tab `body`. Callout `title`, details `summary` and tool `tagline` are inline Markdown only (bold, links, code); tool_grid `title`, tab `label` and tool `name` are plain text. Raw HTML is sanitized: inline `style` keeps only cosmetic properties (no `position`, no `url()`), and `class`/`id` are removed. Do not try to style content with classes. A link there must be a site path (`/docs/x`), a `#fragment` or an absolute `https:`, `http:`, `mailto:` or `tel:` url; any other href (a relative path, `//host`) and any `//host` image src is dropped when the page renders, with no save error.
 
-Never use `htmlBlock` (`{"_type":"htmlBlock",…}`): raw HTML there keeps `class`/`id` and bypasses the Web9 sanitizer. Use the blocks listed below.
+The site rejects some blocks on save (`SAVE_REJECTED`, the message lists each problem as `body: #<index> <type> …`):
+- `htmlBlock`, `iframe` and any `_type` outside this allow list: `block` (paragraphs, headings, list items), `blockquoteGroup`, `break`, `table`, `file`, `pullquote`, `video`, `image`, `gallery`, `columns`, `cover`, `button`, `buttons`, `code`, `embed`, `callout`, `tabs`, `details`, `mermaid`, `tool_grid`, `investment_warning`;
+- a `block` whose `children` hold anything but `span` (no blocks, covers, images or iframes inside a paragraph), a `span` with its own `children`, and any other node with `children`;
+- a `block` with a `style` other than normal, h1–h6, blockquote, a `listItem` other than bullet, number, menu, a `level` outside 1–20, `marks` that are not a decorator (strong, em, underline, strike-through, subscript, superscript, code) or the `_key` of one of that block's `markDefs`, or a `markDefs` entry that is not a `link` with a string `href` (the same rules apply to blocks inside `cover.content`, `columns[].content` and `blockquoteGroup.blocks`, which may hold blocks only);
+- a span with more than 20 `marks`, a block with more than 1000 `children`, or a `_key` that is not a string;
+- a `url` or `logo` that is not a string on `button`, `buttons[]`, `file`, `embed` and `tool_grid` tools;
+- an `embed` with `html` (an `embed` takes only `url`; YouTube and Vimeo render as a player, anything else as a link);
+- core block fields outside their allowed values: `image.alignment` (left, center, right, wide, full), colours that are not `#hex`/`rgb()`, `cover.minHeight` other than a plain length, `code.language` with spaces, `tool_grid.logo_size` outside 16–300;
+- an image whose `dominantColor` is not `#hex`/`rgb()` or whose `blurhash` does not decode: the `image` and `gallery` blocks, the `featured_image` field of posts and the images of a page's `layout` blocks (`hero.image`, `feature_grid` `features[].image`); for those two fields this includes `meta` and `darkVariant`, and a `meta.storageKey` that is not a string.
+Fix the block and send the save again; never try to get around the check.
 
 | Block | JSON |
 |---|---|
@@ -59,6 +69,10 @@ Never use `htmlBlock` (`{"_type":"htmlBlock",…}`): raw HTML there keeps `class
 
 - Table cells hold text spans only (marks: `strong`, `em`, `code`, `strike-through`, or a `link` markDef key). Put logos in a `tool_grid`, not a table.
 - Images: site images are `/img/...` paths; new uploads go through `media_upload` and are referenced by the returned URL.
+
+## Widgets
+
+Content widgets (rich text in a widget area) are not rendered: an area that holds one is hidden whole, the footer on every page included. Put that text in a doc or page instead. Component widgets take only the props their component declares (`core:recent-posts` takes no `urlTemplate`: post links stay `/posts/<slug>`); any other key hides the area too, and so do a `title` or string prop over 200 characters, a `menuName` over 100, the same component twice in one area, more than 2 menu widgets, more than 20 widgets, or a recent-posts `count` over 20, a tags `limit` over 50 or an archives `limit` over 24.
 
 ## Checks after publishing
 

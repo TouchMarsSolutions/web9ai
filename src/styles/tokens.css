@@ -5,10 +5,9 @@
   theme.css are unlayered, so they always beat these @layer base
   defaults -- no specificity tricks needed.
 
-  Colors use light-dark(): the first value applies in light mode, the
-  second in dark mode. Overriding a color with a plain value changes
-  both modes at once; use light-dark(<light>, <dark>) in an override to
-  keep them distinct.
+  Colors are not defined here: they live in src/styles/global.css
+  (light values in @theme static, dark values in :root.dark and in
+  @media (prefers-color-scheme: dark) :root:not(.light)).
 
   --font-body is defined by the font pipeline in astro.config.mjs, not
   here. To swap the loaded webfont, edit the fonts entry there. To use a
@@ -18,8 +17,6 @@
 
 @layer base {
 	:root {
-		color-scheme: light dark;
-
 		/* EmDash search theming */
 		--emdash-search-bg: var(--color-bg);
 		--emdash-search-text: var(--color-text);
@@ -108,25 +105,5 @@
 
 		/* Misc */
 		--tag-padding-y: 2px; /* vertical padding on tag pills */
-	}
-
-	/*
-	 * Light-mode values for browsers without light-dark() (Safari < 17.5,
-	 * Chrome < 123). Must mirror the light values above.
-	 */
-	@supports not (color: light-dark(#000, #fff)) {
-		:root {
-			color-scheme: light;
-			--color-bg: #ffffff;
-			--color-bg-subtle: #fafafa;
-			--color-text: #1a1a1a;
-			--color-text-secondary: #525252;
-			--color-muted: #8b8b8b;
-			--color-border: #e5e5e5;
-			--color-border-subtle: #f0f0f0;
-			--color-surface: #f7f7f7;
-			--color-brand: #0066cc;
-			--color-brand-hover: #0052a3;
-		}
 	}
 }

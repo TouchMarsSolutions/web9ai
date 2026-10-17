@@ -7,7 +7,8 @@ import {
 	decodeSlug,
 	getSiteSettings,
 } from "emdash";
-import { Image, PortableText, WidgetArea } from "emdash/ui";
+import { Image, PortableText } from "emdash/ui";
+import { SafeWidgetArea } from "@web9/blocks/astro";
 import { Comments, CommentForm } from "emdash/ui/comments";
 import Base from "../../layouts/Base.astro";
 import PostCard from "../../components/PostCard.astro";
@@ -18,13 +19,13 @@ const SITE_ORIGIN = (Astro.site ?? new URL("https://www.web9.ai")).origin;
 const slug = decodeSlug(Astro.params.slug);
 
 if (!slug) {
-	return Astro.redirect("/404");
+	return Astro.rewrite("/404");
 }
 
 const { entry: post, cacheHint } = await getEmDashEntry("posts", slug);
 
 if (!post) {
-	return Astro.redirect("/404");
+	return Astro.rewrite("/404");
 }
 
 if (Astro.cache?.enabled) Astro.cache.set(cacheHint);
@@ -228,7 +229,7 @@ const publishDate =
 					}
 				</header>
 
-				<div class="article-content">
+				<div class="article-content prose max-w-none">
 					<PortableText value={post.data.content} />
 				</div>
 
@@ -248,7 +249,7 @@ const publishDate =
 						</div>
 					</nav>
 					<div class="sidebar-widgets">
-						<WidgetArea name="sidebar" />
+						<SafeWidgetArea name="sidebar" />
 					</div>
 				</div>
 			</aside>
@@ -401,7 +402,7 @@ const publishDate =
 		font-weight: 500;
 		text-transform: uppercase;
 		letter-spacing: var(--tracking-wide);
-		color: var(--color-muted);
+		color: var(--color-text-secondary);
 		margin-bottom: var(--spacing-1);
 	}
 
@@ -622,7 +623,7 @@ const publishDate =
 		font-weight: 500;
 		text-transform: uppercase;
 		letter-spacing: var(--tracking-wide);
-		color: var(--color-muted);
+		color: var(--color-text-secondary);
 		margin-bottom: var(--spacing-3);
 	}
 
@@ -671,7 +672,7 @@ const publishDate =
 		font-weight: 500;
 		text-transform: uppercase;
 		letter-spacing: var(--tracking-wide);
-		color: var(--color-muted);
+		color: var(--color-text-secondary);
 		margin-bottom: var(--spacing-3);
 	}
 

@@ -1,6 +1,7 @@
 ---
 import { getEmDashCollection, getTranslations } from "emdash";
 import { PortableText } from "emdash/ui";
+import { groupDocs } from "../../packages/web9-site/lib/docs-nav.mjs";
 import Base from "../layouts/Base.astro";
 
 interface Props {
@@ -13,19 +14,17 @@ const prefix = locale === "en" ? "" : `/${locale}`;
 
 // Sidebar: every en doc, with this locale's translation swapped in where one exists (an untranslated
 // doc is still reachable under this locale's prefix through the fallback route), plus docs that exist
-// only in this locale; grouped section -> category, ordered by sort_order.
+// only in this locale; grouped section -> category, ordered by sort_order, with the old sidebar's labels.
 const byGroup = new Map();
 for (const l of new Set(["en", locale])) {
 	const { entries: list } = await getEmDashCollection("docs", { locale: l, limit: 500 });
 	// translationGroup is on every entry at runtime but not in the generated Doc type
 	for (const e of list) byGroup.set((e.data as { translationGroup?: string | null }).translationGroup ?? e.data.id, e);
 }
-const entries: any[] = [...byGroup.values()];
-const groups = new Map<string, typeof entries>();
-for (const e of [...entries].sort((a, b) => (a.data.sort_order ?? 0) - (b.data.sort_order ?? 0))) {
-	const key = `${e.data.section ?? "ai"} / ${e.data.category ?? "general"}`;
-	groups.set(key, [...(groups.get(key) ?? []), e]);
-}
+const groups: { key: string; label: string; items: any[] }[] = groupDocs([...byGroup.values()], locale);
+// A fallback page shows the en text, so search engines are pointed at the en URL.
+const canonicalLocale = fallbackLocale ?? locale;
+const canonical = new URL(`${canonicalLocale === "en" ? "" : `/${canonicalLocale}`}/docs/${doc.data.slug}`, Astro.site).href;
 
 const translations = (await getTranslations("docs", doc.data.id)).translations?.filter(
 	(t) => t.status === "published",
@@ -45,13 +44,13 @@ const notTranslated: Record<string, string> = {
 };
 ---
 
-<Base title={doc.data.title} description={doc.data.description} content={{ collection: "docs", id: doc.data.id, slug: doc.data.slug }}>
+<Base title={doc.data.title} description={doc.data.description} canonical={canonical} content={{ collection: "docs", id: doc.data.id, slug: doc.data.slug }}>
 	<div class="mx-auto my-8 grid max-w-[1200px] grid-cols-1 gap-10 px-4 md:grid-cols-[240px_minmax(0,1fr)]">
 		<nav class="text-[0.92rem] md:sticky md:top-4 md:self-start" aria-label="Docs">
 			{
-				[...groups].map(([group, items]) => (
+				groups.map(({ label, items }) => (
 					<div>
-						<p class="mt-4 mb-1.5 text-xs tracking-wider text-muted uppercase">{group}</p>
+						<p class="mt-4 mb-1.5 text-xs tracking-wider text-text-secondary uppercase">{label}</p>
 						<ul class="m-0 list-none p-0">
 							{items.map((e) => (
 								<li>

@@ -1,0 +1,41 @@
+---
+// `hero` block of pages.layout (seed blockTypes). Block props only reach text, href and src, never a
+// class attribute. Core validates the url fields on write; heroButtons runs them through safeHref again,
+// because a row that bypassed that check must not put a javascript: href on the home page.
+import { Image } from "emdash/ui";
+import { heroButtons } from "../../../packages/web9-site/lib/hero-buttons.mjs";
+import type { PageLayoutHeroBlock } from "../../../emdash-env";
+
+interface Props {
+	value: PageLayoutHeroBlock;
+	index: number;
+	blockKey: string;
+}
+const { value: b, index } = Astro.props;
+// The first block of a page carries its h1.
+const Heading = index === 0 ? "h1" : "h2";
+const buttons = heroButtons(b);
+---
+
+<section class="border-b border-border bg-surface px-4 py-16 text-center">
+	<Heading class="text-5xl font-bold tracking-tight text-text">{b.title}</Heading>
+	{b.tagline && <p class="mx-auto mt-4 max-w-2xl text-xl text-text-secondary">{b.tagline}</p>}
+	{b.image && <Image image={b.image} class="mx-auto mt-8 max-h-64 w-auto" priority />}
+	{
+		buttons.length > 0 && (
+			<div class="mt-8 flex flex-wrap justify-center gap-3">
+				{buttons.map((x) =>
+					x.primary ? (
+						<a class="rounded-md bg-brand px-6 py-3 text-lg font-medium text-on-brand no-underline hover:bg-brand-hover" href={x.href}>
+							{x.label}
+						</a>
+					) : (
+						<a class="rounded-md border border-border px-6 py-3 text-lg font-medium text-text no-underline hover:bg-bg-subtle" href={x.href}>
+							{x.label}
+						</a>
+					),
+				)}
+			</div>
+		)
+	}
+</section>
