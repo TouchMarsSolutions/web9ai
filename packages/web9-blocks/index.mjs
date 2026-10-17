@@ -129,6 +129,37 @@ export async function beforeSave(event, ctx) {
 	return { ...content, search_text: extractBlockText(content[main], BLOCK_TYPES) };
 }
 
+const MAX_REASON = 500; // core's MAX_CONTENT_POLICY_REASON_LENGTH (plugins/content-policy.ts), in code points
+const CHECK_FAILED = "Publish rejected (spec §10): the content check failed";
+
+/**
+ * A cancel decision core accepts (inspectContentPolicyDecision): exactly { cancel, reason }, the reason trimmed and
+ * non-empty, without control characters (tab, LF and CR are allowed) and at most MAX_REASON code points.
+ */
+export function cancelDecision(message) {
+	const clean = String(message).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ").trim();
+	const points = Array.from(clean);
+	const reason = points.length > MAX_REASON ? `${points.slice(0, MAX_REASON - 1).join("").trimEnd()}…` : clean;
+	return { cancel: true, reason: reason || CHECK_FAILED };
+}
+
+/**
+ * content:beforePublish and content:beforeSchedule (spec 2026-10-17 §3.2). core hands over the entry with its draft
+ * merged in and the staged slug (emdash-runtime.ts checkContentPolicy), so this judges what would go live: the save
+ * check plus the slug length. It never throws: a throw also blocks the publish but sets no cancellation, so a
+ * scheduled entry would stay scheduled and the scheduler would retry it on every tick.
+ */
+export async function beforePublish(event, ctx) {
+	try {
+		const content = event?.content;
+		const problems = entryProblems(content?.data, await fieldsFor(event?.collection, ctx?.schema), { slug: content?.slug });
+		return problems.length ? cancelDecision(`Publish rejected (spec §10): ${problems.join("; ")}`) : undefined;
+	} catch (error) {
+		console.error("[web9-blocks] the publish check failed; rejecting", error);
+		return cancelDecision(CHECK_FAILED);
+	}
+}
+
 /**
  * hreflang alternates of the home pages. Core derives them from the collection's urlPattern, `/pages/{slug}`,
  * which for the home page is a redirect to `/` (and `/zh-CN/pages/home` redirects to the English home), and a
@@ -172,10 +203,13 @@ export function createPlugin() {
 	return definePlugin({
 		id: ID,
 		version: VERSION,
-		// content:beforeSave is skipped without content:write; ctx.schema exists only with schema:read (plugins/context.ts)
-		capabilities: ["content:write", "schema:read"],
+		// content:beforeSave is skipped without content:write; ctx.schema exists only with schema:read (plugins/context.ts);
+		// the publish and schedule hooks need hooks.content-policy:register (plugins/hooks.ts:346)
+		capabilities: ["content:write", "schema:read", "hooks.content-policy:register"],
 		hooks: {
 			"content:beforeSave": beforeSave,
+			"content:beforePublish": beforePublish,
+			"content:beforeSchedule": beforePublish,
 			"page:metadata": pageMetadata,
 		},
 		admin: { portableTextBlocks: BLOCKS },

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { localizeHref } from "../web9-site/lib/nav.mjs";
-import { BLOCK_IMAGE_FIELDS, HOME_ALTERNATES, IMAGE_FIELDS, PT_FIELDS, beforeSave, createPlugin, pageMetadata } from "./index.mjs";
+import { BLOCK_IMAGE_FIELDS, HOME_ALTERNATES, IMAGE_FIELDS, PT_FIELDS, beforePublish, beforeSave, cancelDecision, createPlugin, pageMetadata } from "./index.mjs";
 
 const seed = JSON.parse(readFileSync(new URL("../../seed/seed.json", import.meta.url), "utf8"));
 const callout = { _type: "callout", _key: "c1", tone: "tip", title: "T", body: "probe-word" };
@@ -195,15 +195,69 @@ describe("content:beforeSave", () => {
 	it("falls back to the pinned fields when the schema read fails", async () => {
 		const schema = { getCollection: async () => { throw new Error("db down"); } };
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-		await expect(beforeSave({ collection: "docs", content: { body: [{ _type: "htmlBlock" }] } }, { schema })).rejects.toMatchObject({
-			message: expect.stringContaining("body: #0 htmlBlock"),
-		});
-		expect((await beforeSave({ collection: "docs", content: { body: [callout] } }, { schema })).search_text).toBe("T\nprobe-word");
-		expect(warn).toHaveBeenCalled();
-		warn.mockRestore();
+		try {
+			await expect(beforeSave({ collection: "docs", content: { body: [{ _type: "htmlBlock" }] } }, { schema })).rejects.toMatchObject({
+				message: expect.stringContaining("body: #0 htmlBlock"),
+			});
+			expect((await beforeSave({ collection: "docs", content: { body: [callout] } }, { schema })).search_text).toBe("T\nprobe-word");
+			expect(warn).toHaveBeenCalled();
+		} finally {
+			warn.mockRestore();
+		}
 	});
 	it("declares schema:read (ctx.schema exists only with it) besides content:write", () => {
 		expect(createPlugin().capabilities).toEqual(expect.arrayContaining(["content:write", "schema:read"]));
+	});
+});
+
+describe("content:beforePublish / content:beforeSchedule (spec 2026-10-17 §3.2)", () => {
+	const entry = (data, slug = "ok") => ({ collection: "docs", content: { id: "x", slug, data } });
+	it("allows an entry the save check passes", async () => {
+		expect(await beforePublish(entry({ title: "T", body: [callout] }))).toBeUndefined();
+		expect(await beforePublish({ collection: "docs", content: { id: "x", slug: null } })).toBeUndefined();
+	});
+	it("cancels a draft the save check rejects, and a staged slug over the limit", async () => {
+		expect(await beforePublish(entry({ body: [{ _type: "htmlBlock", _key: "h" }] }))).toEqual({
+			cancel: true,
+			reason: "Publish rejected (spec §10): body: #0 htmlBlock: raw HTML blocks are not allowed; use Markdown or a Web9 block",
+		});
+		expect(await beforePublish(entry({ title: "T" }, "s".repeat(101)))).toEqual({
+			cancel: true,
+			reason: "Publish rejected (spec §10): slug: at most 100 characters (got 101)",
+		});
+	});
+	it("guards the live schema's fields through ctx.schema", async () => {
+		const schema = { getCollection: async () => ({ fields: [{ slug: "summary", type: "portableText" }] }) };
+		const d = await beforePublish({ collection: "docs", content: { id: "x", data: { summary: [{ _type: "iframe" }] } } }, { schema });
+		expect(d.reason).toContain("summary: #0 iframe");
+	});
+	it("answers only with a decision core accepts: two keys, at most 500 code points, no control characters", async () => {
+		const many = Array.from({ length: 60 }, (_, k) => ({ _type: "htmlBlock", _key: `h${k}` }));
+		const d = await beforePublish(entry({ body: many }));
+		expect(Object.keys(d)).toEqual(["cancel", "reason"]);
+		expect(Array.from(d.reason).length).toBeLessThanOrEqual(500);
+		expect(d.reason.endsWith("…")).toBe(true);
+		expect(cancelDecision("a\u0007b\tc\nd\u007f")).toEqual({ cancel: true, reason: "a b\tc\nd" });
+		expect(Array.from(cancelDecision("😀".repeat(600)).reason)).toHaveLength(500);
+		expect(cancelDecision(" \u0001 ")).toEqual({ cancel: true, reason: "Publish rejected (spec §10): the content check failed" });
+	});
+	it("cancels instead of throwing when the check itself fails (a throw would leave a scheduled entry scheduled)", async () => {
+		const error = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			const ctx = { get schema() { throw new Error("boom"); } };
+			expect(await beforePublish(entry({ title: "T" }), ctx)).toEqual({ cancel: true, reason: "Publish rejected (spec §10): the content check failed" });
+			expect(await beforePublish(undefined)).toBeUndefined();
+			expect(error).toHaveBeenCalledOnce();
+		} finally {
+			error.mockRestore();
+		}
+	});
+	it("is registered for publish and schedule, with the content-policy capability", () => {
+		const plugin = createPlugin();
+		expect(plugin.hooks["content:beforePublish"]).toMatchObject({ handler: beforePublish });
+		expect(plugin.hooks["content:beforeSchedule"]).toMatchObject({ handler: beforePublish });
+		// definePlugin normalizes: content:write adds the implied content:read (plugins/types.ts PLUGIN_CAPABILITY_IMPLICATIONS)
+		expect(plugin.capabilities).toEqual(expect.arrayContaining(["content:write", "schema:read", "hooks.content-policy:register"]));
 	});
 });
 
