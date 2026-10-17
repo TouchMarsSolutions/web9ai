@@ -6392,3 +6392,24 @@ Expected：`git status --short` 没有输出（`.local/`、`.wrangler/`、`dist/
 - worker 压缩后约 4.9 MiB，超过免费套餐上限（计划 3 第 1 步决定）。
 - `upsertEntry` 不比较 taxonomy（`content_get` 不返回它们）：只改了 post 的 tag，runner 会报 `unchanged`，不会更新。要改 tag 就在后台或用 MCP 直接改。
 - 旧站四个 feed（`/blog/rss.xml`、`/blog/atom.xml`、`/zh-CN/blog/rss.xml`、`/zh-CN/blog/atom.xml`）都在 `astro.config.mjs` 里 301 到 `/rss.xml`，`verify` 会检查；切换后看 404 日志里还有没有别的 feed URL。
+- seed 测试：没有测试钉住 terms 的行为（`applySeed` 的 `includeContent` 为 true 时 5 个 term，false 时 0 个）；`seed.test.mjs` 里标题写 "as en terms" 的用例没有断言 locale。
+- `html.mjs` 给所有链接加 `target="_blank"`，站内链接也是（`markdown.mjs` 只给站外链接加）；`html.mjs` 只处理绕过 guard 进库的行。
+- `html.mjs` 从 `markdown.mjs` 引 `ALLOWED_TAGS`，所以也会加载 `marked`。
+- Markdown 字段里的 `!important` 不经校验进入输出（只记录：站点 CSS 不用 `!important`，inline style 本来就优先）。
+- `css-value.mjs`：`border-radius: 9999px`（药丸形）超过 1000 的上限被拒，`turn`、`ch` 单位也被拒；需要时再放宽。
+- `width`、`max-width` 的 `%` 上限是 2000，嵌套时会叠加（只在文档流里横向溢出，盖不住站点框架）；可以改成 100。
+- `img` 不在可设盒属性的标签里（`img` 上的 width、padding、border 会被去掉），`hr`、`menu` 也没有盒属性。
+- 嵌套标题（`<h1><div><h1>…`）不用 style 也会让 prose 字号叠加；可加 `.prose :is(h1,h2,h3,h4,h5,h6) :is(h1,h2,h3,h4,h5,h6) { font-size: inherit }` 或 sanitize-html 的 `nestingLimit`。
+- ruby 过滤只作用于 sanitize-html 的默认标签数组：以后 concat 进 ruby 标签，或 sanitize-html 升级加了 ruby 类标签，就会绕过（`markdown.test.mjs` 钉住了今天的集合）。
+- **AI PAT 之前修**：单页 CPU。在现有上限内，一个 1000 span × 20 mark 的块约 0.3 s（`buildMarksTree`），每个顶满上限的块约 0.7 s；body 没有总量上限。
+- **AI PAT 之前修**：guard 不进表格单元格。core 的 normalize 保留 3000 个 mark、2 万个 span，那一页会 RangeError 或耗时 13 s；单元格内容也要加上限。
+- **AI PAT 之前修**：块形状错误会让本页 500：`buttons.buttons` 是 null、字符串、数字或对象，`tabs` 里有 null，`tools` 里有 null 或 `tagline` 是数字（`Buttons.astro`、`Tabs.astro`、`ToolGrid.astro`）。
+- `embedSrc` 丢掉 Vimeo 的 `h=`（unlisted 视频的 hash）和 `t=`，unlisted 的 Vimeo 视频放不出来。
+- 样式小问题（Task 4）：footer widget 标题的样式丢了；≤640px 时 header 仍有 `border-b`；`sm` 断点和 640px 的规则重叠。
+- `check-public-css` 的两个漏网（Task 5，之后没有复查）：`h-[100\76_h]`（转义吞掉了 `_`）能通过；arbitrary variant 里转义的 `\5b`、`\28`（例如 `data-[x=\5b]:z-50`）也能通过。
+- `verify` 没有正文标记（body 为空也通过）；runner 不比较 `publishedAt`（taxonomy 见上文）；菜单比较忽略 `parentId`、`cssClasses`、`titleAttr`（`cssClasses` 不渲染）。
+- spec §7 的 category 遮蔽说明把 `/zh-CN` 下的同名规则也算上了，但站点没有 `/zh-CN/category/[slug]` 路由；redirects 步骤中途遇到组外规则的 409 停下时，之前已建的规则保留，不回滚。
+- 首页 feature 图片是 12rem × auto（`EmDashImage` 的 scoped `height:auto` 盖过了 `size-48`）。
+- zh 首页没有自己的行时仍声明 zh-CN hreflang（迁移后不会出现这种状态）；空库时的首页占位没有测过。
+- fallback 页面（zh-CN 下显示英文正文）的 `<html lang>` 仍是 `zh-CN`。
+- callout、tabs、details 正文里没闭合的 ``` 会让 `.md` 里之后的站内链接保持相对路径（`absolutize` 以为还在代码块里）。

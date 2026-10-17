@@ -188,6 +188,7 @@
   - `sections` 只要 `content:write` 就能写（core `astro/middleware/auth.ts` 的 SCOPE_RULES），没有 guard；只要没有页面渲染它就是安全的，所以给它加 guard 之前，任何页面都不能渲染 `sections`。
   - `site_import_*`（site transfer import）和 WordPress import 不经过 `content:beforeSave`；它们要 `transfer:import`、`import:execute`（Admin），transfer 还要管理员批准。所以 AI 的 token 永远不能有 transfer 或 import scope，管理员也不能批准它发起的 transfer 请求。
   - 媒体一直经 `/_emdash/api/media/file/...` 提供（`sandbox` CSP、`nosniff`、SVG 和 PDF 作为附件），不改成公开的 R2 域名：那样上传的 SVG 会不带这些头直接内联渲染。
+  - 计划 2 文末"未决事项"里标了 **AI PAT 之前修** 的三项：单页 CPU、表格单元格不受 guard 约束、块形状错误导致本页 500。
 - `DocsPage.astro` 的侧栏每个语言只取 `limit: 500` 篇 doc，没有 `orderBy`：超过 500 篇时侧栏会静默少掉条目；而且每个 doc 页都打印全部 doc 的 title（与上面长度上限同一类问题）。
 - 路径里有残缺的百分号编码（`/docs/%E0%A4%A`、`/%E0%A4%A`）时返回 500。这是 core 的既有行为，响应不带 `Cache-Control`、不进共享缓存；生产上再确认一次。
 - `npm audit` 有两项：katex（经 mermaid）、postcss-selector-parser（经 `@tailwindcss/typography`）；两项的修复都是 breaking，计划 3 评估后再升级。
