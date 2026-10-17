@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { describe, expect, it, vi } from "vitest";
 import { renderInlineMarkdown, renderMarkdown, safeTone } from "./markdown.mjs";
 
 describe("renderMarkdown sanitizer", () => {
@@ -183,6 +184,25 @@ describe("safeTone", () => {
 	it("refuses anything else, so block data cannot inject classes", () => {
 		expect(safeTone("x fixed inset-0 z-50")).toBe("info");
 		expect(safeTone(undefined)).toBe("info");
+	});
+});
+
+describe("renderMarkdown and renderInlineMarkdown when marked throws", () => {
+	it("render nothing and warn without the field: 3000 nested quotes overflow marked's recursion", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			expect(renderMarkdown(`${"> ".repeat(3000)}a`)).toBe("");
+			expect(warn).toHaveBeenCalledExactlyOnceWith("web9-blocks: a Markdown field did not render (RangeError)");
+		} finally {
+			warn.mockRestore();
+		}
+	});
+	it("keep both renderers' parse and sanitize inside a try (source pin; it is the inline renderer's only coverage)", () => {
+		const src = readFileSync(new URL("./markdown.mjs", import.meta.url), "utf8");
+		for (const [name, parse] of [["renderMarkdown", "marked.parse(dedent(src))"], ["renderInlineMarkdown", "marked.parseInline(src)"]]) {
+			const body = src.slice(src.indexOf(`export function ${name}(src) {`)).split("\n}\n")[0];
+			expect(body, name).toMatch(new RegExp(`try \\{\\n\\t\\treturn sanitizeHtml\\(${parse.replace(/[()]/g, "\\$&")}, SANITIZE\\);\\n\\t\\} catch \\(e\\) \\{\\n\\t\\treturn failed\\(e\\);`));
+		}
 	});
 });
 

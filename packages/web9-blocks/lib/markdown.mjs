@@ -132,13 +132,29 @@ function dedent(src) {
 	return lines.map((l) => l.slice(min)).join("\n");
 }
 
+// marked recurses once per nested list or quote, so a deep enough nest overflows the stack (about 1900 markers on one line
+// on Node's main thread). The save check caps markers per line (markdown-density.mjs); a field that throws anyway, stored
+// before the cap or nested some other way, renders as nothing instead of taking the page down.
+const failed = (e) => {
+	console.warn(`web9-blocks: a Markdown field did not render (${e instanceof Error ? e.name : typeof e})`);
+	return "";
+};
+
 // A stored field that is not a string renders as nothing (lib/text.mjs): String() on it could throw and take the page down
 export function renderMarkdown(src) {
 	if (typeof src !== "string" || !src) return "";
-	return sanitizeHtml(marked.parse(dedent(src)), SANITIZE);
+	try {
+		return sanitizeHtml(marked.parse(dedent(src)), SANITIZE);
+	} catch (e) {
+		return failed(e);
+	}
 }
 
 export function renderInlineMarkdown(src) {
 	if (typeof src !== "string" || !src) return "";
-	return sanitizeHtml(marked.parseInline(src), SANITIZE);
+	try {
+		return sanitizeHtml(marked.parseInline(src), SANITIZE);
+	} catch (e) {
+		return failed(e);
+	}
 }
