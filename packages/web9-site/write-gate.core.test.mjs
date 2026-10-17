@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { GATED_PATTERNS } from "./lib/write-gate.mjs";
 
 const core = (p) => new URL(`../../node_modules/emdash/src/${p}`, import.meta.url);
+const sdk = (p) => new URL(`../../node_modules/@modelcontextprotocol/sdk/dist/esm/server/${p}`, import.meta.url);
 
 describe("core write paths the gate was checked against", () => {
 	it("MCP tools", () => {
@@ -43,6 +44,19 @@ describe("core write paths the gate was checked against", () => {
 		]);
 		expect(routes("admin/bylines")).toEqual(["[id]/index.ts", "[id]/translations.ts", "index.ts"]);
 		expect(routes("widget-areas")).toEqual(["[name].ts", "[name]/reorder.ts", "[name]/widgets.ts", "[name]/widgets/[id].ts", "index.ts"]);
+	});
+	it("the 413 bodies payloadTooLarge copies: core's parseBody and the MCP SDK's request body limit", () => {
+		// parseBody refuses only a declared Content-Length over 10 MiB (it reads a chunked body without a cap), which is why the gate answers 413 itself
+		const parse = readFileSync(core("api/parse.ts"), "utf8");
+		expect(parse).toContain("const MAX_BODY_SIZE = 10 * 1024 * 1024;");
+		expect(parse).toContain('if (contentLength && parseInt(contentLength, 10) > MAX_BODY_SIZE) {\n\t\treturn apiError("PAYLOAD_TOO_LARGE", "Request body too large", 413);');
+		// The one SDK copy emdash resolves (no nested node_modules/emdash/node_modules/@modelcontextprotocol)
+		expect(() => readdirSync(new URL("../../node_modules/emdash/node_modules/@modelcontextprotocol", import.meta.url))).toThrow();
+		const body = readFileSync(sdk("requestBody.js"), "utf8");
+		expect(body).toContain("export const DEFAULT_MAX_REQUEST_BODY_SIZE = 4 * 1024 * 1024;");
+		expect(body).toContain("return `Payload Too Large: Request body must not exceed ${maxBytes} bytes`;");
+		expect(readFileSync(sdk("webStandardStreamableHttp.js"), "utf8")).toContain("return this.createJsonErrorResponse(413, -32000, message);");
+		expect(readFileSync(core("astro/routes/api/mcp.ts"), "utf8")).not.toContain("maxRequestBodySize");
 	});
 	it("route patterns the gate keys on, and the patterns around them", () => {
 		// The gate matches context.routePattern against these strings, so a rename in emdash must fail here, not pass silently

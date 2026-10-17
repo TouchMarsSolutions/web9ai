@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GATED_PATTERNS, MAX_GATED_BODY_BYTES, gatedRequest, readGatedBody, writeGateResponse } from "./write-gate.mjs";
+import { GATED_PATTERNS, MAX_GATED_BODY_BYTES, gatedRequest, payloadTooLarge, readGatedBody, writeGateResponse } from "./write-gate.mjs";
 
 const long = (n) => "x".repeat(n);
 const call = (name, args, id = 7) => ({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
@@ -195,6 +195,26 @@ describe("writeGateResponse: MCP", () => {
 	});
 });
 
+describe("payloadTooLarge", () => {
+	it("answers a REST route in core's shape (api/parse.ts: apiError PAYLOAD_TOO_LARGE, 413)", () => {
+		for (const pattern of [CONTENT, CONTENT_ID, MENU_ITEMS, MENU_ITEM, TERMS, TERM, TERM_TRANSLATIONS, BYLINES, BYLINE, BYLINE_TRANSLATIONS]) {
+			expect(payloadTooLarge(pattern), pattern).toEqual({
+				status: 413,
+				body: { success: false, error: { code: "PAYLOAD_TOO_LARGE", message: "Request body too large" } },
+			});
+		}
+	});
+	it("answers the MCP endpoint in the shape of the MCP SDK's own 413 (requestBody.js, 4 MiB; id null)", () => {
+		expect(payloadTooLarge(MCP)).toEqual({
+			status: 413,
+			body: { jsonrpc: "2.0", error: { code: -32000, message: "Payload Too Large: Request body must not exceed 4194304 bytes" }, id: null },
+		});
+	});
+	it("has an answer for every pattern the gate names", () => {
+		for (const pattern of GATED_PATTERNS) expect(payloadTooLarge(pattern).status, pattern).toBe(413);
+	});
+});
+
 describe("readGatedBody", () => {
 	const streamOf = (...chunks) =>
 		new ReadableStream({
@@ -216,7 +236,7 @@ describe("readGatedBody", () => {
 		const bom = new Uint8Array([0xef, 0xbb, 0xbf]);
 		const text = await readGatedBody(streamOf(bom, '{"slug":"a"}'));
 		expect(JSON.parse(text)).toEqual({ slug: "a" });
-		expect(JSON.parse(await readGatedBody(streamOf("﻿{}")))).toEqual({});
+		expect(JSON.parse(await readGatedBody(streamOf("\uFEFF{}")))).toEqual({});
 	});
 	it("gives null as soon as more than MAX_GATED_BODY_BYTES have arrived, without reading on", async () => {
 		const chunk = new Uint8Array(1024 * 1024);

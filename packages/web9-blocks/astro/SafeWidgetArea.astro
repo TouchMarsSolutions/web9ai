@@ -19,16 +19,18 @@ const { name, class: className } = Astro.props;
 let safe = false;
 try {
 	const area = await getWidgetArea(name);
-	safe = widgetAreaIsSafe(area);
-	if (!safe) console.warn(`[web9-blocks] widget area "${name}" fails the widget check (a content widget, an unknown type, component or prop, a string over its length cap, or more than 20 widgets); not rendered`);
+	let ok = widgetAreaIsSafe(area);
+	if (!ok) console.warn(`[web9-blocks] widget area "${name}" fails the widget check (a content widget, an unknown type, component or prop, a string over its length cap, or more than 20 widgets); not rendered`);
 	else {
 		for (const widget of area?.widgets ?? []) {
 			if (widget.type !== "menu" || !widget.menuName || typeof widget.menuName !== "string") continue;
 			if (menuIsSafe(await getMenu(widget.menuName))) continue;
-			safe = false;
+			ok = false;
 			console.warn(`[web9-blocks] widget area "${name}" holds menu "${widget.menuName}", which fails the menu check (more than 50 items, a label over 80 characters, a url over 2048 or a titleAttr over 200); not rendered`);
 		}
 	}
+	// The only place `safe` becomes true: a throw from getMenu above leaves it false
+	safe = ok;
 } catch (error) {
 	console.warn(`[web9-blocks] widget area "${name}" could not be checked; not rendered`, error);
 }

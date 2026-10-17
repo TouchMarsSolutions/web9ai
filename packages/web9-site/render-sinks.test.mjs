@@ -136,6 +136,17 @@ describe("footer menu widget", () => {
 		expect(source).toContain("menuIsSafe(");
 		expect(source).toContain("{safe && <WidgetArea");
 	});
+	it("fails closed: `safe` becomes true only by the last statement of the try, after the widget check and every menu read", () => {
+		const frontmatter = raw("packages/web9-blocks/astro/SafeWidgetArea.astro").split("---")[1];
+		// Every assignment to `safe`: the initial false, and the verdict `ok` (so a throw from getMenu leaves it false)
+		expect([...frontmatter.matchAll(/\bsafe = ([^;]+);/g)].map((m) => m[1])).toEqual(["false", "ok"]);
+		// `ok` starts as the widget check and can only be set to false afterwards
+		expect([...frontmatter.matchAll(/\bok = ([^;]+);/g)].map((m) => m[1])).toEqual(["widgetAreaIsSafe(area)", "false"]);
+		// `safe = ok;` is the last statement of the try block: nothing but whitespace between it and the catch
+		expect(frontmatter).toMatch(/\n\tsafe = ok;\n\} catch \(error\) \{/);
+		// ...and it comes after the menu read
+		expect(frontmatter.indexOf("await getMenu(widget.menuName)")).toBeLessThan(frontmatter.indexOf("safe = ok;"));
+	});
 });
 
 describe("write gate middleware", () => {
@@ -152,5 +163,12 @@ describe("write gate middleware", () => {
 		expect(source).toContain("readGatedBody(request.clone().body)");
 		expect(source).toContain("MAX_GATED_BODY_BYTES");
 		expect(source).not.toMatch(/\.text\(\)/);
+	});
+	it("answers a body over the cap itself with payloadTooLarge (core caps only a declared length): both branches, never next()", () => {
+		const source = raw("src/middleware.ts");
+		expect(source).toContain("payloadTooLarge(routePattern)");
+		expect(source).toMatch(/content-length"\)\) > MAX_GATED_BODY_BYTES\) return tooLarge\(\);/);
+		expect(source).toMatch(/if \(text === null\) return tooLarge\(\);/);
+		expect([...source.matchAll(/return tooLarge\(\)/g)]).toHaveLength(2);
 	});
 });

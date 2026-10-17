@@ -7,10 +7,16 @@
 // re-normalizes (a backslash becomes a slash, dot segments resolve), so a path check and the router can disagree,
 // while the matched pattern is by construction the route that runs. Pure: the middleware passes the method, the
 // pattern and the parsed JSON body (readGatedBody only reads the stream it is given). Anything the gate cannot read (a
-// body that is not JSON, an unknown route or tool) passes through to core, which validates it.
+// body that is not JSON, an unknown route or tool) passes through to core, which validates it. A body over
+// MAX_GATED_BODY_BYTES is the exception: core refuses only a declared Content-Length (a chunked body is read with no cap),
+// so on a gated route the gate answers it itself with payloadTooLarge instead of handing it on unread.
 import { LIMITS, lengthProblem } from "../../web9-blocks/lib/limits.mjs";
 
-/** core's parseBody limit (emdash api/parse.ts MAX_BODY_SIZE): a larger body is core's 413, so the gate does not read it. */
+/**
+ * core's parseBody limit (emdash api/parse.ts MAX_BODY_SIZE). core enforces it only on a declared Content-Length; a
+ * chunked body is parsed with no cap. So the gate reads a body up to this size, and on a gated route answers a larger
+ * one with payloadTooLarge instead of passing it on unchecked.
+ */
 export const MAX_GATED_BODY_BYTES = 10 * 1024 * 1024;
 
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH"]);
@@ -114,10 +120,30 @@ export function writeGateResponse(method, routePattern, body) {
 	return { status: 400, body: { success: false, error: { code: "VALIDATION_ERROR", message: rejected(problems) } } };
 }
 
+/** The MCP SDK's own request body limit (@modelcontextprotocol/sdk server/requestBody.js, the copy emdash resolves). */
+const MCP_SDK_MAX_BODY_BYTES = 4 * 1024 * 1024;
+
+/**
+ * The gate's 413 for a body over MAX_GATED_BODY_BYTES (a declared Content-Length or a stream that ran past it), in the
+ * shape of what the route would have answered: core's apiError for a REST route (api/parse.ts), the MCP SDK's JSON-RPC
+ * 413 for the MCP endpoint (webStandardStreamableHttp.js, createJsonErrorResponse(413, -32000, ...), with its 4 MiB limit
+ * in the message).
+ */
+export function payloadTooLarge(routePattern) {
+	if (routePattern === MCP) {
+		return {
+			status: 413,
+			body: { jsonrpc: "2.0", error: { code: -32000, message: `Payload Too Large: Request body must not exceed ${MCP_SDK_MAX_BODY_BYTES} bytes` }, id: null },
+		};
+	}
+	return { status: 413, body: { success: false, error: { code: "PAYLOAD_TOO_LARGE", message: "Request body too large" } } };
+}
+
 /**
  * The text of a request body stream (null: no body, read as ""), without a leading byte order mark (which would make
- * JSON.parse throw and the gate fail open), or null as soon as more than MAX_GATED_BODY_BYTES have arrived: the
- * gate does not buffer a body core refuses anyway, whether or not it declared a Content-Length.
+ * JSON.parse throw and the gate fail open), or null as soon as more than MAX_GATED_BODY_BYTES have arrived, without
+ * buffering the rest, whether or not a Content-Length was declared. The caller must not pass such a body on: core caps
+ * only a declared length, so on a gated route the middleware answers it with payloadTooLarge.
  * @param {ReadableStream<Uint8Array> | null} body
  * @returns {Promise<string | null>}
  */
@@ -139,5 +165,5 @@ export async function readGatedBody(body) {
 		// Stops reading a stream left unfinished (a body over the cap); a no-op on one that has ended
 		reader.cancel().catch(() => {});
 	}
-	return (text + decoder.decode()).replace(/^﻿/, "");
+	return (text + decoder.decode()).replace(/^\uFEFF/, "");
 }
