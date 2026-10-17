@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { unstable_readConfig } from "wrangler";
 import { CANONICAL_ORIGIN, canonicalRedirect, canonicalResponse } from "./canonical-host.mjs";
 
 describe("canonicalRedirect", () => {
@@ -59,5 +61,27 @@ describe("canonicalResponse", () => {
 	it("runs as the first thing in src/worker.ts's fetch, before EmDash's handler", () => {
 		const worker = readFileSync(new URL("../../../src/worker.ts", import.meta.url), "utf8");
 		expect(worker).toMatch(/fetch\(request, env, ctx\) \{\s*return canonicalResponse\(request\) \?\? handler\.fetch!\(request, env, ctx\);\s*\}/);
+	});
+});
+
+describe("wrangler.jsonc", () => {
+	// Read the way the build reads it, so wrangler also validates the route shape (an unknown key throws)
+	const config = unstable_readConfig({ config: fileURLToPath(new URL("../../../wrangler.jsonc", import.meta.url)) }, { hideWarnings: true });
+
+	it("binds exactly the two production hosts, as Custom Domains (Cloudflare creates their DNS records and certificates)", () => {
+		expect(config.routes).toEqual([
+			{ pattern: "www.web9.ai", custom_domain: true },
+			{ pattern: "web9.ai", custom_domain: true },
+		]);
+	});
+	it("serves every bound host from the canonical origin or redirects it there", () => {
+		for (const { pattern } of config.routes) {
+			const target = canonicalRedirect(`https://${pattern}/`);
+			expect(target ?? `https://${pattern}/`, pattern).toBe(`${CANONICAL_ORIGIN}/`);
+		}
+	});
+	it("keeps workers.dev on, where the owner's passkey lives until Change domain", () => {
+		expect(config.workers_dev).toBe(true);
+		expect(config.preview_urls).toBe(false);
 	});
 });

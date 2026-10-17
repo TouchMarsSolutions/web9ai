@@ -5,6 +5,15 @@
 	"compatibility_date": "2026-02-24",
 	"compatibility_flags": ["nodejs_compat"],
 	"observability": { "enabled": true },
+	// Custom Domains (not routes): Cloudflare creates the DNS record and the certificate for each, so no origin record
+	// is needed once the GitHub Pages records are gone. www.web9.ai is canonical; src/worker.ts sends the apex there
+	// with a 301 (308 for methods other than GET and HEAD). A non-interactive `wrangler deploy` replaces conflicting DNS
+	// records without asking, so the first deploy with these comes after the old records are deleted by id and a
+	// changeset preflight shows no conflict (plan 3 Task 4 Step 3).
+	"routes": [
+		{ "pattern": "www.web9.ai", "custom_domain": true },
+		{ "pattern": "web9.ai", "custom_domain": true },
+	],
 	// The Worker answers on workers.dev until the cutover and keeps it after: the owner's first passkey is bound to
 	// that hostname until Change domain moves the login (plan 3 Task 4). wrangler may turn workers.dev off once
 	// routes are configured unless it is set explicitly.
@@ -12,7 +21,7 @@
 	// No per-version preview URLs (subdomain.previews_enabled = false). This only hides versions: one uploaded with
 	// `wrangler versions upload` still carries the production D1 and R2 bindings, and EmDash runs core migrations on
 	// a version's first request. So Workers Builds also keeps non-production branch builds off, and nobody runs
-	// `wrangler dev --remote` (plan 3 Task 5).
+	// `wrangler dev --remote` (plan 3 Global Constraints, Task 5).
 	"preview_urls": false,
 	"d1_databases": [{ "binding": "DB", "database_name": "web9-ai" }],
 	"r2_buckets": [{ "binding": "MEDIA", "bucket_name": "web9-ai-media" }],
