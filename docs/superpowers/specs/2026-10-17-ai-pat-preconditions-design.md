@@ -78,8 +78,9 @@
 | term `slug` | 100 | 11 | 闸门 |
 | byline `displayName` | 80 | 无 | 闸门（REST `admin/bylines` 和 MCP） |
 | byline `slug` | 100 | 无 | 闸门（REST `admin/bylines` 和 MCP） |
+| byline `avatarMediaId` | 64 | 无 | 闸门（REST `admin/bylines` 和 MCP）；`guard-scan` |
 
-"现有最大值"是 2026-10-17 在本地库里读出来的（MCP 只读，39 个条目、1 个菜单、5 个 term）。`seo.image`、`seo.canonical`、`roleLabel`、`titleAttr` 和 byline 现在库里没有值。`category` 的现有最大值是 2026-10-17 最后一轮修复时读的（39 个条目、38 个 revision）。
+"现有最大值"是 2026-10-17 在本地库里读出来的（MCP 只读，39 个条目、1 个菜单、5 个 term）。`seo.image`、`seo.canonical`、`roleLabel`、`titleAttr` 和 byline 现在库里没有值。`avatarMediaId` 是 PR 评审修复轮加的：`PostCard.astro` 和 `posts/index.astro` 把它原样拼进头像的 `src`（`/_emdash/api/media/file/${id}`），core 的 schema 只要求字符串（`api/schemas/bylines.ts:96`、`:139`、`:159`），没有上限；core 的 media id 是 26 个字符的 ULID，上限 64（`LIMITS.id`）。块里的文本字段（Markdown、代码、`pages.layout` 的文字）的上限见 §3.6。`category` 的现有最大值是 2026-10-17 最后一轮修复时读的（39 个条目、38 个 revision）。
 
 **guard 里的长度**（title、description、excerpt、category）：按字段名作用于所有 collection，值是字符串时才检查，其他类型交给 core。`category` 是 docs 侧栏的分组名：没有对应显示名的 category 原样当分组名打印在每个 doc 页的侧栏上，所以 `docs-nav.mjs` 的 `groupLabel` 渲染时也按 80 截断（分组的 key 不截断）。保存时（`beforeSave`）、发布时（§3.2）、扫描时（§3.2）用的是同一个函数。
 
@@ -87,7 +88,7 @@
 
 - 只看 POST、PUT、PATCH，`context.routePattern` 命中下面的表才读请求体。用 `readGatedBody(request.clone().body)` 读，去掉开头的 BOM（否则 `JSON.parse` 抛错，闸门就放行了），然后 `JSON.parse`，不看 Content-Type，因为 core 也不看。解析失败、stream 出错、请求体不是对象或数组时放行，交给 core 报错。闸门只拦能确定超长的请求。
 - 闸门按 `context.routePattern` 判定，也就是 Astro 匹配到的、由 emdash 注入的路由 pattern，从不看 URL。原因：Astro 用解码后的路径字符串做路由匹配，而 `context.url.pathname` 又被 URL setter 规范化了一次（`\` 变成 `/`，dot segment 被解析掉，`node_modules/astro/dist/core/fetch/fetch-state.js:236-239`），按路径判定的闸门和路由会对不上：`PUT …/terms/a%5Cb` 和 `…/terms/%252E%252E` 都到了 `terms/[slug]`，却绕过了按路径判定的闸门（评审时发现，已修，用 live 探针验证）。匹配到的 pattern 就是将要运行的路由，两边不会不一致。
-- 请求体上限 10 MiB（`MAX_GATED_BODY_BYTES`，等于 core 的 `MAX_BODY_SIZE`）。超限时（声明的 Content-Length 超限，或没有 Content-Length 的 chunked body 读到超限），闸门自己返回 413，格式同该路由：REST 是 `PAYLOAD_TOO_LARGE`（同 core），MCP 是 SDK 的 JSON-RPC 413（`code: -32000`，`id: null`，message 里写的是 SDK 自己的 4 MiB 上限）。原因：core 的 `parseBody` 只拒绝声明了超限 Content-Length 的请求，chunked body 没有上限（`node_modules/emdash/src/api/parse.ts:31-39`），放行等于闸门对 chunked 的大请求失效。读 body 时边读边数，超限就停，不缓冲剩下的部分。
+- 请求体上限 10 MiB（`MAX_GATED_BODY_BYTES`，等于 core 的 `MAX_BODY_SIZE`）。超限时（声明的 Content-Length 超限，或没有 Content-Length 的 chunked body 读到超限），闸门自己返回 413，格式同该路由：REST 是 `PAYLOAD_TOO_LARGE`（同 core），MCP 是 SDK 的 JSON-RPC 413（`code: -32000`，`id: null`，message 里写的是 SDK 自己的 4 MiB 上限）。MCP 的文案说 `4194304 bytes`、闸门却在 10 MiB 才代答，这是有意的：SDK 自己对每个 MCP 请求体限 4 MiB（`@modelcontextprotocol/sdk` `server/requestBody.js` 的 `DEFAULT_MAX_REQUEST_BODY_SIZE`，chunked 也一样边读边数），所以 4 MiB 才是 MCP 真正生效的上限，4–10 MiB 的请求由 SDK 自己回 413；闸门只在超过它自己读取的 10 MiB 时代答，照抄 SDK 的格式和文案，客户端看到的 413 不管是谁给的都一模一样。原因：core 的 `parseBody` 只拒绝声明了超限 Content-Length 的请求，chunked body 没有上限（`node_modules/emdash/src/api/parse.ts:31-39`），放行等于闸门对 chunked 的大请求失效。读 body 时边读边数，超限就停，不缓冲剩下的部分。
 - REST（路径写成路由 pattern）：
 
   | 路由 pattern | 检查 |
@@ -95,7 +96,7 @@
   | `/_emdash/api/content/[collection]`、`/_emdash/api/content/[collection]/[id]` | `slug`、`seo.image`、`seo.canonical`、`bylines[].roleLabel` |
   | `/_emdash/api/menus/[name]/items`、`/_emdash/api/menus/[name]/items/[id]` | `label`、`customUrl`、`titleAttr`、`target` |
   | `/_emdash/api/taxonomies/[name]/terms`、`/_emdash/api/taxonomies/[name]/terms/[slug]`、`/_emdash/api/taxonomies/[name]/terms/[slug]/translations` | `label`、`slug` |
-  | `/_emdash/api/admin/bylines`、`/_emdash/api/admin/bylines/[id]`、`/_emdash/api/admin/bylines/[id]/translations` | `displayName`、`slug` |
+  | `/_emdash/api/admin/bylines`、`/_emdash/api/admin/bylines/[id]`、`/_emdash/api/admin/bylines/[id]/translations` | `displayName`、`slug`、`avatarMediaId` |
 
 - MCP（`/_emdash/api/mcp`）：请求体是一条消息或消息数组。每条 `method: "tools/call"` 按 `params.name` 检查 `params.arguments`：
 
@@ -104,7 +105,7 @@
   | `content_create`、`content_update` | `slug`、`seo.image`、`seo.canonical`、`bylines[].roleLabel` |
   | `menu_set_items` | `items` 的长度，以及每项的 `label`、`customUrl`、`titleAttr`、`target`（items 是平铺的，没有嵌套） |
   | `taxonomy_create_term`、`taxonomy_update_term` | `label`、`slug` |
-  | `byline_create`、`byline_update` | `displayName`、`slug` |
+  | `byline_create`、`byline_update` | `displayName`、`slug`、`avatarMediaId` |
 
 - 超长时：
   - REST 返回 400，body 用 core 的错误格式 `{ "success": false, "error": { "code": "VALIDATION_ERROR", "message": … } }`，带 `Cache-Control: private, no-store`（同 core `api/error.ts`）；
@@ -144,7 +145,7 @@
   - widget area 走 REST `GET /_emdash/api/widget-areas`（没有读 widget 的 MCP 工具；要 `widgets:read`，admin token 有）。
 - 对每份 content data 跑 guard。条目查 `slug`，revision 查 `data._slug`。
 - 条目另查 `content_list` 返回的 `seo.image`、`seo.canonical` 和 `bylines[].roleLabel`。回收站里的条目查不了这三项：`content_list_trashed` 不返回它们，`content_get` 又排除回收站的行。闸门限制了写入，但从回收站恢复既不经过闸门也不经过 hook。
-- 菜单查每项的 `label`、`customUrl`、`url`、`titleAttr`、`target` 和项数；term、byline 查 §3.1 的长度。
+- 菜单查每项的 `label`、`customUrl`、`url`、`titleAttr`、`target` 和项数；term、byline 查 §3.1 的长度（byline 含 `avatarMediaId`）。
 - widget area 按 `SafeWidgetArea` 渲染前的检查来查（§3.1）：先 `widgetAreaIsSafe`，再对每个 menu widget 指向的菜单跑 `menuIsSafe`。`getMenu` 按请求的 locale 选菜单，所以同名菜单的每个 locale 都查；菜单用 `menu_get` 的结果，custom 项的 `customUrl` 按 core 的规则当作 `url`（`customUrl || "#"`，`menus/index.ts:297-298`）。菜单名找不到时通过（渲染出来是空的）。返回的形状不对（没有 `items` 数组，或某个 area 没有字符串 `name` 和 `widgets` 数组）时中止。
 - `revision_list` 的 `total` 大于返回数时，记一条问题（"只扫了最新的 N 个"）。
 - 输出 `collection/id[@revision]: 问题`，每发现一条就打印一条，最后一行是汇总。有任何问题时退出码为 1。
@@ -158,10 +159,10 @@
 - type 为 `portableText` 的字段并入要检查的 Portable Text 字段；
 - type 为 `image` 的字段并入要检查的图片字段。
 
-没有 `ctx.schema`（例如单测）或读取出错时，只用钉死的表，并用 `console.warn` 记一行。钉死的表覆盖今天所有字段，所以不因此拒绝保存。
+没有 `ctx.schema`（例如单测）、读取出错或超过 1500 ms（`SCHEMA_TIMEOUT_MS`）还没返回时，只用钉死的表，并用 `console.warn` 记一行。钉死的表覆盖今天所有字段，所以不因此拒绝保存。超时的原因：core 给每个 hook 5 s（`plugins/define-plugin.ts:293`），超时由 `hooks.ts` 的 `executeWithTimeout` 在 handler 外面抛错，handler 的 try/catch 接不住，发布 hook 就会失败而不设 `cancellation`（§3.2 "从不抛错"的保证在这里失效）。读 schema 让出 1500 ms 后，剩下的时间够检查本身跑完：在 node 上量 10 MiB 的值（闸门的上限），最慢的是一个带约 12 万个 feature 的 `feature_grid`，检查 1.1 s；`search_text` 最慢 0.11 s（一个 500 万项的 `tabs`）；合计约 2.7 s，低于 5 s。这是 node 上的数，workerd 会有出入。计时器在读取返回或出错时清掉。
 
-`BLOCK_IMAGE_FIELDS`（`blocks` 字段里各 block type 的 image 路径）仍然钉死。`migrate verify` 新增 schema 漂移检查：
-- 对线上每个 collection，portableText 字段、image 字段，以及每个 `blocks` 字段里每个 block type 的每个版本中的 image 路径（image 字段，加 repeater 子字段里的 image），都必须在钉死的表里；
+`BLOCK_IMAGE_FIELDS`（`blocks` 字段里各 block type 的 image 路径）和 `BLOCK_TEXT_FIELDS`（各 block type 打印的文字路径和上限，§3.6）仍然钉死。`migrate verify` 新增 schema 漂移检查：
+- 对线上每个 collection，portableText 字段、image 字段，以及每个 `blocks` 字段里每个 block type 的每个版本中的 image 路径（image 字段，加 repeater 子字段里的 image）和文字路径（string、text、url 字段，repeater 子字段里的同类字段，以及每个 image 路径的 `.alt`），都必须在钉死的表里；
 - 否则打印 `schema drift: …`，退出码为 1。
 
 `migrate verify` 因此要读 schema（MCP `schema_list_collections`、`schema_get_collection`），需要带 `schema:read` 的 token（Editor 以上；AI 的 token 没有）。读 schema 出错时，在页面和 redirect 的结果都打印之后，以退出码 1 结束，不把读不到当作没有漂移。
@@ -222,15 +223,54 @@ span、mark、网格格子、markDefs、换行、图片这六项总量中任何�
 - tool 的 `featured` 存在时必须是布尔值；
 - `tabs.default_tab` 存在（不是 null 或 undefined）时必须是 1 到 tab 数之间的整数（tab 数按上限 20 计；现有值：6 个 tab 的块用 3，3 个 tab 的块用 1）。后台的数字输入框清空时存的是 undefined，所以不填可以通过。
 
+**块的文本字段**（PR 评审修复轮）：renderer 打印的每个块文本字段，存在（不是 null 或 undefined）时必须是字符串。原因：Astro 的文本和属性转义、`renderMarkdown` 都对值调 `String()`，`{"toString":1}` 会抛 "Cannot convert object to primitive value"，嵌套约 3000 层的数组会栈溢出，整页 500。core 的 zod 对 PT 块不做类型检查，对 `pages.layout` 的检查在 `content:beforeSave` 之后（`normalizeBlocksData`）。字段和打印它的地方（`pt-guard.mjs` 的 `TEXT`、`LISTS`，`entry-guard.mjs` 的 `BLOCK_TEXT_FIELDS`；括号里是现有最大值，2026-10-17 用 MCP 只读重测：39 个条目、38 个 revision、73 个 PT 值、4 个 layout 值）：
+
+| 字段 | 打印在 | 上限 |
+|---|---|---|
+| `image.title`、`image.caption` | core `Image.astro` 的 `title` 属性（203、217、230、244 行）、`<figcaption>`（253） | 只查类型 |
+| `code.code`、`code.filename` | core `Code.astro` 的 `<code>`（29）、文件名（28） | `code` 20000（579）；`filename` 只查类型 |
+| `pullquote.text`、`pullquote.citation` | core `Pullquote.astro`（23、25） | 只查类型 |
+| `file.filename` | core `File.astro` 的 `download` 属性（28、46）和文件名（24、42） | 只查类型 |
+| `video.caption` | core `Video.astro`（81）；core 的 `isPortableTextVideoBlock` 已经丢掉 caption 不是字符串的 video | 只查类型 |
+| `button.text`、`buttons[].text` | core `Button.astro`（27、30），`Buttons.astro` 逐个交给 Button（29） | 只查类型 |
+| `cover.backgroundImage`、`cover.backgroundVideo` | core `Cover.astro` 的 `<img src>`（48）、`<source src>`（60） | 2048（`LIMITS.url`） |
+| `embed.caption` | web9 `Embed.astro`（25、32、36） | 只查类型 |
+| `callout.title`、`callout.body` | web9 `Callout.astro`：`renderInlineMarkdown`（14）、`renderMarkdown`（15） | 300（29）、25000（503） |
+| `details.summary`、`details.body` | web9 `Details.astro`（11、12） | 300（69）、25000（6196） |
+| `tabs[].label`、`tabs[].body` | web9 `Tabs.astro`（35、47） | 只查类型、25000（714） |
+| `mermaid.code` | web9 `Mermaid.astro` 的 `<pre>`（10） | 20000（1725） |
+| `tool_grid.title`、`tools[].name`、`tools[].tagline` | web9 `ToolGrid.astro`（17、34 和 41、43） | 只查类型、只查类型、300（25） |
+| `block.textAlign` | core `Block.astro`（30）：`textAlignClassName` 用 `Object.hasOwn` 查表（`portable-text-text-align.ts:34`），`{"toString":1}` 在那里抛错 | 只查类型 |
+
+- Markdown 字段（callout、details、tab 的 body，callout 的 title、details 的 summary、tool 的 tagline）每次渲染都跑 marked 和 sanitize-html，所以限长（`LIMITS.markdown` 25000、`LIMITS.inlineMarkdown` 300），整个值的 Markdown 字符合计不超过 52000（`MAX_MARKDOWN`；现有最大 12759，learn_ai_coding）。合计在逐个节点检查之前计入 `count()`，超了就停在那一处；一个字段超过它自己的上限时只按上限计，问题由它自己的那条报出来。mermaid 不计入合计（它在浏览器里渲染）。上限都是现有最大值的 4 倍以上：25000 是 6196 的 4.03 倍，300 是 69 的 4.3 倍，52000 是 12759 的 4.08 倍，20000 是 1725 的 11.6 倍。
+- 只查类型、不限长的是纯文本字段：Astro 的转义是线性的，长度由闸门的 10 MiB body 上限兜着。
+- 这些上限只限住了大小，没有限住渲染 CPU：marked 16.4.2 在密集的分隔符上是超线性的。在 node 上量一个 body 字段：`"[a]("` 重复 4000 字符 2.7 s、8000 字符 22 s（三次方，外推到 25000 约 11 分钟）；`"*a "`、`"_a "` 重复到 25000 字符 6.3–6.7 s（平方）；正常的 prose 写满 25000 字符 15 ms；inline 字段写满 300 字符都在 1.4 ms 以内。见 §5 的残留。
+
+`pages.layout` 里的文字（`BLOCK_TEXT_FIELDS`，`guardBlockText` 在 `guardBlockImages` 旁边遍历同一个值，问题格式 `layout: #0 hero title: at most 200 characters (got 201)`）：
+
+| 块 | 字段 | 上限 | 现有最大值 |
+|---|---|---|---|
+| `hero` | `title` | 200（`LIMITS.title`） | 7 |
+| `hero` | `tagline` | 1000（`LIMITS.description`） | 33 |
+| `hero` | `primary_label`、`secondary_label` | 80（`LIMITS.label`） | 12、无 |
+| `hero` | `primary_href`、`secondary_href` | 2048（`LIMITS.url`） | 17、无 |
+| `hero` | `image.alt` | 1000 | 无 |
+| `feature_grid` | `title`、`features[].title` | 200 | 无、6 |
+| `feature_grid` | `features[].description`、`features[].image.alt` | 1000 | 69、6 |
+
+评审只要求标题类 ≤ `LIMITS.title`、描述类 ≤ `LIMITS.description`；按钮文字和链接、图片的 alt 同样打印在首页上，所以按同类值的上限一并限住。`index.test.mjs` 把 `BLOCK_TEXT_FIELDS` 的路径和 seed 块类型的 string、text、url 字段及 image 的 `.alt` 对齐。
+
 **blurhash**：guard 不解码 blurhash，只做解码器自己在抛错之前做的结构检查：第一个字符在 base83 字母表里，长度等于 `4 + 2 × numX × numY`（numX、numY 由第一个字符算出）。解码器（`@unpic/placeholder` 0.1.2 的 `blurhashToImageCssString`，内部是 `blurhash` 2.0.5 的 `decode`）只在这两种情况抛错：字符串为空或短于 6，或长度对不上（首字符不在字母表里时按 -1 读，算出的长度是 4，所以总是对不上）；其余字符不在字母表里时也按 -1 读，不抛错。所以这个检查和"解码不抛错"完全等价，不额外要求其余字符在字母表里（那样会拒绝能渲染的值）。`pt-guard.blurhash.test.mjs` 把两边对比了 7 万多个字符串（每个首字符、几种填充字符、长度 0–168），并钉住两个包的版本。原因：原来 guard 对每张图解码一次，一张 9×9 的 blurhash 约 0.13 ms，一个 4 MiB 的 gallery 要 2–3 s CPU；结构检查约 0.03 µs。渲染时仍要解码，500 张 9×9 的图约 67 ms。
 
 **渲染端**：Tabs、ToolGrid 的数据经由纯函数（`lib/tabs.mjs` 的 `tabItems`、`lib/tool-grid.mjs` 的 `toolItems`）整理后再渲染：
 - 跳过不是对象的元素；
-- 不是字符串的文本当空字符串；
+- 不是字符串的文本当空字符串（`lib/text.mjs` 的 `text`）；
 - `featured` 只认 `true`；
 - Tabs 的 `default_tab` 不是整数时按 1，超出范围时夹到第一个或最后一个 tab（`lib/tabs.mjs` 的 `activeTab`）。
 
-`buttons` 块用 core 的组件渲染，不合法的结构由写入端和发布 hook 挡住，存量由扫描发现。
+web9 自己的其他 renderer 同样把不是字符串的文本当空字符串（PR 评审修复轮）：`renderMarkdown`、`renderInlineMarkdown` 对非字符串返回 `""`（Callout、Details、Tabs、ToolGrid 的 Markdown 都经过它们）；Mermaid 的 `code`、ToolGrid 和 Callout 的 `title` 经 `text()`；首页的 Hero、FeatureGrid 经 `packages/web9-site/lib/layout-blocks.mjs`（`heroText`、`featureGridItems`，Hero 的图片 alt 也由它给出，再显式传给 core 的 `<Image>`）和 `hero-buttons.mjs`。`astro-registry.test.mjs` 和 `render-sinks.test.mjs` 钉住这些模板只经由这些函数读块的值。
+
+`buttons` 块和其他 core 块用 core 的组件渲染，没有渲染端兜底：不合法的结构和类型由写入端和发布 hook 挡住，存量由扫描发现。
 
 ## 4. 测试和验收
 
@@ -246,6 +286,7 @@ span、mark、网格格子、markDefs、换行、图片这六项总量中任何�
   - 超长 title 经 MCP 保存被拒；
   - 一个草稿的 title 超长时（只能用旧规则下写入的数据构造，无法构造时用单测替身验证 handler），发布被取消；
   - batch 请求被拒。
+  - PR 评审修复轮：MCP `content_create` 一个 posts 草稿，`content` 里的 callout `body` 是 `{"toString":1}`，或长于 25000，都以 `Save rejected` 被拒；MCP `content_update` 首页草稿，`layout` 里 hero 的 `title` 是 `{"toString":1}`，以 `Save rejected` 被拒，`_rev` 不变；MCP `byline_create` 的 `avatarMediaId` 长 65，以 `Write rejected` 被拒；库里没有写进任何东西。
 - `npm test`、`npm run build`（包括公开 CSS 检查）和 `npm run typecheck` 都要通过。
 
 ## 5. 不在范围内
@@ -253,6 +294,13 @@ span、mark、网格格子、markDefs、换行、图片这六项总量中任何�
 - 计划 3 的部署和切换；
 - 真正创建 AI 用户或 token；
 - 其他不属于"AI PAT 之前"的未决事项。
+
+已知残留（PR 评审修复轮记下，没有修）：
+- **marked 的渲染 CPU**：Markdown 字段的长度上限（§3.6）管不住 marked 16.4.2 在密集分隔符上的超线性成本。一个 4000 字符的 `"[a]("` 重复 body 渲染要 2.7 s，8000 字符 22 s，写满 25000 外推约 11 分钟；`"*a "`、`"_a "` 写满 25000 约 6.5 s。把上限压到能限住它的长度（`"[a]("` 要 2000 字符左右）会拒掉现有内容（最长的字段 6196）。能写内容的 token 因此能发布一页每次访问都超出 Workers CPU 限制的 doc。要修得换 parser、在 guard 里数分隔符密度，或者渲染时限时；这需要单独设计。
+- **REST 菜单项数**：`POST /_emdash/api/menus/[name]/items` 每次加一项，闸门只检查这一项的字段，不数菜单里已有多少项（只有 MCP `menu_set_items` 一次给出全部项，闸门才能数）。缓解：`Base.astro` 只渲染前 50 项，`SafeWidgetArea` 遇到超过 50 项的菜单整个 area 不渲染（fail closed），`guard-scan` 报告超过 50 项的菜单。
+- **`@emdash-cms/admin` 是没有声明的传递依赖**：guard 直接 import 它的表格 normalizer（§3.6、§6），`web9-blocks/package.json` 没有写它。emdash 升级挪走它时 import 失败，测试会发现，但部署前要有人处理。
+- **core 的 renderer 没有渲染端兜底**：Image、Code、Pullquote、File、Video、Button、Cover、Block 的文本和 `textAlign` 只靠写入端（guard、发布 hook）挡住；规则加上之前已经存进库的非字符串值仍会让页面 500，由 `guard-scan` 发现（今天库里是 0）。
+- **纯文本字段只查类型**：§3.6 表里"只查类型"的字段没有长度上限，单个值的长度只受闸门 10 MiB body 上限约束；Astro 转义是线性的，代价是页面变大。
 
 ## 6. 对批准设计的调整（执行前核对 core 后）
 
@@ -273,4 +321,6 @@ span、mark、网格格子、markDefs、换行、图片这六项总量中任何�
 | blurhash 改为结构检查，不再解码（最后一轮修复） | 解码一张 9×9 的 blurhash 约 0.13 ms，一个 4 MiB 的 gallery 让一次保存花 2–3 s CPU；结构检查和"解码不抛错"完全等价（§3.6），测试对比两边并钉住版本 | `blurhash` 或 `@unpic/placeholder` 升级改了抛错的条件：版本钉死的测试和对比测试先失败 |
 | 每个 block、表格、单元格的 markDefs 上限 100，整个值的图片上限 500，表格记录字段上限从 32 降到 16 | 总量只管整个值，一个 block 就能用掉 5000 个 markDefs；图片数决定渲染时的解码次数；16 仍是现有最大值（5）的 3 倍多 | 合法内容被拒：现有最大值分别是 3、14、5，可以调高 |
 | `seo.canonical` 进闸门，docs 的 `category` 进 guard（上限 80），侧栏分组名渲染时也截到 80 | 同属 Editor token 能写、core 没有上限、又渲染到页面上的字符串：`canonical` 进 `<link rel="canonical">`，没有显示名的 `category` 原样当侧栏分组名，出现在每个 doc 页 | 合法的长值被拒：现有 category 最长 7 |
+| 块文本字段的类型检查扩到 `block.textAlign`，`pages.layout` 的按钮文字、链接和图片 alt 也限长（PR 评审修复轮） | 逐个核对 core 和 web9 的 renderer 时发现，`Block.astro` 用 `Object.hasOwn` 查 `textAlign`，`{"toString":1}` 在那里抛错；首页的按钮和 alt 同样原样打印 | 合法值被拒：上限按同类值（label 80、url 2048、description 1000）取，现有最大值 12、17、6 |
+| `fieldsFor` 读线上 schema 限时 1500 ms（`SCHEMA_TIMEOUT_MS`，PR 评审修复轮） | core 的 5 s hook 超时在 handler 外面抛错，发布 hook 的"从不抛错"会失效 | 1500 ms 内读不出 schema 时，那一次只用钉死的表；钉死的表覆盖今天所有字段 |
 | `guard-scan` 经 REST 扫 widget area，汇总单列 revision 里的问题 | widget 没有 MCP 工具可读，原来不在扫描范围内；revision 里的问题编辑修不了，要和能修的分开说 | REST 返回的形状变了时扫描中止（fail loud），不会当作 0 个 area |
