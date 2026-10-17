@@ -142,7 +142,7 @@
 - **已定**：用 Cloudflare **Workers Builds** 连接 GitHub 仓库。
 - **已定（owner，2026-10-15，计划 1 结束时）**：PR #2 在计划 1 结束时就合并进 `main`，不再等切换。合并前在 `main` 上打了 tag `docusaurus-final`（指向最后一个 Docusaurus 提交 `b2a8b275`）。Worker 的**生产分支直接用 `main`**。原来"迁移期间生产分支用 `emdash`"是为了不让 `main` 上的 Docusaurus 提交触发必然失败的 Worker 构建，合并后这个理由已经不存在。合并不影响线上：`main` 不再有部署旧站的 workflow，GitHub Pages 继续提供 `gh-pages` 上已经构建好的旧站。
 - 切换步骤：
-  1. 首次部署用本机 `wrangler deploy`（`CLOUDFLARE_API_TOKEN`）。Workers Builds（连接仓库，生产分支 `main`）在切换稳定后由 owner 在后台连接（2026-10-17 改定，理由见 `docs/superpowers/plans/2026-10-17-emdash-plan3-deploy-cutover.md` Task 5）。**已连接（2026-10-17，我用 API 连接）**：只有 `main` 一个 trigger，合并到 `main` 就是部署，构建用 Node 24.16.0；
+  1. 首次部署用本机 `wrangler deploy`（`CLOUDFLARE_API_TOKEN`）。Workers Builds（连接仓库，生产分支 `main`）在切换稳定后由 owner 在后台连接（2026-10-17 改定，理由见 `docs/superpowers/plans/2026-10-17-emdash-plan3-deploy-cutover.md` Task 5）。**已连接（2026-10-17，我用 API 连接）**：只有 `main` 一个 trigger，合并到 `main` 就是部署，构建用 Node 24.22.0（trigger 的 `NODE_VERSION`；构建镜像也读仓库的 `.nvmrc`，两者必须相同，升级时一起改）；Cloudflare 的 GitHub App 只开放给选定的仓库，`web9ai` 要在它的列表里，否则 push 不会触发构建；
   2. 在 `*.workers.dev` 上验证；
   3. 对生产环境跑迁移；
   4. 在 Worker 上绑定 `www.web9.ai` 和 `web9.ai` 两个 Custom Domain（DNS 已经在 Cloudflare），`src/worker.ts` 把 apex 重定向到 www。做法：`wrangler.jsonc` 的 `routes` 写成 `custom_domain: true`。用 Custom Domain 而不是普通 route，是因为 Cloudflare 会为它建 DNS 记录和证书，删掉 GitHub Pages 的记录后不需要另建源站记录。EmDash 的 Change domain 对此没有要求，它只要新域名用 https 直接服务本站、不跳转。非交互的 `wrangler deploy` 会不提示、直接覆盖冲突的 DNS 记录，所以按计划 3 Task 4 Step 3 的顺序做：
