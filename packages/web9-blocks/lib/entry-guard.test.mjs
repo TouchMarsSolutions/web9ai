@@ -158,6 +158,33 @@ describe("entryProblems", () => {
 		expect(entryProblems({ layout: [{ ...hero, title: "T", tagline: null }, { ...grid, features: [null, { title: "t" }] }, { _type: "other", title: bad }] }, pages)).toEqual([]);
 		for (const layout of [null, "x", { title: bad }]) expect(entryProblems({ layout }, pages)).toEqual([]);
 	});
+	it("rejects {toString:1}, a ~3000-deep array and other non-strings at every pages.layout text path, never throwing", () => {
+		const pages = staticFields("pages");
+		const deep = () => {
+			let v = [];
+			for (let i = 0; i < 3000; i++) v = [v];
+			return v;
+		};
+		const BAD = [["{toString:1}", () => JSON.parse('{"toString":1}')], ["3000-deep array", deep], ["number", () => 5], ["boolean", () => true], ["object", () => ({ a: "b" })]];
+		/** A block of `type` holding `value` at `path` ("title", "image.alt", "features[].title"), and the label its problem names. */
+		const at = (type, path, value) => {
+			const [head, ...rest] = path.split(".");
+			const inner = rest.reduceRight((v, key) => ({ [key]: v }), value);
+			const block = { _type: type, _version: 1, _key: "k" };
+			if (head.endsWith("[]")) return [{ ...block, [head.slice(0, -2)]: [inner] }, path.replace("[]", "[0]")];
+			return [{ ...block, [head]: inner }, path];
+		};
+		const paths = Object.entries(BLOCK_TEXT_FIELDS.pages.layout).flatMap(([type, caps]) => Object.keys(caps).map((path) => [type, path]));
+		expect(paths).toHaveLength(11);
+		for (const [type, path] of paths) {
+			for (const [name, bad] of BAD) {
+				const [block, label] = at(type, path, bad());
+				const problems = entryProblems({ layout: [block] }, pages);
+				expect(problems, `${type} ${path} ${name}`).toHaveLength(1);
+				expect(problems[0].startsWith(`layout: #0 ${type} ${label}: value `) && problems[0].endsWith(" is not allowed"), problems[0]).toBe(true);
+			}
+		}
+	});
 	it("treats data that is not an object as empty, and reads only own fields", () => {
 		for (const data of [undefined, null, "x", 5]) expect(entryProblems(data, docs)).toEqual([]);
 		expect(entryProblems(Object.create({ title: "t".repeat(500) }), docs)).toEqual([]);
