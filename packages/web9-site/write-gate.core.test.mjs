@@ -1,13 +1,78 @@
 // The write gate (lib/write-gate.mjs) knows core's write paths as of emdash 1.3. These snapshots fail when an emdash
-// upgrade adds an MCP tool or a REST route in a gated area, or renames a route pattern the gate keys on: re-check the
-// gate against it, then update the snapshot (spec 2026-10-17 §3.1). emdash ships its src/, so the files are read from
-// node_modules; a missing file fails the test.
+// upgrade adds an MCP tool or a REST route in a gated area, renames a route pattern the gate keys on, or adds, drops or
+// renames a field of a tool's arguments or a route's body that the gate reads: re-check the gate against it, then update
+// the snapshot (spec 2026-10-17 §3.1). emdash ships its src/, so the files are read from node_modules; a missing file
+// fails the test.
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { GATED_PATTERNS } from "./lib/write-gate.mjs";
 
 const core = (p) => new URL(`../../node_modules/emdash/src/${p}`, import.meta.url);
 const sdk = (p) => new URL(`../../node_modules/@modelcontextprotocol/sdk/dist/esm/server/${p}`, import.meta.url);
+
+/**
+ * The top-level fields of the first `object({ ... })` after `anchor` in `source`, as { name: value source }; a spread is
+ * { "...name": "" }. Reads past strings and comments, so a field is found however the chain is wrapped. Throws when the
+ * anchor or the object is missing, so a renamed schema fails here.
+ */
+function objectFields(source, anchor) {
+	const at = source.indexOf(anchor);
+	if (at < 0) throw new Error(`not found: ${anchor}`);
+	const fields = {};
+	let depth = 0;
+	let key = null;
+	let value = "";
+	let expectKey = false;
+	const flush = () => {
+		if (key !== null) fields[key] = value.replace(/\s+/g, " ").trim();
+		key = null;
+		value = "";
+	};
+	for (let i = source.indexOf("object({", at) + "object(".length; i < source.length; i++) {
+		const c = source[i];
+		if (c === "/" && source[i + 1] === "/") {
+			i = source.indexOf("\n", i);
+			continue;
+		}
+		if (c === "/" && source[i + 1] === "*") {
+			i = source.indexOf("*/", i) + 1;
+			continue;
+		}
+		if (depth === 1 && expectKey && /\S/.test(c) && !"})]".includes(c)) {
+			const m = /^(?:\.\.\.([\w.]+)|(\w+)\s*:)/.exec(source.slice(i));
+			if (!m) throw new Error(`unreadable field at ${source.slice(i, i + 40)}`);
+			flush();
+			if (m[1]) fields[`...${m[1]}`] = "";
+			else key = m[2];
+			i += m[0].length - 1;
+			expectKey = false;
+			continue;
+		}
+		if (c === '"' || c === "'" || c === "`") {
+			const from = i;
+			for (i++; i < source.length && source[i] !== c; i++) if (source[i] === "\\") i++;
+			value += source.slice(from, i + 1);
+			continue;
+		}
+		if ("{([".includes(c)) {
+			if (++depth === 1) {
+				expectKey = true;
+				continue;
+			}
+		} else if ("})]".includes(c)) {
+			if (--depth === 0) {
+				flush();
+				return fields;
+			}
+		} else if (c === "," && depth === 1) {
+			flush();
+			expectKey = true;
+			continue;
+		}
+		if (key !== null) value += c;
+	}
+	throw new Error(`unclosed object after ${anchor}`);
+}
 
 describe("core write paths the gate was checked against", () => {
 	it("MCP tools", () => {
@@ -57,6 +122,89 @@ describe("core write paths the gate was checked against", () => {
 		expect(body).toContain("return `Payload Too Large: Request body must not exceed ${maxBytes} bytes`;");
 		expect(readFileSync(sdk("webStandardStreamableHttp.js"), "utf8")).toContain("return this.createJsonErrorResponse(413, -32000, message);");
 		expect(readFileSync(core("astro/routes/api/mcp.ts"), "utf8")).not.toContain("maxRequestBodySize");
+	});
+	it("reads the fields of an object literal however its chains are wrapped (the reader the next two tests use)", () => {
+		const source = 'const b = z.object({ a: z.string().max(2), // x: no\n\tb: z\n\t\t.array(z.object({ c: z.string() }))\n\t\t.optional(), d: "e, f: g",\n\t...base.shape,\n});';
+		expect(objectFields(source, "const b")).toEqual({ a: "z.string().max(2)", b: "z .array(z.object({ c: z.string() })) .optional()", d: '"e, f: g"', "...base.shape": "" });
+		expect(() => objectFields(source, "const missing")).toThrow("not found: const missing");
+	});
+	it("the fields of MCP tool arguments the gate reads (mcp/server.ts)", () => {
+		const server = readFileSync(core("mcp/server.ts"), "utf8");
+		/** One tool's registration: from its name to the next registerTool call. */
+		const tool = (name) => {
+			const at = server.search(new RegExp(`registerTool\\(\\s*"${name}"`));
+			expect(at, name).toBeGreaterThan(0);
+			return server.slice(at, server.indexOf("registerTool(", at + 1));
+		};
+		const args = (name) => objectFields(tool(name), "inputSchema:");
+		for (const name of ["content_create", "content_update"]) {
+			const fields = args(name);
+			// slug, seo (contentSeoInput: image, canonical) and bylines (contentBylineInputSchema: roleLabel) are gated
+			expect(fields.slug, name).toMatch(/^z\.string\(\)/);
+			expect(fields.seo, name).toMatch(/^contentSeoInput\b/);
+			expect(fields.bylines, name).toMatch(/^z \.array\(contentBylineInputSchema\)/);
+		}
+		expect(Object.keys(args("content_create"))).toEqual([
+			"collection", "data", "slug", "status", "locale", "translationOf", "migrateBlocks", "replaceBlocks", "bylines", "taxonomies", "seo", "publishedAt",
+		]);
+		expect(Object.keys(args("content_update"))).toEqual([
+			"collection", "id", "locale", "data", "slug", "status", "seo", "bylines", "taxonomies", "publishedAt", "migrateBlocks", "replaceBlocks", "_rev", "overrideLock",
+		]);
+		expect(server).toMatch(/^import \{[^}]*\bcontentBylineInputSchema,\s+contentSeoInput,[^}]*\} from "#api\/schemas\.js";$/m);
+		expect(Object.keys(args("menu_set_items"))).toEqual(["name", "locale", "items"]);
+		expect(Object.keys(objectFields(tool("menu_set_items"), "items: z"))).toEqual([
+			"label", "type", "customUrl", "referenceCollection", "referenceId", "titleAttr", "target", "cssClasses", "parentIndex",
+		]);
+		expect(Object.keys(args("taxonomy_create_term"))).toEqual(["taxonomy", "slug", "label", "parentId", "description", "locale", "translationOf"]);
+		expect(Object.keys(args("taxonomy_update_term"))).toEqual(["taxonomy", "termSlug", "slug", "label", "parentId", "description", "locale"]);
+		// the byline tools take the REST bodies' shapes (pinned in the next test)
+		expect(args("byline_create")).toEqual({ "...bylineCreateBody.shape": "" });
+		expect(args("byline_update")).toEqual({ id: expect.stringMatching(/^z\.string\(\)/), "...bylineUpdateBody.shape": "" });
+	});
+	it("the body schemas of the gated REST routes and the fields the gate reads in them", () => {
+		const route = (p) => readFileSync(core(`astro/routes/api/${p}`), "utf8");
+		const parsed = (p) => [...route(p).matchAll(/parseBody\(request, (\w+)\)/g)].map((m) => m[1]);
+		expect(Object.fromEntries(
+			[
+				"content/[collection]/index.ts", "content/[collection]/[id].ts", "menus/[name]/items.ts", "menus/[name]/items/[id].ts",
+				"taxonomies/[name]/terms/index.ts", "taxonomies/[name]/terms/[slug].ts", "taxonomies/[name]/terms/[slug]/translations.ts",
+				"admin/bylines/index.ts", "admin/bylines/[id]/index.ts", "admin/bylines/[id]/translations.ts",
+			].map((p) => [p, parsed(p)]),
+		)).toEqual({
+			"content/[collection]/index.ts": ["contentCreateBody"],
+			"content/[collection]/[id].ts": ["contentUpdateBody"],
+			"menus/[name]/items.ts": ["createMenuItemBody"],
+			"menus/[name]/items/[id].ts": ["updateMenuItemBody"],
+			"taxonomies/[name]/terms/index.ts": ["createTermBody"],
+			"taxonomies/[name]/terms/[slug].ts": ["updateTermBody"],
+			"taxonomies/[name]/terms/[slug]/translations.ts": ["createTermTranslationBody"],
+			"admin/bylines/index.ts": ["bylineCreateBody"],
+			"admin/bylines/[id]/index.ts": ["bylineUpdateBody"],
+			"admin/bylines/[id]/translations.ts": ["bylineTranslationCreateBody"],
+		});
+		const schema = (file, name) => Object.keys(objectFields(readFileSync(core(`api/schemas/${file}`), "utf8"), `export const ${name} = z`));
+		const content = (name) => objectFields(readFileSync(core("api/schemas/content.ts"), "utf8"), `export const ${name} = z`);
+		expect(schema("content.ts", "contentSeoInput")).toEqual(["title", "description", "image", "canonical", "noIndex"]);
+		expect(schema("bylines.ts", "contentBylineInputSchema")).toEqual(["bylineId", "roleLabel"]);
+		for (const name of ["contentCreateBody", "contentUpdateBody"]) {
+			expect(content(name).slug, name).toMatch(/^z\.string\(\)/);
+			expect(content(name).seo, name).toMatch(/^contentSeoInput\b/);
+			expect(content(name).bylines, name).toMatch(/^z\.array\(contentBylineInputSchema\)/);
+		}
+		expect(Object.keys(content("contentCreateBody"))).toEqual([
+			"data", "slug", "status", "bylines", "locale", "translationOf", "seo", "taxonomies", "references", "publishedAt", "createdAt", "migrateBlocks", "replaceBlocks",
+		]);
+		expect(Object.keys(content("contentUpdateBody"))).toEqual([
+			"data", "slug", "status", "authorId", "bylines", "_rev", "skipRevision", "overrideLock", "seo", "taxonomies", "references", "publishedAt", "migrateBlocks", "replaceBlocks",
+		]);
+		expect(schema("menus.ts", "createMenuItemBody")).toEqual(["type", "label", "referenceCollection", "referenceId", "customUrl", "target", "titleAttr", "cssClasses", "parentId", "sortOrder"]);
+		expect(schema("menus.ts", "updateMenuItemBody")).toEqual(["label", "customUrl", "target", "titleAttr", "cssClasses", "parentId", "sortOrder"]);
+		expect(schema("taxonomies.ts", "createTermBody")).toEqual(["slug", "label", "parentId", "description", "locale", "translationOf"]);
+		expect(schema("taxonomies.ts", "updateTermBody")).toEqual(["slug", "label", "parentId", "description"]);
+		expect(Object.keys(objectFields(route("taxonomies/[name]/terms/[slug]/translations.ts"), "const createTermTranslationBody = z"))).toEqual(["locale", "label", "slug"]);
+		expect(schema("bylines.ts", "bylineCreateBody")).toEqual(["slug", "displayName", "bio", "avatarMediaId", "websiteUrl", "userId", "isGuest", "locale", "translationOf", "customFields"]);
+		expect(schema("bylines.ts", "bylineUpdateBody")).toEqual(["slug", "displayName", "bio", "avatarMediaId", "websiteUrl", "userId", "isGuest", "customFields"]);
+		expect(schema("bylines.ts", "bylineTranslationCreateBody")).toEqual(["locale", "slug", "displayName", "bio", "avatarMediaId", "websiteUrl"]);
 	});
 	it("route patterns the gate keys on, and the patterns around them", () => {
 		// The gate matches context.routePattern against these strings, so a rename in emdash must fail here, not pass silently

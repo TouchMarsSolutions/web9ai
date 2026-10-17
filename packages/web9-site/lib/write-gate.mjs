@@ -1,15 +1,15 @@
-// Write-length gate (spec 2026-10-17 §3.1), run by src/middleware.ts. core's REST and MCP schemas put no maximum on
-// a content slug, a content entry's seo.image and byline roleLabel, a menu item's label, URL, target and titleAttr, a
-// term's label and slug or a byline's name and slug, and no hook sees them, while menus, terms and bylines render on
-// many pages. EmDash's middleware is all order "pre", so src/middleware.ts runs after its auth and before the route,
-// and answers in the route's place when a value is over LIMITS. The gate keys on the route pattern Astro matched
-// (context.routePattern), never on the URL: core's routes match on a decoded path string that context.url
-// re-normalizes (a backslash becomes a slash, dot segments resolve), so a path check and the router can disagree,
-// while the matched pattern is by construction the route that runs. Pure: the middleware passes the method, the
-// pattern and the parsed JSON body (readGatedBody only reads the stream it is given). Anything the gate cannot read (a
-// body that is not JSON, an unknown route or tool) passes through to core, which validates it. A body over
-// MAX_GATED_BODY_BYTES is the exception: core refuses only a declared Content-Length (a chunked body is read with no cap),
-// so on a gated route the gate answers it itself with payloadTooLarge instead of handing it on unread.
+// Write-length gate (spec 2026-10-17 §3.1), run by src/middleware.ts. core's REST and MCP schemas put no maximum on a
+// content slug, a content entry's seo.image, seo.canonical and byline roleLabel, a menu item's label, URL, target and
+// titleAttr, a term's label and slug or a byline's name and slug, and no hook sees them, while menus, terms and bylines
+// render on many pages. EmDash's middleware is all order "pre", so src/middleware.ts runs after its auth and before the
+// route, and answers in the route's place when a value is over LIMITS. The gate keys on the route pattern Astro matched
+// (context.routePattern), never on the URL: core's routes match on a decoded path string that context.url re-normalizes
+// (a backslash becomes a slash, dot segments resolve), so a path check and the router can disagree, while the matched
+// pattern is by construction the route that runs. Pure: the middleware passes the method, the pattern and the parsed
+// JSON body (readGatedBody only reads the stream it is given). Anything the gate cannot read (a body that is not JSON,
+// an unknown route or tool) passes through to core, which validates it. A body over MAX_GATED_BODY_BYTES is the
+// exception: core refuses only a declared Content-Length (a chunked body is read with no cap), so on a gated route the
+// gate answers it itself with payloadTooLarge instead of handing it on unread.
 import { LIMITS, lengthProblem } from "../../web9-blocks/lib/limits.mjs";
 
 /**
@@ -32,14 +32,18 @@ const field = (name, max) => (record, at) => {
 const SLUG = field("slug", LIMITS.slug);
 const LABEL = field("label", LIMITS.label);
 // seo and bylines are checked only when shaped as core's schema has them (core rejects any other shape)
-const SEO_IMAGE = (record, at) => (isRecord(record.seo) ? field("image", LIMITS.url)(record.seo, `${at}seo.`) : []);
+const SEO_FIELDS = [field("image", LIMITS.url), field("canonical", LIMITS.url)];
+const SEO = (record, at) => (isRecord(record.seo) ? SEO_FIELDS.flatMap((check) => check(record.seo, `${at}seo.`)) : []);
 const ROLE_LABELS = (record, at) =>
 	Array.isArray(record.bylines)
 		? record.bylines.flatMap((credit, k) => (isRecord(credit) ? field("roleLabel", LIMITS.label)(credit, `${at}bylines[${k}].`) : []))
 		: [];
 
-/** A content entry: slug, seo.image (og:image) and bylines[].roleLabel (emdash api/schemas/content.ts, bylines.ts). */
-const CONTENT = [SLUG, SEO_IMAGE, ROLE_LABELS];
+/**
+ * A content entry: slug, seo.image (og:image), seo.canonical (<link rel="canonical">; core's httpUrl checks the scheme,
+ * not the length) and bylines[].roleLabel (emdash api/schemas/content.ts contentSeoInput, bylines.ts).
+ */
+const CONTENT = [SLUG, SEO, ROLE_LABELS];
 const MENU_ITEM = [LABEL, field("customUrl", LIMITS.url), field("titleAttr", LIMITS.titleAttr), field("target", LIMITS.target)];
 const TERM = [LABEL, SLUG];
 const BYLINE = [field("displayName", LIMITS.label), SLUG];

@@ -107,6 +107,17 @@ describe("writeGateResponse: REST", () => {
 			"Write rejected (spec §10): slug: at most 100 characters (got 101); seo.image: at most 2048 characters (got 2049); bylines[0].roleLabel: at most 80 characters (got 81)",
 		);
 	});
+	it("rejects an over-long content seo.canonical (rendered as <link rel=\"canonical\">), alone and beside seo.image", () => {
+		expect(writeGateResponse("POST", CONTENT, { slug: "p", data: {}, seo: { canonical: long(2049) } })).toEqual({
+			status: 400,
+			body: { success: false, error: { code: "VALIDATION_ERROR", message: "Write rejected (spec §10): seo.canonical: at most 2048 characters (got 2049)" } },
+		});
+		expect(writeGateResponse("PUT", CONTENT_ID, { seo: { image: long(2049), canonical: `https://example.com/${long(2049)}` } }).body.error.message).toBe(
+			"Write rejected (spec §10): seo.image: at most 2048 characters (got 2049); seo.canonical: at most 2048 characters (got 2069)",
+		);
+		expect(writeGateResponse("POST", CONTENT, { seo: { canonical: long(2048), image: long(2048) } })).toBeNull();
+		for (const canonical of [null, undefined, 5, ["x".repeat(5000)]]) expect(writeGateResponse("POST", CONTENT, { seo: { canonical } })).toBeNull();
+	});
 	it("rejects an over-long byline displayName or slug on the admin byline routes", () => {
 		expect(writeGateResponse("POST", BYLINES, { slug: "ok", displayName: long(81) }).body.error.message).toBe(
 			"Write rejected (spec §10): displayName: at most 80 characters (got 81)",
@@ -159,6 +170,16 @@ describe("writeGateResponse: MCP", () => {
 		expect(writeGateResponse("POST", MCP, call("content_update", { id: "x", bylines: [{ bylineId: "x" }, { bylineId: "y", roleLabel: long(81) }] })).body.error.message).toBe(
 			"Write rejected (spec §10): content_update bylines[1].roleLabel: at most 80 characters (got 81)",
 		);
+	});
+	it("checks the seo.canonical of content_create and content_update", () => {
+		expect(writeGateResponse("POST", MCP, call("content_create", { collection: "posts", data: {}, seo: { canonical: long(2049) } }))).toEqual({
+			status: 200,
+			body: { jsonrpc: "2.0", id: 7, error: { code: -32602, message: "Write rejected (spec §10): content_create seo.canonical: at most 2048 characters (got 2049)" } },
+		});
+		expect(writeGateResponse("POST", MCP, call("content_update", { id: "x", seo: { canonical: long(2049) } })).body.error.message).toBe(
+			"Write rejected (spec §10): content_update seo.canonical: at most 2048 characters (got 2049)",
+		);
+		expect(writeGateResponse("POST", MCP, call("content_update", { id: "x", seo: { canonical: long(2048) } }))).toBeNull();
 	});
 	it("checks the titleAttr and target of every menu_set_items item", () => {
 		expect(
