@@ -194,6 +194,12 @@
 - `npm audit` 有两项：katex（经 mermaid）、postcss-selector-parser（经 `@tailwindcss/typography`）；两项的修复都是 breaking，计划 3 评估后再升级。
 - CI job 已改名为 "Tests and build"（原来是 "Unit tests"）：如果 `main` 的 branch protection 规则要求 "Unit tests" 这个 check，会挡住所有 PR；计划 3 配置 GitHub 时要改成新名字。
 - 生产第一次运行迁移 runner：先 `node scripts/migrate.mjs all --dry-run`，再 `node scripts/migrate.mjs menu --overwrite`（seed 里的菜单与目标不同，§7），然后 `node scripts/migrate.mjs all`；再跑一次 `all` 确认全是 `unchanged`，最后 `verify`。
-- 浏览器验收（计划 2 Task 15 Step 5）还没做：当时 Chrome（CDP :9222）里没有 `localhost:4321` 的标签页。已用 curl、HTML 和 MCP 检查代替，只有这些没有目视确认：各页截图、主题切换后的颜色、深色主题下的 Mermaid、浏览器控制台、后台里 `tool_grid` 的展开、YouTube 嵌入的版式。
+- 浏览器验收（计划 2 Task 15 Step 5）2026-10-17 补做完毕，结果通过。通过 CDP :9222 借用一个已有标签页逐页检查，做完导航回原页面。
+  - 首页：浅色、深色、跟随系统三种主题都检查了，切换主题后 `<html>` 的 class 和颜色都跟着变；`/zh-CN/` 也检查了。
+  - Docs 页面：`/docs/intro` 侧栏 7 组；`tools-summary` 8 组卡片、27 个 logo 都是 100×100；`learn_ai_coding` 的 details、Tabs 展平、有序列表续号和 Mermaid 都正常；`guide` 的 5 个 `youtube-nocookie` 嵌入都能加载，行内 code 没有反引号；深色主题下 Mermaid 文字清楚；`/zh-CN/docs/lambda` 显示 fallback 提示条，canonical 指向 en。
+  - 其他页面：`/posts/ai-tools-adhoc` 正常；`/search?q=Coze` 有结果；嵌套标题字号不再叠加（4 层都是 36px）。
+  - 后台：Docs 列表有 en 26 篇、zh-CN 9 篇；`tool_grid` 编辑窗口能打开，只看了，点了 Cancel，没有保存。
+  - 除浏览器插件自己的警告外，站点没有控制台错误。
+  - 发现 3 个外观问题，记在计划 2 的"未决事项"里。
 - 开发环境（dev）的一条 warning：`[astro-portabletext] Cache missed for unknown component on node type "@span"`。原因是 emdash core 的 `Table.astro`（`emdash/src/components/Table.astro`）里嵌套的 `<PortableText>` 覆盖了 astro-portabletext 的全局 context，表格之后的默认 `Mark.astro`（strong/em/code）就会走 `getUnknownComponent`。只在 dev 出现（受 `import.meta.env.DEV` 控制），生产不会出现；没有内容丢失（表格 105 个单元格与旧站一致，链接、粗体、标题、callout 都在）。`lambda` 是目前唯一有表格后接粗体、斜体或行内代码的 doc。
-- 其余已知问题（Mermaid 深色文字、标题没有 `id`、热链图片、`tool_grid` 宽 logo 等）记在计划 2 文末的"未决事项"里（`docs/superpowers/plans/2026-10-15-emdash-plan2-migration-local.md`）。
+- 其余已知问题（深色主题下的深色 logo、标题没有 `id`、热链图片、`tool_grid` 宽 logo 等）记在计划 2 文末的"未决事项"里（`docs/superpowers/plans/2026-10-15-emdash-plan2-migration-local.md`）。
