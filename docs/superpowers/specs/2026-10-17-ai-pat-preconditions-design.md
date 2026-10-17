@@ -244,7 +244,35 @@ span、mark、网格格子、markDefs、换行、图片这六项总量中任何�
 
 - Markdown 字段（callout、details、tab 的 body，callout 的 title、details 的 summary、tool 的 tagline）每次渲染都跑 marked 和 sanitize-html，所以限长（`LIMITS.markdown` 25000、`LIMITS.inlineMarkdown` 300），整个值的 Markdown 字符合计不超过 52000（`MAX_MARKDOWN`；现有最大 12759，learn_ai_coding）。合计在逐个节点检查之前计入 `count()`，超了就停在那一处；一个字段超过它自己的上限时只按上限计，问题由它自己的那条报出来。mermaid 不计入合计（它在浏览器里渲染）。上限都是现有最大值的 4 倍以上：25000 是 6196 的 4.03 倍，300 是 69 的 4.3 倍，52000 是 12759 的 4.08 倍，20000 是 1725 的 11.6 倍。
 - 只查类型、不限长的是纯文本字段：Astro 的转义是线性的，长度由闸门的 10 MiB body 上限兜着。
-- 这些上限只限住了大小，没有限住渲染 CPU：marked 16.4.2 在密集的分隔符上是超线性的。在 node 上量一个 body 字段：`"[a]("` 重复 4000 字符 2.7 s、8000 字符 22 s（三次方，外推到 25000 约 11 分钟）；`"*a "`、`"_a "` 重复到 25000 字符 6.3–6.7 s（平方）；正常的 prose 写满 25000 字符 15 ms；inline 字段写满 300 字符都在 1.4 ms 以内。见 §5 的残留。
+- 这些上限只限住了大小，没有限住渲染 CPU：marked 16.4.2 在某些分隔符上是超线性的（`"[a]("` 重复 8000 字符 22 s，外推到 25000 约 11 分钟）。所以每个 Markdown 字段在长度上限之内还要限分隔符密度和"换行 × 长度"（`markdown-density.mjs`，PR 评审 I2，见下面的"分隔符密度"）。
+
+**分隔符密度**（PR 评审 I2）：Markdown 字段是 callout 的 `title`、`body`，details 的 `summary`、`body`，tab 的 `body`，tool 的 `tagline`（tab 的 `label` 是纯文本，`Tabs.astro` 原样打印）；`renderMarkdown`、`renderInlineMarkdown` 没有别的调用方。每个字段在长度上限之内（超过长度的字段由它自己那条问题报出来，不再数）用一次 O(n) 扫描数下面这些量。超过字段上限记 `#0 callout body: at most 40 "*" characters (got 41)`、`#0 callout body: at most 134 line breaks in a field of 25000 characters (got 200)`（列表里是 `#0 tabs tabs[1].body: …`）；值的合计走 `count()`，每个字段只按字段上限计入，超了就停在那一处：`at most 224 "*" characters are allowed in Markdown in total`、`at most 6271258 line breaks × field characters are allowed in Markdown in total`。
+
+| 量 | 每个字段 | 每个值 | 现有最大值（字段 / 值） | 为什么超线性 |
+|---|---|---|---|---|
+| `*`、`_`、`~`、`` ` ``、`!` | 40、30、20、80、10 | 224、110、40、236、90 | 20/112、15/55、0/0、40/118、5/45 | 它们结束一个 text token，每个 token 开头 GFM 的 email lookahead 都扫后面那一段 email 字符；它们自己也是 email 字符，所以一段里有 k 个就是 k × 段长。emphasis、del 和 code span 也从每个 opener 往后找 closer。`"*a "` 重复到 25000 字符 6.5 s |
+| `<` | 46 | 54 | 23/27 | 每个 `<` 开始一个 HTML tag、注释、声明或 autolink，marked 往后找它的结尾，sanitize-html 再解析一遍。只有 `<` 时是线性的（写满 25000 字符 20 ms），和 `>`、`?` 搭配就不是：`"<<?"` 重复到 25000 字符 101 ms，`")<<>"` 49 ms；限到 46 个时都在 9 ms 以内 |
+| `\` | 10 | 10 | 5/5 | 每个转义都重建一次 marked 给 emphasis 用的 masked 副本（`Lexer.inlineTokens`）。``"[``\"`` 重复在 link label 的正则里是指数级（每单元约 1.55 倍，300 字符的 tagline 超过 2 s），每个单元要一个 `\`：后面跟 25000 字符的文字时 10 个单元 13 ms，11 个 21 ms，12 个 33 ms，15 个 134 ms，20 个 1.5 s |
+| `](`（link opener） | 20 | 34 | 10/17 | 闭合的 link 每个也重建一次 masked 副本。限住 destination 里的 `(` 之后是线性的（隔空格闭合的 `"[a](b) "` 3000 个 26 ms） |
+| link destination 里的 `(` | 40 | 200 | 1/3 | link 不闭合时，link 正则在 destination（`](` 之后跳过空白，到空格或控制字符为止的一段）里回溯，在每个 `(` 处试一个 `(...)` title，一直扫到全文末尾：代价约 0.1 ms × opener 数 × destination 里的 `(` 数，在密集的 link opener 上是三次方（20 × 252 用 529 ms）。每个 opener 数它自己 destination 里的 `(`，几个 opener 共用一段时各算一次，所以这个数正是代价里 opener 和它的 `(` 配成的对数。在上限时（1 个 opener 40 个 `(`、20 个 opener 各 2 个、9 个连写的 opener）≤ 5.1 ms；20 个 opener 各 40 个（820，被拒）83 ms。只限 `(` 的总数不行：要压到 23 以下，低于现有最大值 126 |
+| 换行 × 字段字符数（`\r\n`、单独的 `\r` 各算一个换行） | 3370624：25000 字符的字段 134 个换行，6196 字符的 544 个 | 6271258（各字段的乘积之和） | 1685312（一个 6196 字符、272 个换行的 details body）/ 3135629 | marked 的 list 循环每读一行都对剩下的全文做一次 `split("\n", 1)`，所以 list item 的 lazy continuation 行的代价是行数 × 它们后面的长度（一个 item 后面 12000 行用 1.1 s）。最后一行很长、以 `<` 开头、又写满要转义的字符（`&`、`'`）时最重 |
+| 一行开头的 list/quote marker（`>`；`-`、`*`、`+`、`1.`、`1)` 后面跟空格、tab 或行尾，前面可以缩进；单独成行的 thematic break 不算） | 8 | — | 1 | 每个 marker 嵌一层容器，marked 每层递归一次：一行约 1900 个 marker（3.8–5.7 KB）在 0.95 MB 的栈上溢出，0.5 MB 的栈上 719–978 个，渲染抛 RangeError。`1.` 这类 marker 用字符上限管不住。超了记 `… at the start of a line (got 9 on line 3)`，报的是 marker 最多的第一行。靠缩进逐行加深要平方级的字符，规则下 25000 字符最深 440 层（37 ms），0.5 MB 的栈上也不溢出 |
+
+**为什么换行按"换行数 × 长度"限**（PR 评审 I2 的 d3 裁定）：只限换行数时（原定 544，现有最大值 272 的 2 倍），最坏的字段是一个 list item 跟 543 行 lazy 行，最后一行以 `<` 开头、后面写满 `&`：113–128 ms，一个值里两个这样的字段约 257 ms，都超过预算。分隔符上限管不住它：一个 `<` 就够，`&` 是普通字符。代价和"行数 × 后面的长度"成正比，所以按这个乘积限：短字段可以有很多行，长字段少一些。换行数 400 时这个字段是 92–96 ms，272 时 70–75 ms，而 272 已经是现有最大值。
+
+**为什么上限是现有最大值的 2 倍，不再高**：每一类单独看，在上限之上还很快：单独写满一个字段、其余的类在上限时，25 ms 以内 `*` 可到 350、`_` 200、`~` 150、`` ` `` 800、`!` 400，`\` 11 个就 21 ms 所以是 10。但同一个字段里所有类都放满、加上 lazy 行、以 `<` 开头的最后一行和写满的 `&` 时，取这些单独的值是 84.5 ms，超过一个字段的预算（约 50 ms，有换行这一族时约 67 ms）；取 2 倍时 49–71 ms（7 次重复，中位数 61 ms）。所以都留在 2 倍（`~` 现有为 0，取 20、40）。现有最大值是 2026-10-17 用 MCP 只读重测的（39 个条目、38 个 revision、73 个 PT 值、451 个 Markdown 字段）。
+
+**不计数的**：`>`、`#`、`-`、`+`、`|`、`![`、`[`、`(` 的总数、`)`、`:`、`&`、`'` 和其他字符。限住上面这些之后它们是线性的：一个字段单独写满其中一种最多约 27 ms（`*>~>` 均匀分布），`![` 受 `!` 和 `](` 的上限约束。它们的代价由长度上限兜着；线性但重的见下面和 §5。
+
+**admonition 扩展**（`:::tone`，PR 评审 I2）：原来的扩展有一个 `start()`，marked 在每个段落之前都用它在剩下的全文里找 `^:::`，并在它指的地方切开段落；tokenizer 的正则不锚定，每个 block 都搜一遍剩下的全文。25000 个 `:` 渲染要 3.6 s，105 个连着的未闭合 opener 0.46 s，`":::note\n\n"` 重复到 25000 字符超过 20 s。现在没有 `start()`：opener 只在 block 的开头算（字段开头、空行或另一个 block 之后），贴在段落行后面的是普通文字；opener 行用 sticky 正则匹配、先查 tone；找结束行时遇到下一个 opener 行就停，这个 opener 当作未闭合。这样各个未闭合 opener 找结束行的范围互不重叠，是线性的：上面三个分别是 0.9 ms、0.8 ms、17 ms，所以 `:` 不用限。现有 451 个 Markdown 字段渲染结果逐字节相同（12 个 admonition，都在字段开头）。只有不合法的嵌套变了：`":::note\nx\n\n:::tip\ny\n:::"` 原来是一个吞掉 tip opener 的 note，现在是一段未闭合的 note 文字和一个 tip；嵌套的 opener 原来也渲染不成 admonition。
+
+怎么量的（一个 worker，栈 0.95 MB，即 node 主线程的大小；取 3–7 次中最快的一次；25000 字符的字段；Apple Silicon 上的 node 24）：
+- fuzz：由 `[ ] ( ) ! * _ ~ \` < > # - + | \ \n`、`a`、空格和 `:` 组成的每个 1–4 个 token 的 pattern（42770 个）重复到 2000 和 8000 字符，增长指数大于 1.3 或超过 2 s 的有 9092 个；另外 18 个字符（`= . 1 @ " ' / & ; { $ % ? ^ ,`、tab、`h`、`w`）的 1–3 个 token 的 pattern 又找出 2156 个；inline 字段写满 300 字符跑全部 42770 个；再加 27 个已知的结构（嵌套、表格、admonition 等）。这个 fuzz 拼不出 `:::note`，admonition 的最坏情况是后来手工找到的。
+- 套上最终规则：9092 + 2156 个 pattern 和 27 个已知结构，每个按两种方式把超出上限的部分换成 `a`（保留开头的，或均匀分布的；换行按 25000 字符的字段取 134 个），共 22604 次渲染。五个 worker 并行筛出 315 个超过 25 ms 的，再在一个 worker 上重测：没有超过 50 ms 的，超过 25 ms 的 27 个，最慢的是宽表格（39 ms）和均匀分布的 `"_&'"`、`"~&'"`（38 ms）。
+- 一个字段，所有类放满（测试 (i)）：25000 字符的字段里 134 行 lazy 行、每一类正好在上限、40 个 destination 里的 `(`、一行 8 个 marker，`<` 也放满（`"<<?"`），最后一行以 `<` 开头、写满 `&` 或 `'`：49–71 ms（7 次重复，中位数 61 ms；不放分隔符时 43–51 ms）；不写满 `&` 时 ≤ 24 ms；没有 lazy 行时 ≤ 27 ms。12500 字符的字段（269 行）37–40 ms，6196 字符（544 行）27–28 ms，2000 字符（1685 行）8 ms。
+- 一个值（测试 (ii)）：52000 个 Markdown 字符按 25000 + 25000 + 2000、4 × 12500 + 2000、8 × 6196 + 2432、26 × 2000 分成几个字段，每个都像 (i) 那样放到字段上限和值上限剩下的为止：最多 114 ms（25000 + 25000 + 2000，写满 `&`）；写满 `a` 时 ≤ 53 ms。173 个 300 字符的 tagline（两个 tool_grid）各放到上限，合计 33 ms。
+- 线性但重的（不限）：160 列 × 76 行的表格 70 ms，79 × 79 的 45 ms；25000 个 `&` 或 `'` 21 ms；闭合的 link 写满 28 ms。
+- 计数本身一个 25000 字符的字段约 1 ms。
 
 `pages.layout` 里的文字（`BLOCK_TEXT_FIELDS`，`guardBlockText` 在 `guardBlockImages` 旁边遍历同一个值，问题格式 `layout: #0 hero title: at most 200 characters (got 201)`）：
 
@@ -268,7 +296,7 @@ span、mark、网格格子、markDefs、换行、图片这六项总量中任何�
 - `featured` 只认 `true`；
 - Tabs 的 `default_tab` 不是整数时按 1，超出范围时夹到第一个或最后一个 tab（`lib/tabs.mjs` 的 `activeTab`）。
 
-web9 自己的其他 renderer 同样把不是字符串的文本当空字符串（PR 评审修复轮）：`renderMarkdown`、`renderInlineMarkdown` 对非字符串返回 `""`（Callout、Details、Tabs、ToolGrid 的 Markdown 都经过它们）；Mermaid 的 `code`、ToolGrid 和 Callout 的 `title` 经 `text()`；首页的 Hero、FeatureGrid 经 `packages/web9-site/lib/layout-blocks.mjs`（`heroText`、`featureGridItems`，Hero 的图片 alt 也由它给出，再显式传给 core 的 `<Image>`）和 `hero-buttons.mjs`。`astro-registry.test.mjs` 和 `render-sinks.test.mjs` 钉住这些模板只经由这些函数读块的值。
+web9 自己的其他 renderer 同样把不是字符串的文本当空字符串（PR 评审修复轮）：`renderMarkdown`、`renderInlineMarkdown` 对非字符串返回 `""`（Callout、Details、Tabs、ToolGrid 的 Markdown 都经过它们）；marked 或 sanitize-html 抛错时（比如嵌套太深、栈溢出）它们也返回 `""`，并 `console.warn` 一句不带字段内容的原因（PR 评审 I2，`markdown.test.mjs` 用 3000 层 `> ` 测，并钉住两个函数里的 try/catch）；Mermaid 的 `code`、ToolGrid 和 Callout 的 `title` 经 `text()`；首页的 Hero、FeatureGrid 经 `packages/web9-site/lib/layout-blocks.mjs`（`heroText`、`featureGridItems`，Hero 的图片 alt 也由它给出，再显式传给 core 的 `<Image>`）和 `hero-buttons.mjs`。`astro-registry.test.mjs` 和 `render-sinks.test.mjs` 钉住这些模板只经由这些函数读块的值。
 
 `buttons` 块和其他 core 块用 core 的组件渲染，没有渲染端兜底：不合法的结构和类型由写入端和发布 hook 挡住，存量由扫描发现。
 
@@ -287,6 +315,7 @@ web9 自己的其他 renderer 同样把不是字符串的文本当空字符串�
   - 一个草稿的 title 超长时（只能用旧规则下写入的数据构造，无法构造时用单测替身验证 handler），发布被取消；
   - batch 请求被拒。
   - PR 评审修复轮：MCP `content_create` 一个 posts 草稿，`content` 里的 callout `body` 是 `{"toString":1}`，或长于 25000，都以 `Save rejected` 被拒；MCP `content_update` 首页草稿，`layout` 里 hero 的 `title` 是 `{"toString":1}`，以 `Save rejected` 被拒，`_rev` 不变；MCP `byline_create` 的 `avatarMediaId` 长 65，以 `Write rejected` 被拒；库里没有写进任何东西。
+  - PR 评审 I2：MCP `content_create` 一个 posts 草稿，callout `body` 是 600 个 `[a](`（`at most 20 "](" link openers`，`at most 40 "(" in link destinations (got 179700)`）、一行 9 个 `> `（`(got 9 on line 1)`）、或 25000 字符里 200 个换行（`at most 134 line breaks in a field of 25000 characters (got 200)`），都以 `Save rejected` 被拒；库里没有写进任何东西。
 - `npm test`、`npm run build`（包括公开 CSS 检查）和 `npm run typecheck` 都要通过。
 
 ## 5. 不在范围内
@@ -296,7 +325,8 @@ web9 自己的其他 renderer 同样把不是字符串的文本当空字符串�
 - 其他不属于"AI PAT 之前"的未决事项。
 
 已知残留（PR 评审修复轮记下，没有修）：
-- **marked 的渲染 CPU**：Markdown 字段的长度上限（§3.6）管不住 marked 16.4.2 在密集分隔符上的超线性成本。一个 4000 字符的 `"[a]("` 重复 body 渲染要 2.7 s，8000 字符 22 s，写满 25000 外推约 11 分钟；`"*a "`、`"_a "` 写满 25000 约 6.5 s。把上限压到能限住它的长度（`"[a]("` 要 2000 字符左右）会拒掉现有内容（最长的字段 6196）。能写内容的 token 因此能发布一页每次访问都超出 Workers CPU 限制的 doc。要修得换 parser、在 guard 里数分隔符密度，或者渲染时限时；这需要单独设计。
+- **marked 的渲染 CPU**（PR 评审 I2 之后）：分隔符密度和"换行 × 长度"的上限（§3.6）只覆盖 fuzz 找到的 pattern：ASCII 标点、tab、换行和几个字母组成的短 pattern，以及已知的结构。更长的组合、其他 Unicode 字符、marked 升级后的新路径都没有量过；渲染端不限时。上限内量到的最坏情况：一个字段 49–71 ms（lazy 行、所有类放满、最后一行以 `<` 开头并写满 `&`；只有 lazy 行和 `&` 时 43–51 ms），一个值 114 ms。不计数的类是线性的，由长度上限兜着，但可以很重：160 列 × 76 行的表格 70 ms，25000 个 `&` 21 ms。marked 升级时要重跑 fuzz（脚本不在仓库里，方法见 §3.6；`pt-guard.density.test.mjs` 钉住 marked 16.4.2）。
+- **栈的大小是假设**：一行 marker 的上限（8）和靠缩进能达到的 440 层，是按 node 主线程的 0.95 MB 栈和 0.5 MB 栈量的；workerd 的栈没有量过。在更小的栈上溢出时，`renderMarkdown`、`renderInlineMarkdown` 渲染成空字符串（§3.6），这一个字段不显示，页面不会 500。
 - **REST 菜单项数**：`POST /_emdash/api/menus/[name]/items` 每次加一项，闸门只检查这一项的字段，不数菜单里已有多少项（只有 MCP `menu_set_items` 一次给出全部项，闸门才能数）。缓解：`Base.astro` 只渲染前 50 项，`SafeWidgetArea` 遇到超过 50 项的菜单整个 area 不渲染（fail closed），`guard-scan` 报告超过 50 项的菜单。
 - **`@emdash-cms/admin` 是没有声明的传递依赖**：guard 直接 import 它的表格 normalizer（§3.6、§6），`web9-blocks/package.json` 没有写它。emdash 升级挪走它时 import 失败，测试会发现，但部署前要有人处理。
 - **core 的 renderer 没有渲染端兜底**：Image、Code、Pullquote、File、Video、Button、Cover、Block 的文本和 `textAlign` 只靠写入端（guard、发布 hook）挡住；规则加上之前已经存进库的非字符串值仍会让页面 500，由 `guard-scan` 发现（今天库里是 0）。
@@ -324,3 +354,4 @@ web9 自己的其他 renderer 同样把不是字符串的文本当空字符串�
 | 块文本字段的类型检查扩到 `block.textAlign`，`pages.layout` 的按钮文字、链接和图片 alt 也限长（PR 评审修复轮） | 逐个核对 core 和 web9 的 renderer 时发现，`Block.astro` 用 `Object.hasOwn` 查 `textAlign`，`{"toString":1}` 在那里抛错；首页的按钮和 alt 同样原样打印 | 合法值被拒：上限按同类值（label 80、url 2048、description 1000）取，现有最大值 12、17、6 |
 | `fieldsFor` 读线上 schema 限时 1500 ms（`SCHEMA_TIMEOUT_MS`，PR 评审修复轮） | core 的 5 s hook 超时在 handler 外面抛错，发布 hook 的"从不抛错"会失效 | 1500 ms 内读不出 schema 时，那一次只用钉死的表；钉死的表覆盖今天所有字段 |
 | `guard-scan` 经 REST 扫 widget area，汇总单列 revision 里的问题 | widget 没有 MCP 工具可读，原来不在扫描范围内；revision 里的问题编辑修不了，要和能修的分开说 | REST 返回的形状变了时扫描中止（fail loud），不会当作 0 个 area |
+| Markdown 字段限分隔符密度和"换行 × 长度"（`markdown-density.mjs`，PR 评审 I2；评审的裁定是在 guard 里数分隔符，不换 parser，也不在保存时预渲染；admonition 扩展改成线性；渲染抛错时返回空字符串） | 长度上限管不住 marked 的超线性 CPU（§3.6）。只数单个字符不够：link 的代价是 opener 数 × destination 里的 `(` 数，`(` 的总数要压到现有最大值以下才管得住，所以数 destination 里的 `(`；一行的 marker（`1.` 不是单个字符）单独限；lazy 行的代价是行数 × 后面的长度，只限换行数时最坏字段 113–128 ms，所以限乘积 | 合法内容被拒：每个上限是现有最大值的 2 倍；只因为所有类叠在一个字段里时的预算而没有更高（§3.6）。长字段能写的换行比短字段少（25000 字符 134 个） |
