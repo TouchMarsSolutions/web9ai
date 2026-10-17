@@ -131,6 +131,26 @@ describe("per field", () => {
 		// one closing parenthesis, as in a Wikipedia link inside parentheses
 		expect(guardPortableText([callout("(see http://a.b/x) and https://en.wikipedia.org/wiki/A_(b).)")])).toEqual([]);
 	});
+	it("caps each shape marked backpedals at 16 and 17: trailing ), entities, a table cell, a cut at an unmatched (", () => {
+		const SHAPES = {
+			"trailing )": (n) => linkWithTail(")".repeat(n)),
+			entities: (n) => linkWithTail("&a;".repeat(n)),
+			// marked ends the cell's run at the "|"; the raw run ends with it
+			"a table cell": (n) => `|a|\n|-|\n|${linkWithTail(")".repeat(n), LIMITS.markdown - 10)}|`,
+			// the first pass stops at the "(", then the dots go one per pass
+			"a cut at an unmatched (": (n) => linkWithTail(`${".".repeat(n - 1)}(a`),
+		};
+		for (const [what, text] of Object.entries(SHAPES)) {
+			expect(guardPortableText([callout(text(LINK_TAIL))]), what).toEqual([]);
+			expect(guardPortableText([callout(text(LINK_TAIL + 1))]), what).toEqual([
+				`#0 callout body: at most ${LINK_TAIL} punctuation characters or entities at the end of a link (got ${LINK_TAIL + 1})`,
+			]);
+		}
+	});
+	it("accepts a bare link that ends in one closing parenthesis", () => {
+		expect(markdownDensity("http://a.b/x)").linkTail).toBe(1);
+		expect(guardPortableText([callout("http://a.b/x)")])).toEqual([]);
+	});
 	it("rejects the bare-link payloads that took 0.3-0.8 s within every other cap", () => {
 		const message = (n) => [`#0 callout body: at most ${LINK_TAIL} punctuation characters or entities at the end of a link (got ${n})`];
 		for (const c of [")", ";", '"', "'", ":", "?"]) expect(guardPortableText([callout(`http://a.b/${c.repeat(24000)}`)]), c).toEqual(message(24000));

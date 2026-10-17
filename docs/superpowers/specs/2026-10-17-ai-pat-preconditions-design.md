@@ -275,7 +275,7 @@ span、mark、网格格子、markDefs、换行、图片这六项总量中任何�
 - 套上最终规则：9092 + 2156 个 pattern 和 27 个已知结构，每个按两种方式把超出上限的部分换成 `a`（保留开头的，或均匀分布的；换行按 25000 字符的字段取 134 个），共 22604 次渲染。五个 worker 并行筛出 315 个超过 25 ms 的，再在一个 worker 上重测：没有超过 50 ms 的，超过 25 ms 的 27 个，最慢的是宽表格（39 ms）和均匀分布的 `"_&'"`、`"~&'"`（38 ms）。
 - 一个字段，所有类放满（测试 (i)）：25000 字符的字段里 134 行 lazy 行、每一类正好在上限、40 个 destination 里的 `(`、一行 8 个 marker，`<` 也放满（`"<<?"`），最后一行以 `<` 开头、写满 `&` 或 `'`：49–71 ms（7 次重复，中位数 61 ms；不放分隔符时 43–51 ms）；不写满 `&` 时 ≤ 24 ms；没有 lazy 行时 ≤ 27 ms。12500 字符的字段（269 行）37–40 ms，6196 字符（544 行）27–28 ms，2000 字符（1685 行）8 ms。
 - 一个值（测试 (ii)）：52000 个 Markdown 字符按 25000 + 25000 + 2000、4 × 12500 + 2000、8 × 6196 + 2432、26 × 2000 分成几个字段，每个都像 (i) 那样放到字段上限和值上限剩下的为止：最多 114 ms（25000 + 25000 + 2000，写满 `&`）；写满 `a` 时 ≤ 53 ms。173 个 300 字符的 tagline（两个 tool_grid）各放到上限，合计 33 ms。
-- 裸链接（PR 评审 I2 的复审）：由 `http://a`、`www.a`、`HTTP://a`、`) ( | . , ; ' " ? * &a; &`、`a`、空格、换行和 `/` 组成、含一个链接开头的 1–3 个 token 的 pattern，按四种方式写满 25000 字符（连写、隔开、接在一个链接后面、放进表格单元格），共 11484 种，guard 接受的 3093 种在五个 worker 上渲染：没有出错，超过 25 ms 的 694 种在一个 worker 上重测，超过 50 ms 的 3 种（表格单元格里的 `" www.a\""` 等，单次 74 ms），在主线程上取 7 次最快是 20–35 ms，而且是线性的（同一写法 6250、12500、25000 字符 8、15、29 ms）：几千个 `<a>` 经过 sanitize-html 的代价。另在 20 万个随机的段上对照 marked 自己的 `_backpedal`：计数没有一次少于它的遍数。
+- 裸链接（PR 评审 I2 的复审）：由 `http://a`、`www.a`、`HTTP://a`、`) ( | . , ; ' " ? * &a; &`、`a`、空格、换行和 `/` 组成、含一个链接开头的 1–3 个 token 的 pattern，按四种方式写满 25000 字符（连写、隔开、接在一个链接后面、放进表格单元格），共 11484 种，guard 接受的 3093 种在五个 worker 上渲染：没有出错，超过 25 ms 的 694 种在一个 worker 上重测，超过 50 ms 的 3 种（表格单元格里的 `" www.a\""` 等，单次 74 ms），在主线程上取 7 次最快是 20–35 ms，而且是线性的（同一写法 6250、12500、25000 字符 8、15、29 ms）：几千个 `<a>` 经过 sanitize-html 的代价。另在 20 万个随机的段上对照 marked 自己的 `_backpedal`：计数没有一次少于它的遍数。规则定下之后又跑了一轮：链接开头 `http://`、`https://`、`ftp://`、`www.`、`HTTP://` 后面跟 0–3 个 `) ( . , ? ; " ' &a; | ~ a /` 的 token（1779 个 pattern），按九种方式写满 25000 字符（连写、隔开、以换行、空格或 `<` 结束的段、接在一个链接后面、表格行、一个单元格、单元格里以空格隔开），被拒的把重复部分减到 guard 刚好接受（重复在前或 `a` 在前两种），共 16011 种：一个 worker 上取 5 次最快，最慢 43.7 ms（单元格里以空格隔开的 `"www.a&a;\""`），主线程上 24 ms，线性（6250、12500、25000 字符 7、13、24 ms）。和上面 (i) 的最坏字段叠在一起（链接末尾 16 个 `)`、16 个 entity、15 个 `.` 加 `(`、16 个被截断的开头，或用空格隔开的链接写满）时不比 (i) 本身慢：最多 51.6 ms，(i) 本身 51.5–54.8 ms（同一个 worker，取 5 次最快）。
 - 线性但重的（不限）：160 列 × 76 行的表格 70 ms，79 × 79 的 45 ms；25000 个 `&` 或 `'` 21 ms；闭合的 link 写满 28 ms；一个字段里 4000 多个裸链接 24–35 ms。
 - 计数本身一个 25000 字符的字段约 1 ms。
 
@@ -321,7 +321,7 @@ web9 自己的其他 renderer 同样把不是字符串的文本当空字符串�
   - batch 请求被拒。
   - PR 评审修复轮：MCP `content_create` 一个 posts 草稿，`content` 里的 callout `body` 是 `{"toString":1}`，或长于 25000，都以 `Save rejected` 被拒；MCP `content_update` 首页草稿，`layout` 里 hero 的 `title` 是 `{"toString":1}`，以 `Save rejected` 被拒，`_rev` 不变；MCP `byline_create` 的 `avatarMediaId` 长 65，以 `Write rejected` 被拒；库里没有写进任何东西。
   - PR 评审 I2：MCP `content_create` 一个 posts 草稿，callout `body` 是 600 个 `[a](`（`at most 20 "](" link openers`，`at most 40 "(" in link destinations (got 179700)`）、一行 9 个 `> `（`(got 9 on line 1)`）、或 25000 字符里 200 个换行（`at most 134 line breaks in a field of 25000 characters (got 200)`），都以 `Save rejected` 被拒；库里没有写进任何东西。
-  - PR 评审 I2 的复审：同样的草稿，callout `body` 是 `"http://a.b/"` 后面 24000 个 `)`，以 `Save rejected` 被拒（`at most 16 punctuation characters or entities at the end of a link (got 24000)`）；库里没有写进任何东西。
+  - PR 评审 I2 的复审：同样的草稿，callout `body` 是 `"http://a.b/"` 后面 24000 个 `)`，或后面 8000 个 `&a;`，都以 `Save rejected` 被拒（`at most 16 punctuation characters or entities at the end of a link (got 24000)`、`(got 8000)`）；库里没有写进任何东西。
 - `npm test`、`npm run build`（包括公开 CSS 检查）和 `npm run typecheck` 都要通过。
 
 ## 5. 不在范围内
