@@ -410,7 +410,7 @@ access token 1 小时过期。过期后按 Step 1 用 refresh token 换新的，
 - **合并**：PR #7 合并为 `e7c40ac7`，`dist/server/wrangler.json` 带两条 Custom Domain routes。
 - **备份**：`dns-full-before.json` 15 条，`dns-backup.json` 5 条。
 - **校准没通过**：旧记录都在时，Step 3 第 2 步的预检返回 `success:true, added:[www.web9.ai, web9.ai], conflicting:[]`。
-  - Cloudflare 文档写明，已有 CNAME 的 hostname 不能直接建 Custom Domain，可接口没把 `www` 列为冲突。所以 changeset 接口不报 DNS 冲突，第 2、4 步的预检检测不到我们关心的东西。
+  - Cloudflare 文档写明，已有 CNAME 的 hostname 不能直接建 Custom Domain，可接口没把 `www` 列为冲突。所以 changeset 接口没有把这些记录报成冲突，第 2、4 步的预检检测不到我们关心的东西。
   - 按计划停了下来，并核实这次调用没有副作用：Custom Domain 列表为空，DNS 和备份一致。
   - 删掉了 `dist/`。
   - 因此 Step 3 第 4 步（删记录后的确认预检）也跳过了，没有运行。
@@ -439,7 +439,7 @@ access token 1 小时过期。过期后按 Step 1 用 refresh token 换新的，
   - 校准后 Custom Domain 列表为空；
   - itouchmars.com 的 MX 修改时间；
   - 在 www 上跑的 `verify` 计数（日志没留，tail 里能看到这段请求）。
-- `wrangler.jsonc` 的 routes 注释在 PR #8 里改成了切换后的说法；上面 Step 1 引用的是当时的原文。
+- `wrangler.jsonc` 的 routes 注释在 PR #8 里改成了切换后的说法；下面 Step 1 引用的是当时的原文。
 - **收尾**：
   - revoke 返回 `{revoked:true}`，之后旧 access token 返回 401，refresh 返回 400；
   - 本地 token 文件已删除。
@@ -616,7 +616,7 @@ owner 的操作：在 Workers & Pages › `web9-ai` › Settings › Build 里�
     - 766 个事件：719 个请求、47 次 cron；589 ok、177 canceled（客户端先断开）；
     - 1 个 exception（`Network connection lost.`）；
     - 成功请求的 CPU p50 5 ms、p95 78 ms、最大 217 ms；wall time p50 70 ms、p95 1.06 s；
-    - 请求里有 478 个是扫描器（`/.env*`、`/.git/*`、wp 和 php 路径），每个都让 EmDash 渲染一次 404。如果一直这样，考虑给点开头的路径直接回 404，或者加一条 WAF 规则（WAF 要先问 owner）。
+    - 请求里有 478 个是扫描器，几乎全是 `.env` 和 `.git` 探测（含 `//` 开头的变体），每个都让 EmDash 渲染一次 404。如果一直这样，考虑给点开头的路径直接回 404，或者加一条 WAF 规则（WAF 要先问 owner）。
   - `wrangler tail` 采样 CPU 和 wall time。同账号的 itouchmars 测到 D1 往返让 P50 wall time 达到 0.7–2.2 s，我们开了 read replication，要看实际效果，再决定要不要加页面缓存。
 - [x] **回写 spec**（PR #8，2026-10-17）：§9 的切换步骤和"已定"里写上线日期、version id、Custom Domain，以及 Change domain 已经完成；§12 补上 BIC 和百分号编码的实测结果。
 - [ ] **GitHub Pages**：证书 2026-12-01 到期后，GitHub 续不了期（DNS 已经不指向它），回退就不能用了。到时问 owner 要不要 unpublish `gh-pages`。
