@@ -27,7 +27,7 @@ describe("widget areas", () => {
 
 describe("set:html in src/", () => {
 	it("appears only for the static theme icons and the search snippet core has already escaped", () => {
-		const sites = srcFiles.flatMap((file) => [...raw(file).matchAll(/set:html=\{([^}]*)\}/g)].map((m) => [file, m[1]]));
+		const sites = srcFiles.flatMap((file) => [...raw(file).matchAll(/set:html\s*=\s*\{([^}]*)\}/g)].map((m) => [file, m[1]]));
 		expect(sites).toEqual([
 			["src/layouts/Base.astro", "ICONS[b.theme]"],
 			["src/pages/search.astro", "result.snippet"],

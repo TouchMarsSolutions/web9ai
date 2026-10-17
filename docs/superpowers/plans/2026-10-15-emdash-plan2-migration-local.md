@@ -6406,7 +6406,6 @@ Expected：`git status --short` 没有输出（`.local/`、`.wrangler/`、`dist/
 - **AI PAT 之前修**：块形状错误会让本页 500：`buttons.buttons` 是 null、字符串、数字或对象，`tabs` 里有 null，`tools` 里有 null 或 `tagline` 是数字（`Buttons.astro`、`Tabs.astro`、`ToolGrid.astro`）。
 - `embedSrc` 丢掉 Vimeo 的 `h=`（unlisted 视频的 hash）和 `t=`，unlisted 的 Vimeo 视频放不出来。
 - 样式小问题（Task 4）：footer widget 标题的样式丢了；≤640px 时 header 仍有 `border-b`；`sm` 断点和 640px 的规则重叠。
-- `check-public-css` 的两个漏网（Task 5，之后没有复查）：`h-[100\76_h]`（转义吞掉了 `_`）能通过；arbitrary variant 里转义的 `\5b`、`\28`（例如 `data-[x=\5b]:z-50`）也能通过。
 - `verify` 没有正文标记（body 为空也通过）；runner 不比较 `publishedAt`（taxonomy 见上文）；菜单比较忽略 `parentId`、`cssClasses`、`titleAttr`（`cssClasses` 不渲染）。
 - spec §7 的 category 遮蔽说明把 `/zh-CN` 下的同名规则也算上了，但站点没有 `/zh-CN/category/[slug]` 路由；redirects 步骤中途遇到组外规则的 409 停下时，之前已建的规则保留，不回滚。
 - 首页 feature 图片是 12rem × auto（`EmDashImage` 的 scoped `height:auto` 盖过了 `size-48`）。
