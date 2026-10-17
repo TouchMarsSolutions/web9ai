@@ -61,3 +61,26 @@ describe("canonicalResponse", () => {
 		expect(worker).toMatch(/fetch\(request, env, ctx\) \{\s*return canonicalResponse\(request\) \?\? handler\.fetch!\(request, env, ctx\);\s*\}/);
 	});
 });
+
+describe("wrangler.jsonc", () => {
+	// JSONC: whole-line comments and trailing commas only (no value in the file contains "//")
+	const source = readFileSync(new URL("../../../wrangler.jsonc", import.meta.url), "utf8");
+	const config = JSON.parse(source.replace(/^\s*\/\/.*$/gm, "").replace(/,(\s*[}\]])/g, "$1"));
+
+	it("binds exactly the two production hosts, as Custom Domains (Change domain accepts nothing else)", () => {
+		expect(config.routes).toEqual([
+			{ pattern: "www.web9.ai", custom_domain: true },
+			{ pattern: "web9.ai", custom_domain: true },
+		]);
+	});
+	it("serves every bound host from the canonical origin or redirects it there", () => {
+		for (const { pattern } of config.routes) {
+			const target = canonicalRedirect(`https://${pattern}/`);
+			expect(target ?? `https://${pattern}/`, pattern).toBe(`${CANONICAL_ORIGIN}/`);
+		}
+	});
+	it("keeps workers.dev on, where the owner's passkey lives until Change domain", () => {
+		expect(config.workers_dev).toBe(true);
+		expect(config.preview_urls).toBe(false);
+	});
+});

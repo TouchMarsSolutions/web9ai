@@ -5,6 +5,14 @@
 	"compatibility_date": "2026-02-24",
 	"compatibility_flags": ["nodejs_compat"],
 	"observability": { "enabled": true },
+	// Custom Domains (not routes): EmDash's Change domain only accepts a Custom Domain. www.web9.ai is canonical;
+	// src/worker.ts sends the apex there with a 301 (308 for methods other than GET and HEAD). A non-interactive
+	// `wrangler deploy` replaces conflicting DNS records without asking, so the old GitHub Pages records were deleted
+	// by id before the first deploy with these (plan 3 Task 4).
+	"routes": [
+		{ "pattern": "www.web9.ai", "custom_domain": true },
+		{ "pattern": "web9.ai", "custom_domain": true },
+	],
 	// The Worker answers on workers.dev until the cutover and keeps it after: the owner's first passkey is bound to
 	// that hostname until Change domain moves the login (plan 3 Task 4). wrangler may turn workers.dev off once
 	// routes are configured unless it is set explicitly.
