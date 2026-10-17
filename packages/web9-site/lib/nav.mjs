@@ -23,7 +23,13 @@ export function splitMenu(items) {
 
 const DOC_HREF = /^(?:\/zh-CN)?\/docs\/([^/?#]+)\/?$/;
 const BLOG_PATH = /^\/(?:posts|tag|category)(?:\/|$)/;
-const trimSlash = (path) => (path.length > 1 ? path.replace(/\/+$/, "") : path);
+// Trailing slashes off, a lone "/" kept. A linear scan: the regex /\/+$/ backtracks quadratically on a long slash run,
+// and request paths reach this (a 404 included).
+const trimSlash = (path) => {
+	let end = path.length;
+	while (end > 1 && path.charCodeAt(end - 1) === 47) end--;
+	return path.slice(0, end);
+};
 
 /**
  * The href of the menu item to highlight, or undefined (spec 2026-10-17 docs UX §3.1). `docNav` is passed on doc pages

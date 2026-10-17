@@ -66,6 +66,10 @@ describe("activeMenuHref", () => {
 	it("never picks an external item or an item without a string href", () => {
 		expect(activeMenuHref([{ href: "https://www.web9.ai/posts" }, { href: null }, {}], "/posts")).toBeUndefined();
 	});
+	it("trims trailing slashes in linear time, so a long slash run on a request path is cheap", () => {
+		expect(activeMenuHref(items, "/".repeat(20000) + "x")).toBeUndefined();
+		expect(activeMenuHref(items, "/posts" + "/".repeat(20000))).toBe("/posts");
+	});
 });
 
 describe("homeLanguages", () => {
