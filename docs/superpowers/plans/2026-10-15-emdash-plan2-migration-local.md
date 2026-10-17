@@ -6380,11 +6380,14 @@ Expected：`git status --short` 没有输出（`.local/`、`.wrangler/`、`dist/
 
 ## 未决事项（已知，不阻塞计划 2）
 
-- Mermaid 在深色主题下的文字颜色（`themeCSS`）只能在浏览器里确认（Task 15 Step 5）。
+- Mermaid 深色主题：2026-10-16 在浏览器里抽查了 `/docs/ai-tools-adhoc` 的图，文字清楚；其余图没有逐一看过。
 - 标题没有 `id`，旧站的页内锚点（`#programming-code`、`#function`、`#what-is-not`）跳不过去了。
 - 12 张图片是外站热链，可能失效；以后下载到 `public/img/`。
 - 图片的 alt 是 MDX 里的 import 名（例如 `varInKt`），对读屏不友好；需要人工补。
 - `tool_grid` 里宽 logo（NotebookLM、海绵）在正方形框里缩小显示（Task 14 之后不再变形，但比旧站小）。
+- 深色主题下，黑色或深色的 logo 放在深色卡片上几乎看不见，例如 Replicate、Recraft、LibLibAI、Notion、ima、Get笔记（`tools-summary`、`ai-tools-adhoc`）；这是 2026-10-16 浏览器验收时发现的。可以在深色主题下给 logo 加一层浅色底。
+- 代码块字体 JetBrains Mono 会把 `<=` 等运算符显示成连字（`≤`），复制出来的仍是原文；可以在 `pre`/`code` 上设 `font-variant-ligatures: none`。
+- YouTube 嵌入的 iframe 同时有 `allow` 和 `allowfullscreen`，Chrome 控制台会出警告 "Allow attribute will take precedence over 'allowfullscreen'"；没有实际影响，可以去掉 `allowfullscreen`。
 - 被图片或视频打断的嵌套有序列表，后半段丢了父级上下文（续号是对的）。
 - 模板 token `text-on-brand`（白）配深色的 `bg-brand`（`#4d9fff`）对比度约 2.9:1，首页按钮在深色主题下偏淡；改 token 是以后样式计划的事。
 - 草稿 `ai-tiny-course` 以后发布时，如果 `publishedAt` 是空的，要传 `2025-03-08T00:19:14Z`（Task 10 Step 6 记录实际情况）。
