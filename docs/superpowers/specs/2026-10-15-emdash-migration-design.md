@@ -170,9 +170,9 @@
 - **图片（2026-10-17，切换后）**：页面打开慢，原因不在 CDN（站点本来就由 Cloudflare 边缘提供），而在图片。旧站的图片原样搬了过来，`public/img` 有 31.9 MiB，最大的一张 2.8 MiB。
   - `scripts/optimize-images.mjs` 原地压缩，路径和格式不变，内容里的 `/img/...` URL 不用改：
     - 先按 EXIF orientation 转正，宽度超过 1600 px 的再缩到 1600 px（文档正文最宽约 900 CSS px）；
-    - 超过 300 KB 的重新编码，PNG 转成 256 色 palette，JPEG 用 mozjpeg q82；
+    - 超过 300 KiB 的重新编码，PNG 转成 256 色 palette，JPEG 用 mozjpeg q82；
     - 省不到 10% 就不写；
-    - 已经是 palette 的 PNG 不再量化（再量化只会掉颜色），动图 PNG 不动（重新编码只剩一帧）；它写过的 JPEG 再编码一次省不到 1%，所以第二次运行什么都不写；
+    - 宽度不超过 1600 px、已经是 palette 的 PNG 不再量化（再量化只会掉颜色），动图 PNG 不动（重新编码只剩一帧）；它写过的 JPEG 再编码一次省不到 1%，所以第二次运行什么都不写；
     - 处理后仍然超过守门上限的文件打印 `over`，退出码为 1，要手工处理（裁小，或者把照片换成 JPEG，这样 URL 会变）。
   - 第一次运行改了 55 张：26.0 MiB → 5.8 MiB，`public/img` 从 31.9 MiB 降到 11.7 MiB。
   - `scripts/lib/raster-images.test.mjs` 是守门测试：`public/img` 和 `public/cover` 下每张 PNG、JPEG 的宽度不超过 1600 px，大小不超过 1 MiB。上限用 1 MiB 而不是 300 KiB，因为照片存成 PNG，量化后可能还是很大（`event/dinner_background_6.png` 895 KiB），而换格式就得改 URL。只查 PNG 和 JPEG，不限高度（长截图靠字节数限住）；GIF、WebP、SVG 不在检查范围内。
@@ -180,7 +180,7 @@
     - Workers 静态资源的默认值是 `public, max-age=0, must-revalidate`，浏览器每张图都要回源验证一次；
     - 文件名不带 hash，所以不设 immutable，换掉的图最多一天后才生效；
     - build 会在 `_headers` 开头加上 `/_astro/*` 的 immutable 规则。如果这个文件里已经有规则在 `/_astro/` 下的路径上设了 Cache-Control，build 就不加了。测试钉住这一点。
-  - SVG 暂不处理：首页的三个（465、487、258 KiB），以及 `public/img` 里的 `energy_free.0.svg`（1.67 MB）、`energy_free.1.svg`、`metaverse.0.svg`、`logo.svg`。
+  - SVG 暂不处理：首页的三个（454、475、252 KiB），以及 `public/img` 里的 `energy_free.0.svg`（1.67 MB）、`energy_free.1.svg`、`metaverse.0.svg`、`logo.svg`。
 - 模板的 cron trigger（`* * * * *`，用于定时发布）每天约 1440 次调用，在免费额度之内。
 - worker 体积（计划 2 Task 15，`wrangler deploy --dry-run`）：Total Upload 19190.21 KiB，gzip 5044.82 KiB。
 
