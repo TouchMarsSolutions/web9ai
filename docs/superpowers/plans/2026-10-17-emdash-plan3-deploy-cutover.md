@@ -68,8 +68,12 @@
   - token 最多显示前 8 个字符；
   - 迁移用的 admin token 在 Task 4 验证完后 revoke，并删除本地文件。
 - 不改 `gh-pages` 分支，不停用 GitHub Pages（它是回退目标），不从 `legacy/` 部署任何东西。
-- **带 `routes` 的构建**：Task 4 Step 3 删掉那 5 条记录、并且删除后的预检 `conflicting` 为空之前，任何带 `routes` 的 `dist/` 都不能 `wrangler deploy`，原因见上表"Custom Domain 和已有 DNS 记录"。
-  - `wrangler deploy` 读的是 build 生成的 `dist/server/wrangler.json`，不是 checkout 里的 `wrangler.jsonc`，所以换分支后要先重新 build。
+- **带 `routes` 的构建**：Task 4 Step 3 删掉那 5 条记录、并且删除后的预检 `conflicting` 为空之前，带 `routes` 的配置一律不能 `wrangler deploy`，不管它是 build 出来的 `dist/`，还是 checkout 里的 `wrangler.jsonc`。原因见上表"Custom Domain 和已有 DNS 记录"。
+  - `wrangler deploy` 读哪份配置：
+    - 有 `.wrangler/deploy/config.json` 时，读 build 生成的 `dist/server/wrangler.json`，所以换分支后要先重新 build；
+    - 没有时（比如 `rm -rf dist .wrangler/deploy` 之后），读 checkout 里的 `wrangler.jsonc`，并且自己打包 `src/worker.ts`（`cli.js:3556-3559`）。
+    
+    所以删掉 `dist/` 并不能让一个还带 `routes` 的 `main` 变得安全，要等 revert 合并之后才行。
   - routes PR 在 Step 3 开头合并。风险在部署，不在合并：CI 不部署，Workers Builds 也还没连（Task 5）。如果 Workers Builds 在 Task 4 之前连上了，合并就等于部署，这一条要改回"删除之前不能合并"。
   - 合并后如果同一次会话里没有接着部署，离开前在 `main` 上 revert routes PR。
 - 永远不运行 `wrangler dev --remote`：它连的是生产 D1，第一次请求就会对生产库跑 core migration。
@@ -430,7 +434,7 @@ jq length .local/dns-full-before.json .local/dns-backup.json   # 15（2026-10-17
 - 预检成功，就证明它能访问 Workers 的 domains 接口；
 - 这两件事都在 GitHub Pages 还在服务、或者刚删完还能马上重建的时候得到验证。
 
-预检命令如下（第 2、4 步都用它）。下面每个代码块都是自包含的：环境变量不会在 Bash 调用之间保留，查不到 zone 或 account 时 `${VAR:?}` 会立刻退出，不会拿 `null` 继续执行。`ACCOUNT` 从 zone 取，2026-10-17 已和 `wrangler whoami` 的 account 核对一致。
+预检命令如下（第 2、4 步都用它）。下面每个代码块都是自包含的，写给 agent 的 Bash 工具用（每次调用都是一个新的非交互 shell）；在交互终端里请用 `bash -c '…'` 或子 shell `( … )` 运行，因为 `exit` 和 `${VAR:?}` 会关掉当前 shell。环境变量不会在 Bash 调用之间保留，查不到 zone 或 account 时 `${VAR:?}` 会立刻退出，不会拿 `null` 继续执行。`ACCOUNT` 从 zone 取，2026-10-17 已和 `wrangler whoami` 的 account 核对一致。
 
 ```bash
 API=https://api.cloudflare.com/client/v4; H="Authorization: Bearer ${CLOUDFLARE_API_TOKEN:?}"
@@ -555,8 +559,12 @@ owner 的操作：在 Workers & Pages › `web9-ai` › Settings › Build 里�
 1. **先撤掉 routes**：开一个 PR，只撤代码，`routes` 和钉住它的测试一起撤：
 
    ```bash
+   git fetch origin   # 否则本地 origin/main 可能还停在 PR #7 合并之前，checkout 什么都不会改
    git checkout -b revert-routes origin/main
    git checkout <PR #7 的 merge commit>^1 -- wrangler.jsonc packages/web9-site/lib/canonical-host.test.mjs
+   git diff --cached --stat   # 必须有这两个文件；空的就说明上一步没取到合并后的 main
+   git commit -m 'revert(deploy): remove the Custom Domain routes (rollback)' && git push -u origin revert-routes
+   gh pr create --base main --title 'Rollback: remove the Custom Domain routes' --body '…'
    ```
 
    - 如果只撤 `routes`，测试会失败，CI 也就挡住了回退。
