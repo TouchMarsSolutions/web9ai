@@ -313,7 +313,31 @@ Expected:
 
 ### Task 3: 生产迁移（检查点 B）
 
-- [ ] **Step 1: 用 device flow 拿 admin token**（字段名已对照 `node_modules/emdash/dist/astro/routes/api/oauth/device/*.mjs` 和 `device-flow-*.mjs` 核实，见 PR #6 评审 M3）
+**状态（2026-10-17，已完成）**：
+- **token**：owner 批准 device code 后拿到 admin token（`scope: admin`，1 小时过期）。前两个码没人批，15 分钟后 `expired_token`。
+- **管理员**：只有 1 个用户，role 50（admin），邮箱域名是 owner 的，创建于 19:41 UTC，就是 owner 做 setup 的时间。
+- **迁移**：
+  - `all --dry-run`：只有 `menu: updated 1`；其余都是新建，docs 35、terms 5、posts 2、redirects 83、home 2。
+  - `menu --overwrite`：`[0].label: stored "Blog" / wanted "AI"`，也就是 seed 的菜单被换成迁移后的菜单。
+  - 第一次 `all`：全部 created。
+  - 第二次 `all`：每一步都是 `unchanged`。
+  - `verify`：54/54 页面、86/86 redirect，没有 schema drift。
+  - `guard-scan`：39 entries、38 revisions、1 menu、5 terms、2 widget areas，0 problems。
+- **抽查**：
+  - 页面都是 200：`/`、`/zh-CN/`、`/docs/intro`、`/docs/tools-summary`、`/posts`、`/search?q=Coze`（结果里有 4 篇 doc）、`/rss.xml`。
+  - 重定向：`/blog/rss.xml` 301 到 `/rss.xml`；`/blog` 301 到 `/posts`；旧 URL `/ai/model/01_3d` 301 到 `/docs/3d`，`/zh-CN/dev/learn_ai_coding` 301 到 `/zh-CN/docs/learn_ai_coding`。
+  - 首页正文和本地 dev 逐字一致，中文首页正常。
+- **主题**（CDP 借用标签页，事后已导航回原页面）：
+  - 系统深色时，首页是深色；系统浅色时，doc 页是浅色。
+  - 切换按钮的 4 种情况都对：系统浅色时点 dark 变深色，点 light 是浅色；系统深色时点 light 变浅色，点 system 恢复深色。
+  - 也就是说，production minify 之后 `:root.dark` 和 `:root:not(.light)` 都有效。
+- **`wrangler tail` 采样 19 个请求**：
+  - CPU：中位数 20 ms，最大 88 ms（`/docs/learn_ai_coding`），最小 2 ms（`/rss.xml`）；
+  - wall time：平均 223 ms，最大 370 ms；
+  - 没有 exception。
+  - 很多请求超过 Free 套餐的 10 ms 上限，说明 Workers Paid 是必需的。
+
+- [x] **Step 1: 用 device flow 拿 admin token**（字段名已对照 `node_modules/emdash/dist/astro/routes/api/oauth/device/*.mjs` 和 `device-flow-*.mjs` 核实，见 PR #6 评审 M3）
 
 ```bash
 curl -s -X POST https://web9-ai.jhcao23.workers.dev/_emdash/api/oauth/device/code \
@@ -342,7 +366,7 @@ curl -s -X POST https://web9-ai.jhcao23.workers.dev/_emdash/api/oauth/device/cod
 
   refresh 会删掉这个 refresh token 名下旧的 access token，再发一个新的，所以 `.local/prod-token` 要立刻覆盖。refresh token 不会轮换，原来的继续有效（`emdash/dist/device-flow-*.mjs` `handleTokenRefresh`）。
 
-- [ ] **Step 2: 核对只有一个管理员**
+- [x] **Step 2: 核对只有一个管理员**
 
 ```bash
 curl -s https://web9-ai.jhcao23.workers.dev/_emdash/api/admin/users -H "Authorization: Bearer $(cat .local/prod-token)" -H 'X-EmDash-Request: 1'
@@ -350,7 +374,7 @@ curl -s https://web9-ai.jhcao23.workers.dev/_emdash/api/admin/users -H "Authoriz
 
 Expected: 只有 1 个用户，role 是 admin，邮箱是 owner 的。如果多出别人，立刻停下，告诉 owner（说明有人抢先完成了 setup）。
 
-- [ ] **Step 3: 跑迁移**（顺序见 spec §12 和计划 2 路线图第 4 步）
+- [x] **Step 3: 跑迁移**（顺序见 spec §12 和计划 2 路线图第 4 步）
 
 每条命令前面都要带上 `EMDASH_URL=https://web9-ai.jhcao23.workers.dev EMDASH_TOKEN=$(cat .local/prod-token)`（环境变量不会在 Bash 调用之间保留）：
 
@@ -371,7 +395,7 @@ Expected:
 
 access token 1 小时过期。过期后按 Step 1 用 refresh token 换新的，不要让 owner 再批一次。
 
-- [ ] **Step 4: 线上抽查**
+- [x] **Step 4: 线上抽查**
 
 1. 用 `node scripts/check-page.mjs` 抽查 workers.dev 上这些页面：`/`、`/zh-CN/`、`/docs/intro`、`/docs/tools-summary`、`/posts`、`/search?q=Coze`、`/rss.xml`、`/blog/rss.xml`（301）、一条旧 doc URL（301）。
 2. 用浏览器（CDP 借用已有标签页）看首页和一篇 doc 的浅色、深色主题。看完导航回原页面。
