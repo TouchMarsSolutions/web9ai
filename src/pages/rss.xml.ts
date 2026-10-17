@@ -1,9 +1,11 @@
 import type { APIRoute } from "astro";
 import { getEmDashCollection, getSiteSettings } from "emdash";
 
+import { cacheControl } from "../../packages/web9-site/lib/cache-control.mjs";
 import { resolveBlogSiteIdentity } from "../utils/site-identity";
 
-export const GET: APIRoute = async ({ site }) => {
+export const GET: APIRoute = async (context) => {
+	const { site } = context;
 	if (!site) throw new Error("astro.config `site` must be set for RSS");
 	const siteUrl = site;
 	const { siteTitle, siteTagline } = resolveBlogSiteIdentity(await getSiteSettings());
@@ -49,7 +51,8 @@ ${items}
 	return new Response(rss, {
 		headers: {
 			"Content-Type": "application/rss+xml; charset=utf-8",
-			"Cache-Control": "public, max-age=3600",
+			// an editor, edit mode or a _preview param get draft titles here: private, no-store (cache-control.mjs)
+			"Cache-Control": cacheControl(context),
 		},
 	});
 };

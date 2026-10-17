@@ -108,6 +108,60 @@ describe("blocksToMarkdown", () => {
 		});
 	});
 
+	// A hostile value must not cost more than its size: these took seconds before the regexes were made linear
+	describe("cost stays linear in the size of the value", () => {
+		const within = (ms, fn) => {
+			const start = performance.now();
+			const result = fn();
+			expect(performance.now() - start).toBeLessThan(ms);
+			return result;
+		};
+		it("handles a body with many unclosed link starts", () => {
+			const md = within(1500, () => blocksToMarkdown([{ _type: "callout", body: "](/".repeat(40000) }], { origin: "https://www.web9.ai" }));
+			expect(md.length).toBeGreaterThan(100000);
+		});
+		it("handles backtick runs that never close", () => {
+			const body = Array.from({ length: 1200 }, (_, i) => "`".repeat(i + 1) + "a").join(" ");
+			within(1500, () => blocksToMarkdown([{ _type: "callout", body }], { origin: "https://www.web9.ai" }));
+		});
+		it("handles a long run of whitespace in a table cell", () => {
+			const cell = { content: [{ _type: "span", text: `a${" ".repeat(60000)}b` }] };
+			within(1500, () => blocksToMarkdown([{ _type: "table", rows: [{ cells: [cell] }] }]));
+		});
+		it("handles code made of thousands of separate backtick runs", () => {
+			const md = within(1500, () => blocksToMarkdown([{ _type: "code", code: "` ".repeat(300000) }]));
+			expect(md.startsWith("```\n")).toBe(true);
+		});
+		it("handles a table with many link definitions and many cells", () => {
+			const markDefs = Array.from({ length: 4000 }, (_, i) => ({ _key: `l${i}`, _type: "link", href: `/p${i}` }));
+			const cells = Array.from({ length: 4000 }, (_, i) => ({ content: [{ _type: "span", text: `c${i}`, marks: [`l${i}`] }] }));
+			const md = within(1500, () => blocksToMarkdown([{ _type: "table", markDefs, rows: [{ cells }] }], { origin: "https://www.web9.ai" }));
+			expect(md).toContain("[c3999](https://www.web9.ai/p3999)");
+		});
+	});
+
+	describe("table links", () => {
+		it("takes link definitions from the table and from the cell, the table first", () => {
+			const md = blocksToMarkdown([
+				{
+					_type: "table",
+					markDefs: [{ _key: "t", _type: "link", href: "https://t.test/" }, { _key: "x", _type: "link", href: "https://table-wins.test/" }, { _key: "bad", _type: "link", href: "javascript:alert(1)" }],
+					rows: [
+						{ cells: [{ content: [{ _type: "span", text: "H" }] }, { content: [{ _type: "span", text: "H2" }] }, { content: [{ _type: "span", text: "H3" }] }] },
+						{
+							cells: [
+								{ content: [{ _type: "span", text: "one", marks: ["t", "strong"] }] },
+								{ markDefs: [{ _key: "c", _type: "link", href: "https://c.test/" }, { _key: "x", _type: "link", href: "https://cell-loses.test/" }], content: [{ _type: "span", text: "two", marks: ["c"] }, { _type: "span", text: "-x", marks: ["x"] }] },
+								{ content: [{ _type: "span", text: "three", marks: ["bad"] }] },
+							],
+						},
+					],
+				},
+			]);
+			expect(md).toContain("| **[one](https://t.test/)** | [two](https://c.test/)[-x](https://table-wins.test/) | three |");
+		});
+	});
+
 	describe("structure from hostile text", () => {
 		it("keeps a callout tone and title on their own line", () => {
 			const md = blocksToMarkdown([{ _type: "callout", tone: "info\n# Injected", title: "A\n# B", body: "x" }]);
@@ -123,6 +177,50 @@ describe("blocksToMarkdown", () => {
 				{ origin: "https://www.web9.ai" },
 			);
 			expect(md).toBe("- a\n- b\n- [c](https://www.web9.ai/ok)\n");
+		});
+	});
+
+	describe("code", () => {
+		const code = (c, language = "js") => ({ _type: "code", _key: "c", language, code: c });
+		it("writes core code in a fence, with the language", () => {
+			expect(blocksToMarkdown([code("let a = 1;")])).toBe("```js\nlet a = 1;\n```\n");
+			expect(blocksToMarkdown([code("x", null)])).toBe("```\nx\n```\n");
+		});
+		it("lengthens the fence when the code contains a fence, so it cannot break out", () => {
+			const md = blocksToMarkdown([text("Before"), code("a\n```\n# Injected heading\n```\nb", "md"), text("After")]);
+			expect(md).toBe("Before\n\n````md\na\n```\n# Injected heading\n```\nb\n````\n\nAfter\n");
+			expect(blocksToMarkdown([code("``````\nx", null)])).toBe("```````\n``````\nx\n```````\n");
+		});
+		it("keeps the code as written, indentation and blank lines included", () => {
+			expect(blocksToMarkdown([code("  indented\n\n\tTabbed  ")])).toBe("```js\n  indented\n\n\tTabbed  \n```\n");
+		});
+		it("drops an unusable language and survives a code that is not a string", () => {
+			expect(blocksToMarkdown([code("x", "js\n# Injected")])).toBe("```\nx\n```\n");
+			expect(blocksToMarkdown([code({ a: 1 }), text("Keep")])).toBe("```js\n\n```\n\nKeep\n");
+		});
+		it("does not make a link inside code absolute, fenced or inline", () => {
+			const md = blocksToMarkdown(
+				[
+					code("[a](/x)", "md"),
+					{
+						_type: "callout",
+						body: "Link [b](/y), code `[c](/z)` and ``[d](/w)`` here.\n\n```\n[e](/v)\n```\n\n~~~md\n[f](/u)\n~~~\n\nAfter [g](/t)",
+					},
+					{ _type: "block", style: "normal", markDefs: [{ _key: "l", _type: "link", href: "/h" }], children: [{ _type: "span", text: "inline", marks: ["code", "l"] }, { _type: "span", text: " and `[i](/s)`" }] },
+				],
+				{ origin: "https://www.web9.ai" },
+			);
+			expect(md).toContain("```md\n[a](/x)\n```");
+			expect(md).toContain("Link [b](https://www.web9.ai/y), code `[c](/z)` and ``[d](/w)`` here.");
+			expect(md).toContain("```\n[e](/v)\n```");
+			expect(md).toContain("~~~md\n[f](/u)\n~~~");
+			expect(md).toContain("After [g](https://www.web9.ai/t)");
+			expect(md).toContain("[`inline`](https://www.web9.ai/h) and `[i](/s)`");
+		});
+		it("makes links absolute again after a fence closes, and not inside an unclosed fence", () => {
+			const md = blocksToMarkdown([{ _type: "callout", body: "````\n```\n[a](/x)\n```\n````\n[b](/y)\n\n```\n[c](/z)" }], { origin: "https://www.web9.ai" });
+			expect(md).toContain("````\n```\n[a](/x)\n```\n````\n[b](https://www.web9.ai/y)");
+			expect(md).toContain("```\n[c](/z)");
 		});
 	});
 
