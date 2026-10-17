@@ -15,6 +15,20 @@ describe("docPageChecks", () => {
 		expect(checks[1].absent).toContain(FALLBACK_NOTICE);
 		expect(checks[0].absent).toContain("ec:block");
 	});
+	it("checks for the web9 embed player and for no output of core's htmlBlock or embed renderer", () => {
+		const page = (locale, slug, title, body) => ({ doc: { locale, slug }, want: { data: { title, body } } });
+		const video = { _type: "embed", _key: "v", url: "https://www.youtube.com/watch?v=LslC2nKEEGU&t=644s" };
+		const other = { _type: "embed", _key: "o", url: "https://example.com/talk.mp4" };
+		const player = 'src="https://www.youtube-nocookie.com/embed/LslC2nKEEGU?start=644"';
+		const checks = docPageChecks([page("en", "guide", "Guide", [video, other]), page("en", "intro", "Intro", [])]);
+		expect(checks.map((c) => [c.url, c.present])).toEqual([
+			["/docs/guide", [">Guide</h1>", player]],
+			["/zh-CN/docs/guide", [">Guide</h1>", FALLBACK_NOTICE, player]],
+			["/docs/intro", [">Intro</h1>"]],
+			["/zh-CN/docs/intro", [">Intro</h1>", FALLBACK_NOTICE]],
+		]);
+		for (const c of checks) expect(c.absent).toEqual(expect.arrayContaining(['class="emdash-html-block', '<figure class="emdash-embed']));
+	});
 	it("escapes like Astro", () => {
 		expect(escapeHtml(`a<b>&"c'`)).toBe("a&lt;b&gt;&amp;&quot;c&#39;");
 	});

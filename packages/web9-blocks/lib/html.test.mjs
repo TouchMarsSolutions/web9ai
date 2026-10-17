@@ -21,6 +21,15 @@ describe("sanitizeHtmlFragment", () => {
 		expect(sanitizeHtmlFragment('<a href="//evil.example">p</a>')).toBe('<a rel="noopener noreferrer" target="_blank">p</a>');
 		expect(sanitizeHtmlFragment('<a href="javascript:alert(1)">j</a>')).toBe('<a rel="noopener noreferrer" target="_blank">j</a>');
 	});
+	it("holds hrefs to the site's href rule (href.mjs, core isSafeHref)", () => {
+		const a = (href) => sanitizeHtmlFragment(`<a href="${href}">x</a>`);
+		for (const href of ["/\\evil.example", "\\\\evil.example", " //evil.example", "\\/evil.example", "foo/bar", "?q=1"]) {
+			expect(a(href), href).toBe('<a rel="noopener noreferrer" target="_blank">x</a>');
+		}
+		for (const href of ["http:evil.example", "tel:+15551234567", "mailto:a@example.com", "https://example.com/a", "/docs/intro", "#top"]) {
+			expect(a(href), href).toBe(`<a href="${href}" rel="noopener noreferrer" target="_blank">x</a>`);
+		}
+	});
 	it("does not run markdown over HTML", () => {
 		expect(sanitizeHtmlFragment("<p>2*3*4 and a_b_c</p>")).toBe("<p>2*3*4 and a_b_c</p>");
 		expect(sanitizeHtmlFragment("<div>\n\n    <span>x</span>\n\n</div>")).toBe("<div>\n\n    <span>x</span>\n\n</div>");

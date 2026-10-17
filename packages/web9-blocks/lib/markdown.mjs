@@ -3,6 +3,7 @@
 import { Marked } from "marked";
 import sanitizeHtml from "sanitize-html";
 import { safeValueFor } from "./css-value.mjs";
+import { isSiteHref, safeHref } from "./href.mjs";
 
 const TONES = new Set(["note", "tip", "info", "warning", "danger", "caution"]);
 
@@ -76,13 +77,13 @@ export const ALLOWED_TAGS = sanitizeHtml.defaults.allowedTags
 	.filter((tag) => !RUBY_TAGS.has(tag))
 	.concat(["img", "details", "summary", "del", "s", "h1", "h2"]);
 
-/** Absolute (http(s)://), protocol-relative (//) and mailto: links leave the site; everything else stays on it. */
-const isExternalHref = (href = "") => /^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(href) || /^mailto:/i.test(href);
+const omit = (attribs, ...names) => Object.fromEntries(Object.entries(attribs).filter(([name]) => !names.includes(name)));
 
+/** Links follow the site's href rule (href.mjs): an unsafe href is dropped (the text stays), a site path or fragment opens in the same tab, anything else in a new one. */
 function transformLink(tagName, attribs) {
-	if (isExternalHref(attribs.href)) return { tagName, attribs: { ...attribs, rel: "noopener noreferrer", target: "_blank" } };
-	const { target, ...rest } = attribs;
-	return { tagName, attribs: rest };
+	if (!safeHref(attribs.href)) return { tagName, attribs: omit(attribs, "href", "target", "rel") };
+	if (isSiteHref(attribs.href)) return { tagName, attribs: omit(attribs, "target") };
+	return { tagName, attribs: { ...attribs, rel: "noopener noreferrer", target: "_blank" } };
 }
 
 const SANITIZE = {
@@ -106,7 +107,9 @@ const SANITIZE = {
 		"*": styleRules(TEXT_STYLE_PROPS),
 		...Object.fromEntries(BLOCK_TAGS.map((tag) => [tag, BLOCK_STYLE_RULES])),
 	},
-	allowedSchemes: ["http", "https", "mailto"],
+	// the schemes href.mjs accepts; the sanitizer checks them again after transformLink
+	allowedSchemes: ["http", "https", "mailto", "tel"],
+	allowProtocolRelative: false,
 	transformTags: { a: transformLink },
 };
 

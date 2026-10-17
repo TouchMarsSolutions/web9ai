@@ -232,12 +232,12 @@ describe("blocksToMarkdown", () => {
 			children: [{ _type: "span", text: label, marks: ["l"] }],
 		});
 		it("keeps http, mailto, site-relative and hash links", () => {
-			for (const href of ["https://x.test/a", "http://x.test", "mailto:a@b.test", "/docs/x", "#top"]) {
+			for (const href of ["https://x.test/a", "http://x.test", "mailto:a@b.test", "/docs/x", "#top", "http:x.test", "tel:+15551234567"]) {
 				expect(blocksToMarkdown([link(href)])).toBe(`[go](${href})\n`);
 			}
 		});
 		it("keeps the text but drops the link when the scheme is not safe", () => {
-			for (const href of ["javascript:alert(1)", " JavaScript:alert(1)", "java\nscript:alert(1)", "data:text/html,x", "vbscript:x", "//evil.example", "/\\evil.example", 5, null]) {
+			for (const href of ["javascript:alert(1)", " JavaScript:alert(1)", "java\nscript:alert(1)", "data:text/html,x", "vbscript:x", "//evil.example", "/\\evil.example", "\\\\evil.example", " //evil.example", "\\/evil.example", "foo/bar", "?q=1", 5, null]) {
 				expect(blocksToMarkdown([link(href)])).toBe("go\n");
 			}
 		});

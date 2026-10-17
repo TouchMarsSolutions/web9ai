@@ -43,6 +43,7 @@
 // `<ol start>` of OrderedList.astro. Both are bounded when present: listId a string of at most MAX_LIST_ID
 // characters, listStart an integer from 1 to MAX_LIST_START.
 import { blurhashToImageCssString } from "@unpic/placeholder";
+import { LOGO_SIZE } from "./tool-grid.mjs";
 
 const COLOR = /^(?:#[0-9a-f]{3,8}|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(?:,\s*(?:0|1|0?\.\d+)\s*)?\))$/i;
 const LENGTH = /^\d{1,4}(?:\.\d{1,2})?(?:px|rem|em|%)$/;
@@ -118,7 +119,7 @@ const RULES = {
 	tabs: {},
 	details: {},
 	mermaid: {},
-	tool_grid: { logo_size: numberIn(16, 300), "tools[].url": STRING, "tools[].logo": STRING },
+	tool_grid: { logo_size: numberIn(LOGO_SIZE.min, LOGO_SIZE.max), "tools[].url": STRING, "tools[].logo": STRING },
 	investment_warning: { lang: oneOf("zh", "en") },
 };
 
@@ -273,8 +274,13 @@ function checkContainers(node, type, i, out) {
 	}
 }
 
+/**
+ * An empty body is absent, null, [] or a blank string (core stores that as null after the hook). Any other
+ * non-array is rejected here rather than left to core's own check, which runs after the hook.
+ */
 export function guardPortableText(value) {
-	if (!Array.isArray(value)) return [];
+	if (value == null || (typeof value === "string" && !value.trim())) return [];
+	if (!Array.isArray(value)) return [`value ${show(value)} is not allowed: a Portable Text field must be an array of blocks`];
 	const out = collector();
 	for (let i = 0; i < value.length && !out.full; i++) {
 		const node = value[i];

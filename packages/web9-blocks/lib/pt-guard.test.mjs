@@ -61,10 +61,18 @@ describe("guardPortableText", () => {
 			"#10 cover minHeight",
 		]);
 	});
-	it("ignores absent fields and non-array values", () => {
+	it("ignores absent fields and empty values", () => {
 		expect(guardPortableText([{ _type: "image", _key: "a", asset: { _ref: "x" } }, { _type: "cover", _key: "b" }])).toEqual([]);
-		expect(guardPortableText("# markdown")).toEqual([]);
-		expect(guardPortableText(undefined)).toEqual([]);
+		// an empty body: absent, null (stored), [] (the editor) or a blank string (core stores it as null)
+		for (const empty of [undefined, null, [], "", " \n\t"]) expect(guardPortableText(empty)).toEqual([]);
+	});
+	it("rejects any other value that is not an array, without throwing", () => {
+		const must = "a Portable Text field must be an array of blocks";
+		expect(guardPortableText("# markdown")).toEqual([`value "# markdown" is not allowed: ${must}`]);
+		expect(guardPortableText(5)).toEqual([`value 5 is not allowed: ${must}`]);
+		expect(guardPortableText(false)).toEqual([`value false is not allowed: ${must}`]);
+		expect(guardPortableText({ _type: "block" })).toEqual([`value {"_type":"block"} is not allowed: ${must}`]);
+		expect(guardPortableText({ toString: 0 })).toEqual([`value {"toString":0} is not allowed: ${must}`]);
 	});
 });
 

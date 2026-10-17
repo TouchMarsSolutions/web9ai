@@ -4,6 +4,13 @@
 // for example a position:absolute; inset:0 cover background (spec §10).
 import sanitizeHtml from "sanitize-html";
 import { ALLOWED_TAGS } from "./markdown.mjs";
+import { safeHref } from "./href.mjs";
+
+/** Every link opens in a new tab; an href that fails the site's href rule (href.mjs) is dropped. */
+function transformLink(tagName, attribs) {
+	const { href, ...rest } = attribs;
+	return { tagName, attribs: { ...(safeHref(href) ? attribs : rest), rel: "noopener noreferrer", target: "_blank" } };
+}
 
 const OPTIONS = {
 	allowedTags: ALLOWED_TAGS,
@@ -13,9 +20,9 @@ const OPTIONS = {
 		td: ["colspan", "rowspan"],
 		th: ["colspan", "rowspan", "scope"],
 	},
-	allowedSchemes: ["http", "https", "mailto"],
+	allowedSchemes: ["http", "https", "mailto", "tel"],
 	allowProtocolRelative: false,
-	transformTags: { a: sanitizeHtml.simpleTransform("a", { rel: "noopener noreferrer", target: "_blank" }, true) },
+	transformTags: { a: transformLink },
 };
 
 export function sanitizeHtmlFragment(html) {

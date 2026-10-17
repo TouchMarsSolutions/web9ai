@@ -26,6 +26,14 @@ describe("content:beforeSave", () => {
 		const other = { body: [{ _type: "htmlBlock" }] };
 		expect(await beforeSave({ collection: "other", content: other })).toBe(other);
 	});
+	it("rejects a Portable Text field that is not an array, and passes an empty one", async () => {
+		await expect(beforeSave({ collection: "docs", content: { body: "<b>x</b>" } })).rejects.toMatchObject({
+			name: "ContentSaveRejectedError",
+			message: 'Save rejected (spec §10): body: value "<b>x</b>" is not allowed: a Portable Text field must be an array of blocks',
+		});
+		await expect(beforeSave({ collection: "posts", content: { content: { _type: "block" } } })).rejects.toMatchObject({ name: "ContentSaveRejectedError" });
+		for (const empty of [null, [], ""]) expect((await beforeSave({ collection: "docs", content: { body: empty } })).search_text).toBe("");
+	});
 	it("rejects a save with a message the editor sees", async () => {
 		await expect(
 			beforeSave({ collection: "docs", content: { body: [{ _type: "htmlBlock", _key: "h", html: "<b>x</b>" }] } }),

@@ -8,9 +8,10 @@
 // cells, for one), so every value here may be malformed: a node that throws is dropped, never the page.
 // Core nodes are rebuilt from their well-formed parts before portableTextToMarkdown sees them, because it
 // throws on a non-iterable `children`, a null child or a non-string `style`, and `"  ".repeat(level)` throws
-// on a huge `level`. Link and image urls are held to the same rule as the site's sanitizeHref.
+// on a huge `level`. Link and image urls are held to the site's href rule (href.mjs, core's isSafeHref).
 import { portableTextToMarkdown } from "emdash/client";
 import { embedSrc } from "./embed-url.mjs";
+import { safeHref as safeUrl } from "./href.mjs";
 import { disclaimerFor } from "./investment-warning.mjs";
 import { safeTone } from "./markdown.mjs";
 
@@ -21,11 +22,6 @@ const str = (v) => (typeof v === "string" ? v : "");
 const oneLine = (s) => str(s).replace(/\s+/g, " ").trim();
 const escLink = (s) => oneLine(s).replace(/([[\]\\])/g, "\\$1");
 
-// The urls the site renders as links (emdash sanitizeHref): http(s), mailto, tel, a site path, a #fragment.
-// Protocol-relative (`//host`) and backslash paths (`/\host`, which a browser reads as `//host`) are not.
-const HREF = /^(?:https?:|mailto:|tel:|\/(?![/\\])|#)/i;
-const CONTROL = /[\u0000-\u001f\u007f]/;
-const safeUrl = (u) => (typeof u === "string" && HREF.test(u) && !CONTROL.test(u) && (u[0] === "/" || u[0] === "#" || URL.canParse(u)) ? u : "");
 /** A url as a Markdown link destination: whitespace, angle brackets, backslashes and parentheses must not end it early. */
 const dest = (u) => u.replace(/[\s<>\\]/g, encodeURIComponent).replace(/\(/g, "%28").replace(/\)/g, "%29");
 

@@ -120,6 +120,29 @@ describe("renderMarkdown sanitizer", () => {
 		);
 		expect(renderMarkdown('<a href="/docs/x" target="_top">t</a>')).toBe('<p><a href="/docs/x">t</a></p>\n');
 	});
+	describe("links follow the site's href rule (href.mjs, core isSafeHref)", () => {
+		const a = (href) => renderInlineMarkdown(`<a href="${href}" target="_top" rel="opener">x</a>`);
+		it("drops an href a browser resolves to another host, or that core would not render", () => {
+			for (const href of ["/\\evil.example", "\\\\evil.example", " //evil.example", "//evil.example", "\\/evil.example", "foo/bar", "?q=1"]) {
+				expect(a(href), href).toBe("<a>x</a>");
+			}
+		});
+		it("opens http:host, tel: and mailto: in a new tab", () => {
+			for (const href of ["http:evil.example", "tel:+15551234567", "mailto:a@example.com", "https://example.com/a"]) {
+				expect(renderInlineMarkdown(`<a href="${href}">x</a>`), href).toBe(`<a href="${href}" rel="noopener noreferrer" target="_blank">x</a>`);
+				expect(a(href), href).toBe(`<a href="${href}" target="_blank" rel="noopener noreferrer">x</a>`);
+			}
+		});
+		it("keeps site paths and fragments in the same tab", () => {
+			expect(a("/docs/intro")).toBe('<a href="/docs/intro" rel="opener">x</a>');
+			expect(a("#top")).toBe('<a href="#top" rel="opener">x</a>');
+		});
+		it("holds inside an admonition too", () => {
+			const out = renderMarkdown(':::tip T\n<a href="/\\evil.example">Docs</a> <a href="http:evil.example">More</a>\n:::');
+			expect(out).toContain("<a>Docs</a>");
+			expect(out).toContain('<a href="http:evil.example" rel="noopener noreferrer" target="_blank">More</a>');
+		});
+	});
 });
 
 describe("safeTone", () => {
