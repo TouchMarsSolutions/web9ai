@@ -1,14 +1,16 @@
 // Delimiter density of Markdown fields (spec 2026-10-17 §3.6, markdown-density.mjs): marked is super-linear in some
 // delimiters, so each Markdown field within its length cap holds at most FIELD_CAPS of each class, at most DEST_PARENS[0]
-// "(" in link destinations, LINE_BUDGET[0] line breaks × characters and LINE_MARKERS markers on one line, and a value at
-// most VALUE_CAPS, DEST_PARENS[1] and LINE_BUDGET[1].
+// "(" in link destinations, LINE_BUDGET[0] line breaks × characters, LINE_MARKERS markers on one line, LINK_TAIL steps at
+// the end of a bare link and LINK_STARTS link starts in one run, and a value at most VALUE_CAPS, DEST_PARENS[1] and
+// LINE_BUDGET[1].
 // The render tests take the worst fuzzed pattern of each class at its cap and allow 4× the 50 ms target, so a slow
 // machine does not flake them; the measured times are in the spec.
 import { createRequire } from "node:module";
+import { Lexer } from "marked";
 import { describe, expect, it } from "vitest";
 import { LIMITS } from "./limits.mjs";
 import { renderInlineMarkdown, renderMarkdown } from "./markdown.mjs";
-import { DEST_PARENS, FIELD_CAPS, LINE_BUDGET, LINE_MARKERS, VALUE_CAPS, markdownDensity } from "./markdown-density.mjs";
+import { DEST_PARENS, FIELD_CAPS, LINE_BUDGET, LINE_MARKERS, LINK_STARTS, LINK_TAIL, VALUE_CAPS, markdownDensity } from "./markdown-density.mjs";
 import { guardPortableText } from "./pt-guard.mjs";
 
 const require = createRequire(import.meta.url);
@@ -16,6 +18,10 @@ const name = (c) => (c === "](" ? '"](" link openers' : `"${c}" characters`);
 /** `k` copies of `unit`, then "a" up to `len` characters. */
 const dense = (unit, k, len = LIMITS.markdown) => (unit.repeat(k) + "a".repeat(len)).slice(0, len);
 const callout = (body) => ({ _type: "callout", _key: "c", body });
+/** A bare link whose run fills `len` characters and ends in `tail`. */
+const linkWithTail = (tail, len = LIMITS.markdown) => `http://a.b/${"a".repeat(len - 11 - tail.length)}${tail}`;
+// What marked's url tokenizer drops from the end of a bare link one per pass
+const TAIL_CHARS = [..."?!.,:;*_'\"~)"];
 
 describe("caps", () => {
 	it("were measured on marked 16.4.2: an upgrade has to be fuzzed again before this pin moves (spec 2026-10-17 §3.6)", () => {
@@ -26,6 +32,8 @@ describe("caps", () => {
 		expect(VALUE_CAPS).toEqual({ "*": 224, _: 110, "~": 40, "`": 236, "!": 90, "<": 54, "\\": 10, "](": 34 });
 		// twice the stored maxima: 272 line breaks in a 6196-character field, 3135629 summed over one value
 		expect([LINE_BUDGET, DEST_PARENS, LINE_MARKERS]).toEqual([[2 * 272 * 6196, 2 * 3135629], [40, 200], 8]);
+		// stored at most 2 of each
+		expect([LINK_TAIL, LINK_STARTS]).toEqual([16, 16]);
 	});
 });
 
@@ -52,6 +60,27 @@ describe("markdownDensity", () => {
 	it("names the first line that holds the most markers, counting \r\n and a lone \r as one line break", () => {
 		expect(markdownDensity("a\r\n> > b\r- - - c\n> > > d")).toMatchObject({ lineMarkers: 3, markerLine: 3 });
 		expect(markdownDensity("a")).toMatchObject({ lineMarkers: 0, markerLine: 0 });
+	});
+	it("counts the steps at the end of a bare link: each trailing character marked drops, and each \"&name;\" entity", () => {
+		expect(markdownDensity("see http://a.b/x).").linkTail).toBe(2);
+		expect(markdownDensity(`www.a/${TAIL_CHARS.join("")}&amp;&a1;`).linkTail).toBe(14);
+		// "&#41;" is not an entity to marked, so only its ";" is dropped
+		expect(markdownDensity("http://a.b/&#41;").linkTail).toBe(1);
+		// a link start is "www." in lower case or a protocol in any case, then a domain character
+		expect(markdownDensity("HTTPS://a.b/)) ftp://a)").linkTail).toBe(2);
+		expect(markdownDensity("WWW.a/)) http://)) www.-))").linkTail).toBe(2);
+		expect(markdownDensity("a/)) (b).").linkTail).toBe(0);
+	});
+	it("counts the steps before each | (a table cell ends there) and before each ( (an unmatched one cuts the first pass)", () => {
+		expect(markdownDensity("|http://a.b/)))|x|").linkTail).toBe(3);
+		expect(markdownDensity("http://a.b/...(x").linkTail).toBe(4);
+		// before the link start, or after a space or "<", it is another run
+		expect(markdownDensity(")))|http://a.b/ x))) y<)))").linkTail).toBe(0);
+	});
+	it("counts the link starts in one run without whitespace or \"<\"", () => {
+		expect(markdownDensity("[http://a.b](http://a.b) www.a").linkStarts).toBe(2);
+		// "wwww.a" holds one start, "www.a"; the "<" ends the run
+		expect(markdownDensity("wwww.a(www.a(http://a<http://a").linkStarts).toBe(3);
 	});
 	it("does not count a thematic break, which nests nothing", () => {
 		expect(markdownDensity("- - - - - - - - - - - -\n *  *  *  *  *  *  *  *  *  *").lineMarkers).toBe(0);
@@ -88,6 +117,57 @@ describe("per field", () => {
 		expect(guardPortableText([callout(`${"a\r\n".repeat(135)}${"a".repeat(25000 - 405)}`)])).toEqual([
 			"#0 callout body: at most 134 line breaks in a field of 25000 characters (got 135)",
 		]);
+	});
+	it("caps the steps at the end of a bare link, each trailing character and entity at 16 and 17", () => {
+		const message = (n) => [`#0 callout body: at most ${LINK_TAIL} punctuation characters or entities at the end of a link (got ${n})`];
+		for (const c of TAIL_CHARS) {
+			// "!" has its own cap of 10
+			const tail = (n) => (c === "!" ? `${".".repeat(n - FIELD_CAPS["!"])}${"!".repeat(FIELD_CAPS["!"])}` : c.repeat(n));
+			expect(guardPortableText([callout(linkWithTail(tail(LINK_TAIL)))]), c).toEqual([]);
+			expect(guardPortableText([callout(linkWithTail(tail(LINK_TAIL + 1)))]), c).toEqual(message(LINK_TAIL + 1));
+		}
+		expect(guardPortableText([callout(linkWithTail("&amp;".repeat(LINK_TAIL)))])).toEqual([]);
+		expect(guardPortableText([callout(linkWithTail("&amp;".repeat(LINK_TAIL + 1)))])).toEqual(message(LINK_TAIL + 1));
+		// one closing parenthesis, as in a Wikipedia link inside parentheses
+		expect(guardPortableText([callout("(see http://a.b/x) and https://en.wikipedia.org/wiki/A_(b).)")])).toEqual([]);
+	});
+	it("rejects the bare-link payloads that took 0.3-0.8 s within every other cap", () => {
+		const message = (n) => [`#0 callout body: at most ${LINK_TAIL} punctuation characters or entities at the end of a link (got ${n})`];
+		for (const c of [")", ";", '"', "'", ":", "?"]) expect(guardPortableText([callout(`http://a.b/${c.repeat(24000)}`)]), c).toEqual(message(24000));
+		expect(guardPortableText([callout(`www.a/${",".repeat(24000)}`)])).toEqual(message(24000));
+		expect(guardPortableText([callout(`http://a.b/${"&a;".repeat(8000)}`)])).toEqual(message(8000));
+		expect(guardPortableText([callout(`|a|\n|-|\n|http://a.b/${")".repeat(24000)}|`)])).toEqual(message(24000));
+		expect(guardPortableText([callout(`http://a.b/${".".repeat(24000)}(a`)])).toEqual(message(24001));
+	});
+	it("caps the link starts in one run at 16 and 17", () => {
+		expect(guardPortableText([callout("www.a(".repeat(LINK_STARTS))])).toEqual([]);
+		expect(guardPortableText([callout("www.a(".repeat(LINK_STARTS + 1))])).toEqual([
+			`#0 callout body: at most ${LINK_STARTS} link starts (http://, www. and the like) in one run without spaces (got ${LINK_STARTS + 1})`,
+		]);
+		expect(guardPortableText([callout("www.a( ".repeat(1000))])).toEqual([]);
+	});
+	it("never counts fewer steps than marked's own url tokenizer takes (marked 16.4.2's url and _backpedal rules)", () => {
+		const { _backpedal, url } = Lexer.rules.inline.gfm;
+		const passes = (s) => {
+			let n = -1;
+			for (let prev; prev !== s; n++) [prev, s] = [s, _backpedal.exec(s)?.[0] ?? ""];
+			return n;
+		};
+		const units = ["http://a", "www.b", ...TAIL_CHARS, "(", "|", "&a;", "&", "&#1;", "x", "/"];
+		let seed = 1;
+		const random = (n) => (seed = (seed * 48271) % 2147483647) % n;
+		for (let t = 0; t < 4000; t++) {
+			let run = "http://a";
+			for (let k = random(14); k > 0; k--) run += units[random(units.length)];
+			const { linkTail } = markdownDensity(run);
+			// every link start, ending at the run end or at a "|" as a table cell does
+			for (let i = 0; i < run.length; i++) {
+				for (const end of [run.length, ...[...run].keys()].filter((e) => e > i && (e === run.length || run[e] === "|"))) {
+					const link = url.exec(run.slice(i, end));
+					if (link && link[2] !== "@") expect(passes(link[0]), run).toBeLessThanOrEqual(linkTail);
+				}
+			}
+		}
 	});
 	it("checks every Markdown field: callout title and body, details summary and body, tab bodies, tool taglines", () => {
 		const over = "!a ".repeat(FIELD_CAPS["!"] + 1);
@@ -174,6 +254,16 @@ describe("the worst fuzzed pattern of each class renders within budget at its ca
 		// a long last line that starts with "<" and holds text marked escapes costs the most after lazy lines
 		["list lazy lines, then \"<\" and escaped text", `- a\n${"a\n".repeat(133)}<${"&".repeat(25000)}`.slice(0, LIMITS.markdown), `- a\n${"a\n".repeat(134)}<${"&".repeat(25000)}`.slice(0, LIMITS.markdown)],
 		["markers on one line", `${"+ ".repeat(8)}a`, `${"+ ".repeat(2000)}a`],
+		// a bare link's run is rescanned once per trailing character or entity marked drops
+		...TAIL_CHARS.map((c) => [
+			`"${c}" at the end of a bare link`,
+			linkWithTail(c === "!" ? `${".".repeat(6)}${"!".repeat(10)}` : c.repeat(16)),
+			`http://a.b/${c.repeat(24000)}`,
+		]),
+		["entities at the end of a bare link", linkWithTail("&a;".repeat(16)), `http://a.b/${"&a;".repeat(8000)}`],
+		["a bare link in a table cell", `|a|\n|-|\n|${linkWithTail(")".repeat(16), LIMITS.markdown - 10)}|`, `|a|\n|-|\n|http://a.b/${")".repeat(24000)}|`],
+		["a bare link cut at an unmatched (", linkWithTail(`${".".repeat(15)}(a`), `http://a.b/${".".repeat(24000)}(a`],
+		["link starts in one run, each cut at (", dense("www.a(", 16), "www.a(".repeat(4166)],
 		["ordered markers on one line", `${"1. ".repeat(8)}a`, `${"1. ".repeat(2000)}a`],
 	];
 	for (const [what, ok, over] of CASES) {

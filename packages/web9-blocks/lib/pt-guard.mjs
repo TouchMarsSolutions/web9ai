@@ -63,9 +63,9 @@
 // capped (LIMITS.markdown, LIMITS.inlineMarkdown) and a value holds at most MAX_MARKDOWN Markdown characters, counted
 // before its nodes are checked (a field over its own cap counts up to the cap, so its own problem names it). Length does
 // not bound marked's CPU, so a field within its length cap is also capped in delimiter density and line breaks ×
-// characters (markdown-density.mjs), per field and over the value, the value totals counted like the others. Mermaid and
-// code-block source is capped at LIMITS.code, a cover's background URLs at LIMITS.url. Plain-text fields are only
-// type-checked: Astro escapes them in linear time.
+// characters, per field and over the value (the value totals counted like the others), and in the tail and starts of
+// bare links, per field (markdown-density.mjs). Mermaid and code-block source is capped at LIMITS.code, a cover's
+// background URLs at LIMITS.url. Plain-text fields are only type-checked: Astro escapes them in linear time.
 // Image values inside the blocks of a `blocks` field (pages.layout: hero.image, feature_grid.features[].image)
 // are rendered by the same component and get the same checks (guardBlockImages), and their printed text values the
 // string-and-length check (guardBlockText). content:beforeSave runs before
@@ -84,7 +84,7 @@
 // characters, listStart an integer from 1 to MAX_LIST_START.
 import { normalizePortableTextTable } from "@emdash-cms/admin/portable-text-table";
 import { LIMITS } from "./limits.mjs";
-import { DEST_PARENS, FIELD_CAPS, LINE_BUDGET, LINE_MARKERS, VALUE_CAPS, markdownDensity } from "./markdown-density.mjs";
+import { DEST_PARENS, FIELD_CAPS, LINE_BUDGET, LINE_MARKERS, LINK_STARTS, LINK_TAIL, VALUE_CAPS, markdownDensity } from "./markdown-density.mjs";
 import { LOGO_SIZE } from "./tool-grid.mjs";
 
 const COLOR = /^(?:#[0-9a-f]{3,8}|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(?:,\s*(?:0|1|0?\.\d+)\s*)?\))$/i;
@@ -355,7 +355,7 @@ function markdownChars(node, type) {
 function checkMarkdown(node, type, i, out) {
 	const check = (v, field, max) => {
 		if (typeof v !== "string" || v.length > max || out.full) return;
-		const { counts, lineBreaks, destParens, lineMarkers, markerLine } = markdownDensity(v);
+		const { counts, lineBreaks, destParens, lineMarkers, markerLine, linkTail, linkStarts } = markdownDensity(v);
 		const where = `#${i} ${type} ${field}`;
 		for (const [c, cap] of Object.entries(FIELD_CAPS)) {
 			if (counts[c] > cap) out.add(`${where}: at most ${cap} ${delimiterName(c)} (got ${counts[c]})`);
@@ -364,6 +364,8 @@ function checkMarkdown(node, type, i, out) {
 		if (lineBreaks > lines) out.add(`${where}: at most ${lines} line breaks in a field of ${v.length} characters (got ${lineBreaks})`);
 		if (destParens > DEST_PARENS[0]) out.add(`${where}: at most ${DEST_PARENS[0]} "(" in link destinations (got ${destParens})`);
 		if (lineMarkers > LINE_MARKERS) out.add(`${where}: at most ${LINE_MARKERS} list or quote markers at the start of a line (got ${lineMarkers} on line ${markerLine})`);
+		if (linkTail > LINK_TAIL) out.add(`${where}: at most ${LINK_TAIL} punctuation characters or entities at the end of a link (got ${linkTail})`);
+		if (linkStarts > LINK_STARTS) out.add(`${where}: at most ${LINK_STARTS} link starts (http://, www. and the like) in one run without spaces (got ${linkStarts})`);
 		const delimiters = Object.fromEntries(Object.entries(FIELD_CAPS).map(([c, cap]) => [c, Math.min(counts[c], cap)]));
 		count(out, { delimiters, destParens: Math.min(destParens, DEST_PARENS[0]), lineCost: Math.min(lineBreaks * v.length, LINE_BUDGET[0]) });
 	};

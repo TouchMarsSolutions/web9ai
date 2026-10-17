@@ -17,13 +17,21 @@
 // - marked's list loop reads each line of an item with split("\n", 1) on the rest of the field, so lazy continuation
 //   lines cost line breaks × the length after them (one item and 12000 lines took 1.1 s). Hence a budget of line breaks
 //   × field characters rather than a line cap: a short field may hold many lines, a long one fewer.
+// - A bare link (GFM: "http://", "https://", "ftp://" or "www." and a domain character) runs to the next whitespace or
+//   "<", and marked's url tokenizer then drops what may not end it one piece per pass (_backpedal): a trailing "?", "!",
+//   ".", ",", ":", ";", "*", "_", "'", '"', "~" or ")", or an entity "&name;" at the end, each pass rescanning the run (a
+//   link and 24000 ")" took 0.3 s, 8000 "&a;" 0.6 s). A table cell ends the run at its "|", and an unmatched "(" cuts the
+//   first pass short, so the steps before each of those count too. Each link start left after a cut rescans the rest of
+//   the run, so link starts per run are capped as well ("www.a(" repeated took 0.2 s).
 // - List and quote markers nest one container each, and marked recurses per container: about 1900 markers on one line
 //   overflow the stack and the render throws (fewer on a smaller stack). Nesting by indentation needs a quadratic number
 //   of characters, so only markers on one line are capped.
 // Each cap is twice the most any stored entry or revision holds. Alone, most classes stay fast well above their caps,
-// but a field that combines all of them with lazy lines and escaped text already takes most of the budget at these.
-// ">", "#", "-", "+", "|", "![" and the rest are linear once these are capped, so they are not counted. Fuzz,
-// corpus maxima and timings are in the spec.
+// but a field that combines all of them with lazy lines and escaped text already takes most of the budget at these. The
+// two bare-link caps are 16 (stored at most 2), where a field stays within a few ms of its linear cost.
+// ">", "#", "-", "+", "|", "![" and the rest are linear once these are capped, so they are not counted (")", ".", ":" and
+// the other link-tail characters are counted only at the end of a bare link). Fuzz, corpus maxima and timings are in the
+// spec.
 
 /** The most of each class one Markdown field may hold: "](" counts link openers. */
 export const FIELD_CAPS = { "*": 40, _: 30, "~": 20, "`": 80, "!": 10, "<": 46, "\\": 10, "](": 20 };
@@ -35,12 +43,22 @@ export const LINE_BUDGET = [3370624, 6271258];
 export const DEST_PARENS = [40, 200];
 /** The most list or quote markers at the start of one line. */
 export const LINE_MARKERS = 8;
+/** The most _backpedal steps (trailing punctuation or entities) at the end of one bare link. */
+export const LINK_TAIL = 16;
+/** The most bare link starts in one run without whitespace or "<". */
+export const LINK_STARTS = 16;
 
 const isSpace = (c) => c === " " || c === "\t";
 // The destination run of marked's link regex ([^ \t\n\x00-\x1f]*) ends at a space or a control character
 const endsRun = (code) => code <= 0x20;
 const SPACE = /\s/;
 const THEMATIC_BREAK = /^[ \t]*([-*])(?:[ \t]*\1){2,}[ \t]*$/;
+// marked's GFM url rule: the protocol in any case, "www." in lower case, then a domain character
+const LINK_START = /(?:[hH][tT][tT][pP][sS]?|[fF][tT][pP]):\/\/(?=[a-zA-Z0-9-])|www\.(?=[a-zA-Z0-9-])/g;
+// The run the url rule takes ([^\s<]*) and what _backpedal drops one per pass from its end
+const LINK_RUN = /[^\s<]+/g;
+const LINK_TAIL_CHARS = new Set("?!.,:;*_'\"~)");
+const ALNUM = /[a-zA-Z0-9]/;
 
 /**
  * Counts of each capped class, the line breaks, the "(" in link destinations (after each "](", skip whitespace, then the
@@ -68,7 +86,49 @@ export function markdownDensity(src) {
 		while (j < text.length && SPACE.test(text[j])) j++;
 		destParens += parensFrom[j];
 	}
-	return { counts, lineBreaks, destParens, ...lineMarkers(text) };
+	return { counts, lineBreaks, destParens, ...lineMarkers(text), ...links(text) };
+}
+
+/**
+ * The most _backpedal steps at the end of a bare link, and the most link starts in one run, in linear time. A link's
+ * steps are those before the run end, before each "|" in the run (a table cell ends there) and before each "(" in it
+ * (an unmatched one cuts the first pass there: one more step); a "(" that does close, or a "|" outside a table, only
+ * makes the count higher than marked's.
+ */
+function links(text) {
+	// steps[e]: the trailing punctuation characters and "&name;" entities that end at e, one step each
+	const steps = new Uint32Array(text.length + 1);
+	for (let e = 1; e <= text.length; e++) {
+		const c = text[e - 1];
+		let n = LINK_TAIL_CHARS.has(c) ? steps[e - 1] + 1 : 0;
+		if (c === ";") {
+			let a = e - 2;
+			while (a >= 0 && ALNUM.test(text[a])) a--;
+			if (a >= 0 && a < e - 2 && text[a] === "&") n = Math.max(n, steps[a] + 1);
+		}
+		steps[e] = n;
+	}
+	let linkTail = 0;
+	let linkStarts = 0;
+	LINK_RUN.lastIndex = 0;
+	for (let run; (run = LINK_RUN.exec(text)); ) {
+		const starts = [];
+		LINK_START.lastIndex = 0;
+		for (let m; (m = LINK_START.exec(run[0])); ) starts.push(run.index + m.index);
+		if (!starts.length) continue;
+		linkStarts = Math.max(linkStarts, starts.length);
+		// walk the run from its end: `most` is the largest count over the ends at or after i
+		let most = steps[run.index + run[0].length];
+		for (let i = run.index + run[0].length - 1, j = starts.length - 1; j >= 0; i--) {
+			if (text[i] === "|") most = Math.max(most, steps[i]);
+			else if (text[i] === "(") most = Math.max(most, steps[i] + 1);
+			if (i === starts[j]) {
+				linkTail = Math.max(linkTail, most);
+				j--;
+			}
+		}
+	}
+	return { linkTail, linkStarts };
 }
 
 /**
