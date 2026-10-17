@@ -7,9 +7,9 @@
 	"observability": { "enabled": true },
 	// Custom Domains (not routes): Cloudflare creates the DNS record and the certificate for each, so no origin record
 	// is needed once the GitHub Pages records are gone. www.web9.ai is canonical; src/worker.ts sends the apex there
-	// with a 301 (308 for methods other than GET and HEAD). A non-interactive `wrangler deploy` replaces conflicting DNS
-	// records without asking, so the first deploy with these comes after the old records are deleted by id and a
-	// changeset preflight shows no conflict (plan 3 Task 4 Step 3).
+	// with a 301 (308 for methods other than GET and HEAD). A non-interactive `wrangler deploy` (an agent shell, Workers
+	// Builds) publishes these with override_existing_dns_record, so never add an A, AAAA or CNAME record on either host
+	// (plan 3 Task 4).
 	"routes": [
 		{ "pattern": "www.web9.ai", "custom_domain": true },
 		{ "pattern": "web9.ai", "custom_domain": true },
