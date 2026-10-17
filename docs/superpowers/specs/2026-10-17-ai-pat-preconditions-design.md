@@ -26,7 +26,7 @@
 - **schema**：插件声明 `schema:read` 后，`ctx.schema.getCollection(slug)` 返回线上字段 `{ slug, type }`（`plugins/context.ts:381`）。MCP `schema_get_collection` 返回 `blocks` 字段的全部 block type 和全部版本（包括退役版本）。
 - **revision**：每个条目保留最新 50 个（`pruneQueuedEntry(..., 50)`）。MCP `revision_list` 一次最多 50 个，没有 cursor，返回 `{ items, total }`。
 - **token**：
-  - PAT 只能由 Admin 给**自己**生成（`POST /_emdash/api/admin/api-tokens`），生成出来就是 Admin 权限。
+  - PAT 只能由 Admin 给**自己**生成（`POST /_emdash/api/admin/api-tokens`）。token 的身份就是这个 Admin（角色检查按 Admin，revision 记在 Admin 名下），只靠创建时选的 scope 收窄（REST 在 `astro/middleware/auth.ts` 的 `enforceTokenScope`，MCP 工具里是 `requireScope`）；Editor 拿不到 PAT。
   - OAuth device flow 发的 token 是"请求的 scope ∩ 该角色允许的 scope"（`api/handlers/device-flow.ts:123`，`@emdash-cms/auth rbac.ts` `clampScopes`）。
   - Editor 能持有的 scope：`content:read/write`、`media:read/write`、`schema:read`、`taxonomies:manage`、`menus:manage`、`settings:read`。拿不到的：`schema:write`、`settings:manage`、`admin`、`transfer:*`、`mcp:tools`。
   - `content:write` 隐含 `menus:manage`、`taxonomies:manage`，但不隐含 `content:read`（`tokens.ts:95`）。
@@ -45,7 +45,7 @@
 
 | # | 项 | 做法 |
 |---|---|---|
-| 1 | 长度上限 | `data` 里的字段（title、description、excerpt）由 guard 检查，保存和发布时都跑；slug、`seo.image`、byline 的 `roleLabel`、菜单项、term、byline 由新增的 `src/middleware.ts` 写入闸门检查；菜单在渲染时截断，footer 的菜单 widget 渲染前检查 |
+| 1 | 长度上限 | `data` 里的字段（title、description、excerpt）由 guard 检查，保存和发布时都跑；slug、`seo.image`、byline 的 `roleLabel`、菜单项、term、byline 由新增的 `src/middleware.ts` 写入闸门检查；菜单在渲染时截断，widget area（footer、文章侧栏）里的菜单 widget 渲染前检查 |
 | 2 | 发布、恢复等不重跑 guard | `content:beforePublish`/`beforeSchedule` 重跑整套 guard 并检查 slug，fail closed；新增 `scripts/guard-scan.mjs`，扫描所有条目、回收站、revision、菜单、term、byline |
 | 3 | 字段表钉在 seed 上 | hook 用 `schema:read` 读线上的 portableText/image 字段，和钉死的表取并集；`migrate verify` 加 schema 漂移检查 |
 | 4 | `sections` | 测试锁定 `src/`、`packages/` 不调用 `getSection`/`getSections` |
@@ -67,11 +67,11 @@
 | content `slug` | 100 | 16 | 闸门；发布 hook（待生效 slug） |
 | content `seo.image` | 2048 | 无 | 闸门 |
 | content `bylines[].roleLabel` | 80 | 无 | 闸门 |
-| 菜单项 `label` | 80 | 6 | 闸门；渲染截断；footer 菜单 widget 渲染前检查 |
-| 菜单项 `customUrl` | 2048 | 44 | 闸门；footer 菜单 widget 渲染前检查 |
-| 菜单项 `titleAttr` | 200 | 无 | 闸门；footer 菜单 widget 渲染前检查 |
+| 菜单项 `label` | 80 | 6 | 闸门；渲染截断；widget area 里的菜单 widget 渲染前检查 |
+| 菜单项 `customUrl` | 2048 | 44 | 闸门；widget area 里的菜单 widget 渲染前检查 |
+| 菜单项 `titleAttr` | 200 | 无 | 闸门；widget area 里的菜单 widget 渲染前检查 |
 | 菜单项 `target` | 32 | 6 | 闸门 |
-| `menu_set_items` 的项数 | 50 | 4 | 闸门；渲染只取前 50；footer 菜单 widget 渲染前检查 |
+| `menu_set_items` 的项数 | 50 | 4 | 闸门；渲染只取前 50；widget area 里的菜单 widget 渲染前检查 |
 | term `label` | 80 | 11 | 闸门 |
 | term `slug` | 100 | 11 | 闸门 |
 | byline `displayName` | 80 | 无 | 闸门（REST `admin/bylines` 和 MCP） |
@@ -116,7 +116,7 @@
 
 **渲染兜底**：
 - `Base.astro` 的菜单只取前 50 项，`label` 按 80 截断，超出部分换成 `…`，不切开 surrogate pair。菜单出现在每一页，而且没有 hook 和发布这第二道关；其他字符串的第二道关见 §6。
-- footer 的菜单 widget：`SafeWidgetArea` 对 area 里每个 menu widget 读它指向的菜单（`getMenu`）。任何一个菜单不通过 `menuIsSafe`，或者读取时抛错，整个 area 不渲染（fail closed）。`menuIsSafe` 检查：项数不超过 50，`label` 不超过 80，`url` 不超过 2048，`titleAttr` 不超过 200。原因：core 的 `WidgetRenderer` 把这些字段原样打印，没有截断。`target` 只在写入时限制（闸门和 `guard-scan`），渲染端不查。
+- widget area（footer、文章侧栏，都经 `SafeWidgetArea` 渲染）里的菜单 widget：`SafeWidgetArea` 对 area 里每个 menu widget 读它指向的菜单（`getMenu`）。任何一个菜单不通过 `menuIsSafe`，或者读取时抛错，整个 area 不渲染（fail closed）。`menuIsSafe` 检查：项数不超过 50，`label` 不超过 80，`url` 不超过 2048，`titleAttr` 不超过 200。原因：core 的 `WidgetRenderer` 把这些字段原样打印，没有截断。`target` 只在写入时限制（闸门和 `guard-scan`），渲染端不查。
 
 ### 3.2 发布时重跑 guard、全库扫描（第 2 项）
 
@@ -159,7 +159,7 @@
 - 对线上每个 collection，portableText 字段、image 字段，以及每个 `blocks` 字段里每个 block type 的每个版本中的 image 路径（image 字段，加 repeater 子字段里的 image），都必须在钉死的表里；
 - 否则打印 `schema drift: …`，退出码为 1。
 
-`migrate verify` 因此要读 schema，需要能调 MCP 的 token。读 schema 出错时，在页面和 redirect 的结果都打印之后，以退出码 1 结束，不把读不到当作没有漂移。
+`migrate verify` 因此要读 schema（MCP `schema_list_collections`、`schema_get_collection`），需要带 `schema:read` 的 token（Editor 以上；AI 的 token 没有）。读 schema 出错时，在页面和 redirect 的结果都打印之后，以退出码 1 结束，不把读不到当作没有漂移。
 
 ### 3.4 `sections` 和媒体（第 4、6 项）
 
@@ -169,16 +169,17 @@
 
 ### 3.5 AI 的 token（第 5 项）
 
-改写上级 spec §8 的"AI 管理内容"段：AI 用单独的 Editor 账号，token 通过 OAuth device flow 获得。不用 PAT：PAT 只能由 Admin 给自己生成，生成出来是 Admin 权限。
+改写上级 spec §8 的"AI 管理内容"段：AI 用单独的 Editor 账号，token 通过 OAuth device flow 获得。不用 PAT：PAT 只能由 Admin 给自己生成，token 的身份就是这个 Admin，只靠 scope 收窄；Editor 拿不到 PAT。
 
 runbook（写进上级 spec §8）：
 1. Admin 在后台建 AI 用户，角色选 Editor。
 2. 在 AI 的运行环境里调 `POST /_emdash/api/oauth/device/code`，body 为 `{"scope":"content:read content:write media:read media:write"}`。一定要显式传 scope：不传的话默认还会给 `schema:read`。
-3. 用 AI 用户登录后台，打开 `/_emdash/admin/device`，输入 user code 并批准。运行环境轮询 `/_emdash/api/oauth/device/token`，拿到 access token 和 refresh token。
+3. 用 AI 用户登录后台，打开 `/_emdash/admin/device`，输入 user code 并批准。运行环境轮询 `POST /_emdash/api/oauth/device/token`，body 为 `{"device_code":"…","grant_type":"urn:ietf:params:oauth:grant-type:device_code"}`，拿到 access token 和 refresh token。
 4. 核对：
    - 用这个 token 调 MCP `content_list` 应该成功；
    - 调 `schema_list_collections`、`settings_update`、`site_export_start`，以及 REST `GET /_emdash/api/admin/api-tokens`、`GET /_emdash/api/redirects`，都应该被拒。
-5. refresh token 只存在 AI 运行环境的 secret 里。停用时调 `/_emdash/api/oauth/token/revoke`，或者在后台禁用这个用户。
+5. 续期：access token 1 小时后过期，运行环境调 `POST /_emdash/api/oauth/token/refresh`，body 为 `{"grant_type":"refresh_token","refresh_token":"…"}`。refresh token 不轮换，续期不延长它的 90 天，到期后要重新走 device flow。
+6. refresh token 只存在 AI 运行环境的 secret 里。停用时调 `/_emdash/api/oauth/token/revoke`，或者在后台禁用这个用户。
 
 `transfer:*`、`admin` 和 import 永远不发给 AI。R2 bucket 不开公开访问（不加 r2.dev 域名，也不绑自定义域名）。
 
@@ -253,9 +254,9 @@ span、mark、网格格子、markDefs、换行这五项总量中任何一项超�
 | 另加 mark 总数上限 5000 | 批准的设计只限 span 总数；单页 CPU 由 mark 数决定（计划 2 的测量），20000 个 span 各带 20 个 mark 时约 6 s | 合法内容的 mark 超过 5000（现有最大 77）时被拒，可以调高 |
 | AI 的 scope 改成 `content:read content:write media:read media:write` | `content:write` 不隐含 `content:read`，没有读权限 AI 无法 `content_list`；`menus:manage`、`taxonomies:manage` 已被 `content:write` 隐含 | AI 缺权限时报错，再按需加 |
 | 闸门按 `context.routePattern` 判定，不看 URL（批准的设计和 §3.1 初稿用 `context.url.pathname`） | Astro 用解码后的路径字符串做路由匹配，`context.url.pathname` 又被规范化过一次，两者会对不上，`terms/a%5Cb` 和 `terms/%252E%252E` 就绕过了按路径判定的闸门；匹配到的 pattern 就是将要运行的路由 | emdash 升级改了 pattern 的名字时，快照测试失败；在人处理之前，那条路由不受检查 |
-| 闸门另加 `seo.image`、byline 的 `roleLabel`、菜单项的 `titleAttr` 和 `target`，以及 REST `admin/bylines` | 同属 Editor token 能写、core 的 schema 没有上限的字符串，又渲染到页面上：`seo.image` 进 og:image，`roleLabel` 进文章页的署名，`titleAttr` 进 footer 菜单 widget；byline 原来只管了 MCP 一条路 | 合法的长值被拒：上限远高于现有值，可以调整 |
+| 闸门另加 `seo.image`、byline 的 `roleLabel`、菜单项的 `titleAttr` 和 `target`，以及 REST `admin/bylines` | 同属 Editor token 能写、core 的 schema 没有上限的字符串，又渲染到页面上：`seo.image` 进 og:image，`roleLabel` 进文章页的署名，`titleAttr` 进 widget area 里的菜单 widget；byline 原来只管了 MCP 一条路 | 合法的长值被拒：上限远高于现有值，可以调整 |
 | 超过 10 MiB 的请求体由闸门返回 413，批准的设计是放行交给 core | core 只拒绝声明了超限 Content-Length 的请求，chunked body 没有上限；放行等于闸门对 chunked 的大请求失效 | 合法的、超过 10 MiB 的写入被拒；声明了长度时，core 本来就会拒 |
-| `SafeWidgetArea` 检查 footer 的菜单 widget，不通过就不渲染 | core 的 `WidgetRenderer` 不截断菜单项的 `label` 和 `titleAttr`；菜单没有 hook，也没有发布这第二道关 | footer 区域消失，直到菜单修好；`guard-scan` 会报告是哪个菜单 |
+| `SafeWidgetArea` 检查 widget area（footer、文章侧栏）里的菜单 widget，不通过就不渲染 | core 的 `WidgetRenderer` 不截断菜单项的 `label` 和 `titleAttr`；菜单没有 hook，也没有发布这第二道关 | footer 或文章侧栏的 area 消失，直到菜单修好；`guard-scan` 会报告是哪个菜单 |
 | guard 自己跑 core 的表格 normalizer（`@emdash-cms/admin/portable-text-table`） | `Table.astro` 渲染的就是它的输出；只有跑同一个函数，才知道 core 排不排得出这张表、铺出多少格子 | 它是 emdash 的传递依赖，没有写进 `web9-blocks/package.json`：emdash 升级把它挪走时 import 失败，测试会发现 |
 | 表格的"单元格"改指网格格子 | 渲染成本跟网格格子数成正比，一个 colspan × rowspan 的单元格就能占几千个格子，写下来的单元格数管不住 | 合法的大表被拒：网格上限 2000，现有最大 78 |
 | 发布和定时发布被拒时，reason 文案相同（`Publish rejected (spec §10): …`），错误码不同（`PUBLISH_REJECTED`、`SCHEDULE_REJECTED`） | 同一个 handler 注册为 `beforePublish` 和 `beforeSchedule`，错误码由 core 按动作给出 | 只看 reason 分不出是发布还是定时发布，要看错误码 |
