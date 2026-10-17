@@ -1,11 +1,13 @@
 ---
+import { text } from "../lib/text.mjs";
+
 interface Props {
 	node: { _type: "mermaid"; _key: string; code?: string };
 }
 const { node } = Astro.props;
 ---
 
-<pre class="mermaid">{node?.code ?? ""}</pre>
+<pre class="mermaid">{text(node?.code)}</pre>
 
 <script>
 	import "./mermaid-client.mjs";

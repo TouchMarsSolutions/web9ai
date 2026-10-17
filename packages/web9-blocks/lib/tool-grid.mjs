@@ -1,3 +1,5 @@
+import { text } from "./text.mjs";
+
 // tool_grid logo size in px. The value comes from content (editor or MCP), so it is clamped: an
 // oversized logo is the cheapest way to cover a page with one image.
 export const LOGO_SIZE = { default: 72, min: 16, max: 300 };
@@ -9,7 +11,6 @@ export function logoSize(value) {
 }
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
-const text = (v) => (typeof v === "string" ? v : "");
 
 /**
  * The tools of a tool_grid block as ToolGrid.astro renders them: object tools only, text fields as strings ("" when

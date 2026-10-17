@@ -36,3 +36,25 @@ describe("Tabs and ToolGrid", () => {
 		for (const source of [tabs, grid]) expect(source).not.toMatch(/Array\.isArray\(node\?\.(tabs|tools)\)/);
 	});
 });
+
+describe("printed block text", () => {
+	const component = (name) => readFileSync(new URL(`./astro/${name}`, import.meta.url), "utf8");
+	it("goes through text() or the Markdown sinks, so a stored non-string renders as nothing instead of throwing", () => {
+		const mermaid = component("Mermaid.astro");
+		expect(mermaid).toMatch(/^import \{ text \} from "\.\.\/lib\/text\.mjs";$/m);
+		expect(mermaid).toContain('<pre class="mermaid">{text(node?.code)}</pre>');
+		const grid = component("ToolGrid.astro");
+		expect(grid).toMatch(/^import \{ text \} from "\.\.\/lib\/text\.mjs";$/m);
+		expect(grid).toContain("const title = text(node?.title);");
+		expect(grid).not.toMatch(/node\??\.title\b(?!\))/);
+		// Callout and Details read their text only inside text(), renderMarkdown and renderInlineMarkdown (both give "" for a
+		// non-string)
+		const callout = component("Callout.astro");
+		expect(callout).toContain("const title = text(node?.title);");
+		expect(callout).toContain("set:html={renderInlineMarkdown(title)}");
+		for (const name of ["Callout.astro", "Details.astro"]) {
+			const rest = component(name).replace(/\b(text|renderMarkdown|renderInlineMarkdown)\(node\?\.(title|body|summary)[^)]*\)/g, "");
+			expect(rest, name).not.toMatch(/node\??\.(title|body|summary)/);
+		}
+	});
+});

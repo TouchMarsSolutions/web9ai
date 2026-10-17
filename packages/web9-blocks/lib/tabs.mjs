@@ -1,7 +1,8 @@
 // The tabs of a tabs block as Tabs.astro renders them. The write check rejects a bad shape (pt-guard.mjs), but stored
 // values from before it, or written past it, must not take the page down: tab.label on a null tab throws.
+import { text } from "./text.mjs";
+
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
-const text = (v) => (typeof v === "string" ? v : "");
 
 /** The index of the open tab: default_tab (1-based) clamped to the tabs there are, the first when it is not an integer. */
 export function activeTab(node, count) {

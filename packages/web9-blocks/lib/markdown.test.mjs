@@ -154,3 +154,14 @@ describe("safeTone", () => {
 		expect(safeTone(undefined)).toBe("info");
 	});
 });
+
+describe("renderMarkdown and renderInlineMarkdown on a value that is not a string", () => {
+	it("render nothing: a stored {toString:1} or deep array used to throw in String() and take the page down", () => {
+		let deep = [];
+		for (let i = 0; i < 3000; i++) deep = [deep];
+		for (const v of [JSON.parse('{"toString":1}'), deep, 5, true, null, undefined, { a: 1 }, ["a"]]) {
+			expect(renderMarkdown(v), JSON.stringify(v)?.slice(0, 20)).toBe("");
+			expect(renderInlineMarkdown(v), JSON.stringify(v)?.slice(0, 20)).toBe("");
+		}
+	});
+});

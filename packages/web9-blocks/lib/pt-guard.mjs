@@ -56,8 +56,17 @@
 // An `image` value also carries meta, a free-form record. EmDashImage.astro reads meta.dominantColor and
 // meta.blurhash as fallbacks and builds the src from meta.storageKey in a template string (media/url.ts), which
 // throws for an object without a callable toString; so meta.storageKey must be a string when present.
+// The same holds for every block text field a renderer prints (TEXT, and the item fields of LISTS): Astro's text and
+// attribute escaping and renderMarkdown call String() on it, which throws for {"toString":1} and overflows on an array
+// nested a few thousand deep, so each must be a string when present. Markdown fields (callout, details, tab bodies, tool
+// taglines) run marked and sanitize-html on every render, and marked is super-linear on dense delimiters, so each is
+// capped (LIMITS.markdown, LIMITS.inlineMarkdown) and a value holds at most MAX_MARKDOWN Markdown characters, counted
+// before its nodes are checked (a field over its own cap counts up to the cap, so its own problem names it). Mermaid
+// and code-block source is capped at LIMITS.code, a cover's background URLs at LIMITS.url. Plain-text fields are only
+// type-checked: Astro escapes them in linear time.
 // Image values inside the blocks of a `blocks` field (pages.layout: hero.image, feature_grid.features[].image)
-// are rendered by the same component and get the same checks (guardBlockImages). content:beforeSave runs before
+// are rendered by the same component and get the same checks (guardBlockImages), and their printed text values the
+// string-and-length check (guardBlockText). content:beforeSave runs before
 // core's normalizeBlocksData (emdash-runtime.ts), so the walk sees the raw value and must survive any shape.
 // Size caps, because the renderers are not linear in them: @portabletext/toolkit's buildMarksTree nests one
 // component per mark (3000 marks on a span overflow the stack), and its sortMarksByOccurences is O(n²) in a
@@ -72,6 +81,7 @@
 // `<ol start>` of OrderedList.astro. Both are bounded when present: listId a string of at most MAX_LIST_ID
 // characters, listStart an integer from 1 to MAX_LIST_START.
 import { normalizePortableTextTable } from "@emdash-cms/admin/portable-text-table";
+import { LIMITS } from "./limits.mjs";
 import { LOGO_SIZE } from "./tool-grid.mjs";
 
 const COLOR = /^(?:#[0-9a-f]{3,8}|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(?:,\s*(?:0|1|0?\.\d+)\s*)?\))$/i;
@@ -119,6 +129,7 @@ function collector() {
 		markDefs: 0,
 		lines: 0,
 		images: 0,
+		markdown: 0,
 		added: 0,
 		add(problem) {
 			this.added++;
@@ -136,8 +147,8 @@ function collector() {
 	};
 }
 
-/** Adds spans, marks, table grid slots, markDefs, line breaks and images to the value's totals; past one, stops the walk with its problem. */
-function count(out, { spans = 0, marks = 0, slots = 0, markDefs = 0, lines = 0, images = 0 }) {
+/** Adds spans, marks, table grid slots, markDefs, line breaks, images and Markdown characters to the value's totals; past one, stops the walk with its problem. */
+function count(out, { spans = 0, marks = 0, slots = 0, markDefs = 0, lines = 0, images = 0, markdown = 0 }) {
 	if (out.full) return;
 	out.spans += spans;
 	out.marks += marks;
@@ -145,12 +156,14 @@ function count(out, { spans = 0, marks = 0, slots = 0, markDefs = 0, lines = 0, 
 	out.markDefs += markDefs;
 	out.lines += lines;
 	out.images += images;
+	out.markdown += markdown;
 	if (out.spans > MAX_SPANS) out.stop(`at most ${MAX_SPANS} spans are allowed in total`);
 	else if (out.marks > MAX_TOTAL_MARKS) out.stop(`at most ${MAX_TOTAL_MARKS} marks are allowed in total`);
 	else if (out.slots > MAX_GRID_SLOTS) out.stop(`at most ${MAX_GRID_SLOTS} table cells are allowed in total (counting cells spanned by another)`);
 	else if (out.markDefs > MAX_MARK_DEFS) out.stop(`at most ${MAX_MARK_DEFS} markDefs are allowed in total`);
 	else if (out.lines > MAX_TOTAL_LINES) out.stop(`at most ${MAX_TOTAL_LINES} line breaks are allowed in total`);
 	else if (out.images > MAX_IMAGES) out.stop(`at most ${MAX_IMAGES} images are allowed in total`);
+	else if (out.markdown > MAX_MARKDOWN) out.stop(`at most ${MAX_MARKDOWN} Markdown characters are allowed in total`);
 }
 
 /** Field checks per allowed _type. Paths use `a.b` for nesting and `list[].field` for arrays. */
@@ -261,16 +274,59 @@ const MAX_RECORD_KEYS = 16;
 const MAX_SPAN_LINES = 1000;
 const MAX_TOTAL_LINES = 5000;
 const MAX_IMAGES = 500;
+const MAX_MARKDOWN = 52000;
 /**
- * Lists a renderer maps: [field, max items, string fields of an item, boolean fields of an item, null allowed].
- * url/logo are in RULES. Core's Buttons.astro defaults the list only for undefined (`const { buttons = [] } = node`),
- * so `buttons: null` throws there; web9's Tabs and ToolGrid tolerate null.
+ * Lists a renderer maps: [field, max items, text fields of an item (each with its length cap, or null for a type check
+ * only), boolean fields of an item, null allowed]. url/logo are in RULES. Core's Buttons.astro defaults the list only for
+ * undefined (`const { buttons = [] } = node`), so `buttons: null` throws there; web9's Tabs and ToolGrid tolerate null.
  */
 const LISTS = {
-	buttons: ["buttons", 10, ["text"], [], false],
-	tabs: ["tabs", 20, ["label", "body"], [], true],
-	tool_grid: ["tools", 100, ["name", "tagline"], ["featured"], true],
+	buttons: ["buttons", 10, { text: null }, [], false],
+	tabs: ["tabs", 20, { label: null, body: LIMITS.markdown }, [], true],
+	tool_grid: ["tools", 100, { name: null, tagline: LIMITS.inlineMarkdown }, ["featured"], true],
 };
+
+/**
+ * The text fields a renderer prints, per _type, with their length cap (null: a type check only). Sinks: core Image.astro
+ * (title attribute, figcaption), Code.astro, Pullquote.astro, File.astro (download attribute, name), Video.astro
+ * (figcaption; core's isPortableTextVideoBlock already drops a video with a non-string caption), Button.astro,
+ * Cover.astro (img and source src); web9 Embed.astro (figcaption), Callout.astro and Details.astro (renderMarkdown and
+ * renderInlineMarkdown), Mermaid.astro (<pre>), ToolGrid.astro (<h4>). Gallery images and an image's alt reach the
+ * page through core's own type checks (sanitizeGalleryImages, resolveImageMedia).
+ */
+const TEXT = {
+	image: { title: null, caption: null },
+	code: { code: LIMITS.code, filename: null },
+	pullquote: { text: null, citation: null },
+	file: { filename: null },
+	video: { caption: null },
+	button: { text: null },
+	cover: { backgroundImage: LIMITS.url, backgroundVideo: LIMITS.url },
+	embed: { caption: null },
+	callout: { title: LIMITS.inlineMarkdown, body: LIMITS.markdown },
+	details: { summary: LIMITS.inlineMarkdown, body: LIMITS.markdown },
+	mermaid: { code: LIMITS.code },
+	tool_grid: { title: null },
+};
+/** The Markdown fields per _type (on the node, or for a LISTS type on each item), which count toward MAX_MARKDOWN. */
+const MARKDOWN = { callout: ["title", "body"], details: ["summary", "body"], tabs: ["body"], tool_grid: ["tagline"] };
+
+/** A printed text field: absent or null, or a string of at most `max` characters (any length when `max` is null). */
+function checkText(v, where, field, max, out) {
+	if (v === undefined || v === null) return;
+	if (typeof v !== "string") out.add(notAllowed(where, field, v));
+	else if (max !== null && v.length > max) out.add(`${where} ${field}: at most ${max} characters (got ${v.length})`);
+}
+
+/** The Markdown characters a node renders, each field counted up to its own cap; a list past its item cap counts none. */
+function markdownChars(node, type) {
+	if (!Object.hasOwn(MARKDOWN, type)) return 0;
+	const chars = (record, caps) => MARKDOWN[type].reduce((n, f) => n + (typeof record?.[f] === "string" ? Math.min(record[f].length, caps[f]) : 0), 0);
+	if (!Object.hasOwn(LISTS, type)) return chars(node, TEXT[type]);
+	const [field, max, texts] = LISTS[type];
+	const list = node[field];
+	return Array.isArray(list) && list.length <= max ? list.reduce((n, item) => n + chars(item, texts), 0) : 0;
+}
 
 /** `_key` may be absent (undefined or null); when present it must be a string. */
 function checkKey(node, where, field, out) {
@@ -304,6 +360,8 @@ function checkBlock(node, where, out) {
 	if (node.level != null && !integerIn(1, MAX_LIST_LEVEL)(node.level)) out.add(notAllowed(where, "level", node.level));
 	if (node.listId != null && !(typeof node.listId === "string" && node.listId.length <= MAX_LIST_ID)) out.add(notAllowed(where, "listId", node.listId));
 	if (node.listStart != null && !integerIn(1, MAX_LIST_START)(node.listStart)) out.add(notAllowed(where, "listStart", node.listStart));
+	// core's Block.astro looks textAlign up with Object.hasOwn (portable-text-text-align.ts:34), which throws for {"toString":1}
+	if (node.textAlign != null && typeof node.textAlign !== "string") out.add(notAllowed(where, "textAlign", node.textAlign));
 
 	// The only annotation core renders is link. Keys are what span marks point at: no inherited names.
 	const keys = new Set();
@@ -509,9 +567,9 @@ function checkDefaultTab(node, i, out) {
 	if (!integerIn(1, tabs)(node.default_tab)) out.add(notAllowed(`#${i} tabs`, "default_tab", node.default_tab));
 }
 
-/** A list a renderer maps (LISTS): an array of objects within its cap (null only where allowed), text fields strings, flags booleans. */
+/** A list a renderer maps (LISTS): an array of objects within its cap (null only where allowed), text fields strings within their caps, flags booleans. */
 function checkList(node, type, i, out) {
-	const [field, max, strings, booleans, nullable] = LISTS[type];
+	const [field, max, texts, booleans, nullable] = LISTS[type];
 	const list = node[field];
 	const where = `#${i} ${type} ${field}`;
 	if (list === undefined || (list === null && nullable)) return;
@@ -523,7 +581,7 @@ function checkList(node, type, i, out) {
 			out.add(`${where}[${k}]: must be an object`);
 			continue;
 		}
-		for (const key of strings) if (item[key] != null && typeof item[key] !== "string") out.add(notAllowed(`#${i} ${type}`, `${field}[${k}].${key}`, item[key]));
+		for (const [key, cap] of Object.entries(texts)) checkText(item[key], `#${i} ${type}`, `${field}[${k}].${key}`, cap, out);
 		for (const key of booleans) if (item[key] != null && typeof item[key] !== "boolean") out.add(notAllowed(`#${i} ${type}`, `${field}[${k}].${key}`, item[key]));
 	}
 }
@@ -564,9 +622,10 @@ export function guardPortableText(value) {
 			out.add(`#${i} ${type}: unknown block type`);
 			continue;
 		}
-		// Counted before the image rules run, so a huge gallery is one problem
+		// Counted before the node's checks run, so a huge gallery, or many oversized Markdown fields, is one problem
 		if (type === "image") count(out, { images: 1 });
 		if (type === "gallery" && Array.isArray(node.images)) count(out, { images: node.images.length });
+		count(out, { markdown: markdownChars(node, type) });
 		if (out.full) break;
 		// astro-portabletext treats any node with a children array as a block and renders those children inline
 		if (type === "block") checkBlock(node, `#${i} block`, out);
@@ -578,6 +637,7 @@ export function guardPortableText(value) {
 		if (type === "table") checkTable(node, i, out);
 		if (Object.hasOwn(LISTS, type)) checkList(node, type, i, out);
 		if (type === "tabs") checkDefaultTab(node, i, out);
+		if (Object.hasOwn(TEXT, type)) for (const [field, cap] of Object.entries(TEXT[type])) checkText(node[field], `#${i} ${type}`, field, cap, out);
 		checkContainers(node, type, i, out);
 		checkRules(node, RULES[type], `#${i} ${type} `, out);
 	}
@@ -638,6 +698,30 @@ export function guardBlockImages(value, imagePaths) {
 			for (const [label, image] of labelledValuesAt(block, path)) {
 				if (out.full) break;
 				checkRules(image, IMAGE_VALUE_RULES, `#${i} ${type} ${label}.`, out);
+			}
+		}
+	}
+	return out.done();
+}
+
+/**
+ * Printed text values inside the blocks of a `blocks` field: each a string of at most its cap when present.
+ * @param {unknown} value the field value, e.g. pages.layout
+ * @param {Record<string, Record<string, number>>} textFields per block `_type`, the cap of each text path ("title", "features[].title")
+ * @returns problems like `#0 hero title: at most 200 characters (got 201)`; empty means OK. A block whose `_type` has no
+ * entry is left to core.
+ */
+export function guardBlockText(value, textFields) {
+	const out = collector();
+	if (!Array.isArray(value)) return out.done();
+	for (let i = 0; i < value.length && !out.full; i++) {
+		const block = value[i];
+		const type = block !== null && typeof block === "object" ? block._type : undefined;
+		if (typeof type !== "string" || !Object.hasOwn(textFields, type)) continue;
+		for (const [path, max] of Object.entries(textFields[type])) {
+			for (const [label, text] of labelledValuesAt(block, path)) {
+				if (out.full) break;
+				checkText(text, `#${i} ${type}`, label, max, out);
 			}
 		}
 	}

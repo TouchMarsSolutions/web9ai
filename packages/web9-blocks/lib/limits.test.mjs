@@ -3,7 +3,21 @@ import { DATA_LIMITS, LIMITS, clampText, lengthProblem } from "./limits.mjs";
 
 describe("LIMITS", () => {
 	it("holds the limits of spec 2026-10-17 §3.1", () => {
-		expect(LIMITS).toEqual({ title: 200, description: 1000, excerpt: 1000, slug: 100, label: 80, url: 2048, menuItems: 50, titleAttr: 200, target: 32 });
+		expect(LIMITS).toEqual({
+			title: 200,
+			description: 1000,
+			excerpt: 1000,
+			slug: 100,
+			label: 80,
+			url: 2048,
+			menuItems: 50,
+			titleAttr: 200,
+			target: 32,
+			markdown: 25000,
+			inlineMarkdown: 300,
+			code: 20000,
+			id: 64,
+		});
 		// docs.category is a plain string field that every docs page prints in its sidebar
 		expect(DATA_LIMITS).toEqual({ title: 200, description: 1000, excerpt: 1000, category: 80 });
 		expect(Object.isFrozen(LIMITS)).toBe(true);

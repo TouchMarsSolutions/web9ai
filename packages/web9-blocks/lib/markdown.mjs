@@ -121,12 +121,13 @@ function dedent(src) {
 	return lines.map((l) => l.slice(min)).join("\n");
 }
 
-export function renderMarkdown(src = "") {
-	if (!src) return "";
-	return sanitizeHtml(marked.parse(dedent(String(src))), SANITIZE);
+// A stored field that is not a string renders as nothing (lib/text.mjs): String() on it could throw and take the page down
+export function renderMarkdown(src) {
+	if (typeof src !== "string" || !src) return "";
+	return sanitizeHtml(marked.parse(dedent(src)), SANITIZE);
 }
 
-export function renderInlineMarkdown(src = "") {
-	if (!src) return "";
-	return sanitizeHtml(marked.parseInline(String(src)), SANITIZE);
+export function renderInlineMarkdown(src) {
+	if (typeof src !== "string" || !src) return "";
+	return sanitizeHtml(marked.parseInline(src), SANITIZE);
 }

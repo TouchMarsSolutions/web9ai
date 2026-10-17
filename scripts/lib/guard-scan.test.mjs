@@ -73,7 +73,7 @@ describe("revisionsOf", () => {
 
 describe("scanFields", () => {
 	it("is the pinned fields plus the live schema's", () => {
-		expect(scanFields({ slug: "docs", fields: [{ slug: "summary", type: "portableText" }] })).toEqual({ pt: ["body", "summary"], image: [], blocks: [] });
+		expect(scanFields({ slug: "docs", fields: [{ slug: "summary", type: "portableText" }] })).toEqual({ pt: ["body", "summary"], image: [], blocks: [], blockText: [] });
 	});
 });
 

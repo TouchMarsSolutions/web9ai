@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { localizeHref } from "../web9-site/lib/nav.mjs";
 import {
 	BLOCK_IMAGE_FIELDS,
+	BLOCK_TEXT_FIELDS,
 	HOME_ALTERNATES,
 	IMAGE_FIELDS,
 	PT_FIELDS,
@@ -85,6 +86,20 @@ describe("content:beforeSave", () => {
 		expect(BLOCK_IMAGE_FIELDS).toEqual(fromSeed);
 		expect(BLOCK_IMAGE_FIELDS).toEqual({ pages: { layout: { hero: ["image"], feature_grid: ["features[].image"] } } });
 	});
+	it("pins BLOCK_TEXT_FIELDS to the string, text and url values and image alts inside the seed's block types", () => {
+		const types = new Map(seed.blockTypes.map((t) => [t.slug, t]));
+		const at = (prefix, f) => (["string", "text", "url"].includes(f.type) ? [prefix + f.slug] : f.type === "image" ? [`${prefix}${f.slug}.alt`] : []);
+		const paths = (type) =>
+			type.versions
+				.find((v) => v.version === type.currentVersion)
+				.fields.flatMap((f) => (f.type === "repeater" ? (f.validation?.subFields ?? []).flatMap((sub) => at(`${f.slug}[].`, sub)) : at("", f)));
+		for (const c of seed.collections) {
+			for (const f of c.fields.filter((f) => f.type === "blocks")) {
+				for (const t of f.validation.allowedTypes) expect(Object.keys(BLOCK_TEXT_FIELDS[c.slug][f.slug][t]).sort(), `${c.slug}.${f.slug} ${t}`).toEqual(paths(types.get(t)).sort());
+			}
+		}
+		expect(Object.keys(BLOCK_TEXT_FIELDS)).toEqual(["pages"]);
+	});
 	const img = (over = {}) => ({ id: "", provider: "external", src: "/img/ai.svg", mimeType: "image/svg+xml", alt: "AI", ...over });
 	const layout = (heroImage, ...featureImages) => [
 		{ _type: "hero", _version: 1, _key: "home-hero", title: "Web9.AI", image: heroImage },
@@ -105,6 +120,20 @@ describe("content:beforeSave", () => {
 		});
 		await expect(save({ layout: layout(img({ meta: { storageKey: { toString: 1 } } })) })).rejects.toMatchObject({
 			message: expect.stringContaining('layout: #0 hero image.meta.storageKey: value {"toString":1} is not allowed'),
+		});
+	});
+	it("rejects pages.layout text that is not a string or is over its cap", async () => {
+		const save = (content) => beforeSave({ collection: "pages", content });
+		const home = layout(img(), img());
+		home[0].title = JSON.parse('{"toString":1}');
+		await expect(save({ layout: home })).rejects.toMatchObject({
+			name: "ContentSaveRejectedError",
+			message: 'Save rejected (spec §10): layout: #0 hero title: value {"toString":1} is not allowed',
+		});
+		const long = layout(img(), img());
+		long[1].features[0].description = "d".repeat(1001);
+		await expect(save({ layout: long })).rejects.toMatchObject({
+			message: "Save rejected (spec §10): layout: #1 feature_grid features[0].description: at most 1000 characters (got 1001)",
 		});
 	});
 	it("accepts the home page layout and saves without a layout, and guards layout and body together", async () => {
@@ -164,8 +193,13 @@ describe("content:beforeSave", () => {
 		await expect(beforeSave({ collection: "posts", content: { featured_image: { id: "x", meta: { storageKey: deep(20000) } } } })).rejects.toMatchObject(rejected);
 		const hero = { _type: "hero", _version: 1, _key: "h", title: "T", image: { id: "", src: "/img/ai.svg", meta: { storageKey: deep(20000) } } };
 		await expect(beforeSave({ collection: "pages", content: { title: "Home", layout: [hero] } })).rejects.toMatchObject(rejected);
-		// text of a web9 block is walked for search_text after the guard passed it (callout has no field rules)
-		const saved = await beforeSave({ collection: "docs", content: { body: [{ _type: "callout", _key: "c", body: deep(50000) }] } });
+		// a printed text field must be a string, so a deep callout body is rejected (it used to throw at render)
+		await expect(beforeSave({ collection: "docs", content: { body: [{ _type: "callout", _key: "c", body: deep(50000) }] } })).rejects.toMatchObject({
+			name: "ContentSaveRejectedError",
+			message: "Save rejected (spec §10): body: #0 callout body: value [unprintable array] is not allowed",
+		});
+		// a field no renderer prints passes the guard and is still walked for search_text without overflowing
+		const saved = await beforeSave({ collection: "docs", content: { body: [{ _type: "callout", _key: "c", note: deep(50000) }] } });
 		expect(saved.search_text).toBe("x");
 	});
 	it("drops a caller-sent search_text from saves without the body field", async () => {

@@ -92,7 +92,7 @@ describe("nested headings in prose", () => {
 describe("set:html in src/ and the block renderers", () => {
 	it("appears only at these sites: static theme icons, the search snippet core has escaped, and sanitized Markdown or HTML", () => {
 		expect(sinks).toEqual([
-			["packages/web9-blocks/astro/Callout.astro", "renderInlineMarkdown(node.title)"],
+			["packages/web9-blocks/astro/Callout.astro", "renderInlineMarkdown(title)"],
 			["packages/web9-blocks/astro/Callout.astro", "renderMarkdown(node?.body)"],
 			["packages/web9-blocks/astro/Details.astro", 'renderInlineMarkdown(node?.summary ?? "Details")'],
 			["packages/web9-blocks/astro/Details.astro", "renderMarkdown(node?.body)"],

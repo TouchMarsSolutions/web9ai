@@ -14,6 +14,14 @@ export const LIMITS = Object.freeze({
 	// (core WidgetRenderer, no clamp), which SafeWidgetArea checks with menuIsSafe.
 	titleAttr: 200,
 	target: 32,
+	// Block text fields (pt-guard.mjs): a Markdown body (callout, details, a tab), an inline-Markdown line (callout
+	// title, details summary, tool tagline), and mermaid or code-block source. Each Markdown field runs marked and
+	// sanitize-html on every render; marked is super-linear on dense delimiters, so these bound, not remove, that cost.
+	markdown: 25000,
+	inlineMarkdown: 300,
+	code: 20000,
+	// A media id the site prints into a URL (a byline's avatarMediaId; core's ids are 26-character ULIDs)
+	id: 64,
 });
 
 /**

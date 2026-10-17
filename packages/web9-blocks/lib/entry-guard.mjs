@@ -4,7 +4,7 @@
 // imports emdash's runtime (pt-guard.mjs imports only core's self-contained table normalizer), so guard-scan runs it
 // in plain node.
 import { DATA_LIMITS, LIMITS, lengthProblem } from "./limits.mjs";
-import { guardBlockImages, guardImageValue, guardPortableText } from "./pt-guard.mjs";
+import { guardBlockImages, guardBlockText, guardImageValue, guardPortableText } from "./pt-guard.mjs";
 
 /** Portable Text fields per collection: all are guarded on every save; the first one feeds search_text. Pinned to the seed. */
 export const PT_FIELDS = { docs: ["body"], posts: ["content"], pages: ["content"] };
@@ -19,7 +19,33 @@ export const IMAGE_FIELDS = { posts: ["featured_image"] };
  */
 export const BLOCK_IMAGE_FIELDS = { pages: { layout: { hero: ["image"], feature_grid: ["features[].image"] } } };
 
-/** @typedef {{ pt: string[], image: string[], blocks: Array<[string, Record<string, string[]>]> }} EntryFields */
+/**
+ * `blocks` fields per collection, and in each the cap of every text value Hero.astro and FeatureGrid.astro print (a
+ * title, a tagline, a button label or href, an alt). Core's block schema (zod, at normalizeBlocksData) types them only
+ * after content:beforeSave and caps none; layout-blocks.mjs and hero-buttons.mjs also render a non-string as "".
+ * Pinned to the seed; `migrate verify` reports a live text path missing here (scripts/lib/schema-drift.mjs).
+ */
+export const BLOCK_TEXT_FIELDS = {
+	pages: {
+		layout: {
+			hero: {
+				title: LIMITS.title,
+				tagline: LIMITS.description,
+				primary_label: LIMITS.label,
+				secondary_label: LIMITS.label,
+				primary_href: LIMITS.url,
+				secondary_href: LIMITS.url,
+				"image.alt": LIMITS.description,
+			},
+			feature_grid: { title: LIMITS.title, "features[].title": LIMITS.title, "features[].description": LIMITS.description, "features[].image.alt": LIMITS.description },
+		},
+	},
+};
+
+/**
+ * @typedef {{ pt: string[], image: string[], blocks: Array<[string, Record<string, string[]>]>,
+ *   blockText: Array<[string, Record<string, Record<string, number>>]> }} EntryFields
+ */
 
 const own = (table, key) => (Object.hasOwn(table, key) ? table[key] : undefined);
 
@@ -29,6 +55,7 @@ export function staticFields(collection) {
 		pt: [...(own(PT_FIELDS, collection) ?? [])],
 		image: [...(own(IMAGE_FIELDS, collection) ?? [])],
 		blocks: Object.entries(own(BLOCK_IMAGE_FIELDS, collection) ?? {}),
+		blockText: Object.entries(own(BLOCK_TEXT_FIELDS, collection) ?? {}),
 	};
 }
 
@@ -47,18 +74,34 @@ export function mergeLiveFields(fields, schemaFields) {
 }
 
 /**
+ * How long fieldsFor waits for the schema. Core aborts a hook after 5 s (plugins/define-plugin.ts:293, hooks.ts
+ * executeWithTimeout) with an error the hook cannot catch, so a publish would fail without a cancellation; giving up
+ * well before that leaves the check itself the time to run.
+ */
+export const SCHEMA_TIMEOUT_MS = 1500;
+const TIMED_OUT = Symbol("timed out");
+
+/**
  * The fields to guard in `collection`: the pinned ones plus the live schema's, read through `schema` (the plugin's
- * ctx.schema, present with the schema:read capability). Without it, or when the read fails, the pinned ones alone.
+ * ctx.schema, present with the schema:read capability). Without it, or when the read fails or takes over `timeoutMs`,
+ * the pinned ones alone.
  * @returns {Promise<EntryFields>}
  */
-export async function fieldsFor(collection, schema) {
+export async function fieldsFor(collection, schema, timeoutMs = SCHEMA_TIMEOUT_MS) {
 	const fields = staticFields(collection);
 	if (typeof schema?.getCollection !== "function") return fields;
+	let timer;
 	try {
-		return mergeLiveFields(fields, (await schema.getCollection(collection))?.fields);
+		const timeout = new Promise((resolve) => (timer = setTimeout(() => resolve(TIMED_OUT), timeoutMs)));
+		const live = await Promise.race([schema.getCollection(collection), timeout]);
+		if (live !== TIMED_OUT) return mergeLiveFields(fields, live?.fields);
+		console.warn(`[web9-blocks] reading the ${collection} schema took over ${timeoutMs} ms; guarding the pinned fields only`);
+		return fields;
 	} catch (error) {
 		console.warn(`[web9-blocks] reading the ${collection} schema failed; guarding the pinned fields only`, error);
 		return fields;
+	} finally {
+		clearTimeout(timer);
 	}
 }
 
@@ -75,6 +118,7 @@ export function entryProblems(data, fields, { slug } = {}) {
 		...fields.pt.flatMap((f) => prefixed(f, guardPortableText(value(f)))),
 		...fields.image.flatMap((f) => prefixed(f, guardImageValue(value(f)))),
 		...fields.blocks.flatMap(([f, paths]) => prefixed(f, guardBlockImages(value(f), paths))),
+		...fields.blockText.flatMap(([f, paths]) => prefixed(f, guardBlockText(value(f), paths))),
 		...Object.entries(DATA_LIMITS).map(([f, max]) => lengthProblem(f, value(f), max)),
 		lengthProblem("slug", slug, LIMITS.slug),
 	].filter(Boolean);

@@ -2,7 +2,7 @@ import { ContentSaveRejectedError, definePlugin } from "emdash";
 import { PT_FIELDS, entryProblems, fieldsFor } from "./lib/entry-guard.mjs";
 import { extractBlockText } from "./lib/search-text.mjs";
 
-export { BLOCK_IMAGE_FIELDS, IMAGE_FIELDS, PT_FIELDS } from "./lib/entry-guard.mjs";
+export { BLOCK_IMAGE_FIELDS, BLOCK_TEXT_FIELDS, IMAGE_FIELDS, PT_FIELDS } from "./lib/entry-guard.mjs";
 
 const ID = "web9-blocks";
 const VERSION = "0.1.0";

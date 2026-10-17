@@ -1,18 +1,20 @@
 ---
 import { sanitizeHref } from "emdash";
 import { renderInlineMarkdown } from "../lib/markdown.mjs";
+import { text } from "../lib/text.mjs";
 import { logoSize, toolItems } from "../lib/tool-grid.mjs";
 
 interface Props {
 	node: { _type: "tool_grid"; _key: string; title?: string; tools?: unknown; logo_size?: number };
 }
 const { node } = Astro.props;
+const title = text(node?.title);
 const tools = toolItems(node);
 // Also set inline on the img: preflight's img { height: auto } would otherwise undo object-contain.
 const size = logoSize(node?.logo_size);
 ---
 
-{node?.title && <h4 class="mt-4 mb-2">{node.title}</h4>}
+{title && <h4 class="mt-4 mb-2">{title}</h4>}
 <div class="not-prose my-4 mb-6 grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3" data-w9-tools>
 	{
 		tools.map((tool) => (
