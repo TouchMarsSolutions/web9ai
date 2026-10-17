@@ -21,10 +21,19 @@ describe("groupDocs", () => {
 		expect(groupLabel("ai", "new-thing", "en")).toBe("new-thing");
 		expect(groupDocs([{ data: { slug: "x" } }], "en")[0]).toMatchObject({ key: "ai/general", label: "AI" });
 	});
+	it("reads only own keys, so Object.prototype names show as stored", () => {
+		for (const locale of ["en", "zh-CN"]) {
+			for (const name of ["constructor", "__proto__", "toString"]) {
+				expect(groupLabel(name, "general", locale)).toBe(name);
+				expect(groupLabel("ai", name, locale)).toBe(name);
+			}
+		}
+		expect(groupDocs([doc("x", "ai", "constructor", 1)], "en")[0]).toMatchObject({ key: "ai/constructor", label: "constructor" });
+	});
 });
 
 describe.skipIf(!existsSync("legacy/docs"))("labels match the legacy inventory", () => {
-	it("has every category label the old sidebar showed, in both locales", () => {
+	it("has every category label from the legacy _category_.yml files, in both locales", () => {
 		const tree = readLegacyTree();
 		expect(Object.keys(CATEGORY_LABELS).sort()).toEqual(Object.keys(tree.categories).sort());
 		for (const [dir, { label, zhLabel }] of Object.entries(tree.categories)) {
