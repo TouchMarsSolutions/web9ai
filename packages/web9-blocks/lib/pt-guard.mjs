@@ -61,8 +61,10 @@
 // nested a few thousand deep, so each must be a string when present. Markdown fields (callout, details, tab bodies, tool
 // taglines) run marked and sanitize-html on every render, and marked is super-linear on dense delimiters, so each is
 // capped (LIMITS.markdown, LIMITS.inlineMarkdown) and a value holds at most MAX_MARKDOWN Markdown characters, counted
-// before its nodes are checked (a field over its own cap counts up to the cap, so its own problem names it). Mermaid
-// and code-block source is capped at LIMITS.code, a cover's background URLs at LIMITS.url. Plain-text fields are only
+// before its nodes are checked (a field over its own cap counts up to the cap, so its own problem names it). Length does
+// not bound marked's CPU, so a field within its length cap is also capped in delimiter density and line breaks ×
+// characters (markdown-density.mjs), per field and over the value, the value totals counted like the others. Mermaid and
+// code-block source is capped at LIMITS.code, a cover's background URLs at LIMITS.url. Plain-text fields are only
 // type-checked: Astro escapes them in linear time.
 // Image values inside the blocks of a `blocks` field (pages.layout: hero.image, feature_grid.features[].image)
 // are rendered by the same component and get the same checks (guardBlockImages), and their printed text values the
@@ -82,6 +84,7 @@
 // characters, listStart an integer from 1 to MAX_LIST_START.
 import { normalizePortableTextTable } from "@emdash-cms/admin/portable-text-table";
 import { LIMITS } from "./limits.mjs";
+import { DEST_PARENS, FIELD_CAPS, LINE_BUDGET, LINE_MARKERS, VALUE_CAPS, markdownDensity } from "./markdown-density.mjs";
 import { LOGO_SIZE } from "./tool-grid.mjs";
 
 const COLOR = /^(?:#[0-9a-f]{3,8}|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(?:,\s*(?:0|1|0?\.\d+)\s*)?\))$/i;
@@ -130,6 +133,9 @@ function collector() {
 		lines: 0,
 		images: 0,
 		markdown: 0,
+		delimiters: Object.fromEntries(Object.keys(VALUE_CAPS).map((c) => [c, 0])),
+		destParens: 0,
+		lineCost: 0,
 		added: 0,
 		add(problem) {
 			this.added++;
@@ -147,8 +153,15 @@ function collector() {
 	};
 }
 
-/** Adds spans, marks, table grid slots, markDefs, line breaks, images and Markdown characters to the value's totals; past one, stops the walk with its problem. */
-function count(out, { spans = 0, marks = 0, slots = 0, markDefs = 0, lines = 0, images = 0, markdown = 0 }) {
+/** How a density problem names a class of markdown-density.mjs. */
+const delimiterName = (c) => (c === "](" ? '"](" link openers' : `"${c}" characters`);
+
+/**
+ * Adds spans, marks, table grid slots, markDefs, line breaks, images, Markdown characters, Markdown delimiters (per class),
+ * "(" in Markdown link destinations and Markdown line breaks × field characters to the value's totals; past one, stops the
+ * walk with its problem.
+ */
+function count(out, { spans = 0, marks = 0, slots = 0, markDefs = 0, lines = 0, images = 0, markdown = 0, delimiters = {}, destParens = 0, lineCost = 0 }) {
 	if (out.full) return;
 	out.spans += spans;
 	out.marks += marks;
@@ -157,6 +170,10 @@ function count(out, { spans = 0, marks = 0, slots = 0, markDefs = 0, lines = 0, 
 	out.lines += lines;
 	out.images += images;
 	out.markdown += markdown;
+	for (const [c, n] of Object.entries(delimiters)) out.delimiters[c] += n;
+	out.destParens += destParens;
+	out.lineCost += lineCost;
+	const delimiter = Object.keys(VALUE_CAPS).find((c) => out.delimiters[c] > VALUE_CAPS[c]);
 	if (out.spans > MAX_SPANS) out.stop(`at most ${MAX_SPANS} spans are allowed in total`);
 	else if (out.marks > MAX_TOTAL_MARKS) out.stop(`at most ${MAX_TOTAL_MARKS} marks are allowed in total`);
 	else if (out.slots > MAX_GRID_SLOTS) out.stop(`at most ${MAX_GRID_SLOTS} table cells are allowed in total (counting cells spanned by another)`);
@@ -164,6 +181,9 @@ function count(out, { spans = 0, marks = 0, slots = 0, markDefs = 0, lines = 0, 
 	else if (out.lines > MAX_TOTAL_LINES) out.stop(`at most ${MAX_TOTAL_LINES} line breaks are allowed in total`);
 	else if (out.images > MAX_IMAGES) out.stop(`at most ${MAX_IMAGES} images are allowed in total`);
 	else if (out.markdown > MAX_MARKDOWN) out.stop(`at most ${MAX_MARKDOWN} Markdown characters are allowed in total`);
+	else if (delimiter) out.stop(`at most ${VALUE_CAPS[delimiter]} ${delimiterName(delimiter)} are allowed in Markdown in total`);
+	else if (out.destParens > DEST_PARENS[1]) out.stop(`at most ${DEST_PARENS[1]} "(" in link destinations are allowed in Markdown in total`);
+	else if (out.lineCost > LINE_BUDGET[1]) out.stop(`at most ${LINE_BUDGET[1]} line breaks × field characters are allowed in Markdown in total`);
 }
 
 /** Field checks per allowed _type. Paths use `a.b` for nesting and `list[].field` for arrays. */
@@ -326,6 +346,37 @@ function markdownChars(node, type) {
 	const [field, max, texts] = LISTS[type];
 	const list = node[field];
 	return Array.isArray(list) && list.length <= max ? list.reduce((n, item) => n + chars(item, texts), 0) : 0;
+}
+
+/**
+ * Delimiter density of each Markdown field of a node within its length cap (a longer one, or a list past its item cap,
+ * has its own problem): per-field caps here, and each measure counted toward the value's total up to the field cap.
+ */
+function checkMarkdown(node, type, i, out) {
+	const check = (v, field, max) => {
+		if (typeof v !== "string" || v.length > max || out.full) return;
+		const { counts, lineBreaks, destParens, lineMarkers, markerLine } = markdownDensity(v);
+		const where = `#${i} ${type} ${field}`;
+		for (const [c, cap] of Object.entries(FIELD_CAPS)) {
+			if (counts[c] > cap) out.add(`${where}: at most ${cap} ${delimiterName(c)} (got ${counts[c]})`);
+		}
+		const lines = Math.floor(LINE_BUDGET[0] / v.length);
+		if (lineBreaks > lines) out.add(`${where}: at most ${lines} line breaks in a field of ${v.length} characters (got ${lineBreaks})`);
+		if (destParens > DEST_PARENS[0]) out.add(`${where}: at most ${DEST_PARENS[0]} "(" in link destinations (got ${destParens})`);
+		if (lineMarkers > LINE_MARKERS) out.add(`${where}: at most ${LINE_MARKERS} list or quote markers at the start of a line (got ${lineMarkers} on line ${markerLine})`);
+		const delimiters = Object.fromEntries(Object.entries(FIELD_CAPS).map(([c, cap]) => [c, Math.min(counts[c], cap)]));
+		count(out, { delimiters, destParens: Math.min(destParens, DEST_PARENS[0]), lineCost: Math.min(lineBreaks * v.length, LINE_BUDGET[0]) });
+	};
+	if (!Object.hasOwn(LISTS, type)) {
+		for (const f of MARKDOWN[type]) check(node[f], f, TEXT[type][f]);
+		return;
+	}
+	const [field, max, texts] = LISTS[type];
+	const list = node[field];
+	if (!Array.isArray(list) || list.length > max) return;
+	for (let k = 0; k < list.length; k++) {
+		if (isObject(list[k])) for (const f of MARKDOWN[type]) check(list[k][f], `${field}[${k}].${f}`, texts[f]);
+	}
 }
 
 /** `_key` may be absent (undefined or null); when present it must be a string. */
@@ -638,6 +689,7 @@ export function guardPortableText(value) {
 		if (Object.hasOwn(LISTS, type)) checkList(node, type, i, out);
 		if (type === "tabs") checkDefaultTab(node, i, out);
 		if (Object.hasOwn(TEXT, type)) for (const [field, cap] of Object.entries(TEXT[type])) checkText(node[field], `#${i} ${type}`, field, cap, out);
+		if (Object.hasOwn(MARKDOWN, type)) checkMarkdown(node, type, i, out);
 		checkContainers(node, type, i, out);
 		checkRules(node, RULES[type], `#${i} ${type} `, out);
 	}
