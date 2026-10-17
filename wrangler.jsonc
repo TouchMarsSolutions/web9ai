@@ -4,6 +4,16 @@
 	"main": "./src/worker.ts",
 	"compatibility_date": "2026-02-24",
 	"compatibility_flags": ["nodejs_compat"],
+	"observability": { "enabled": true },
+	// The Worker answers on workers.dev until the cutover and keeps it after: the owner's first passkey is bound to
+	// that hostname until Change domain moves the login (plan 3 Task 4). wrangler may turn workers.dev off once
+	// routes are configured unless it is set explicitly.
+	"workers_dev": true,
+	// No per-version preview URLs (subdomain.previews_enabled = false). This only hides versions: one uploaded with
+	// `wrangler versions upload` still carries the production D1 and R2 bindings, and EmDash runs core migrations on
+	// a version's first request. So Workers Builds also keeps non-production branch builds off, and nobody runs
+	// `wrangler dev --remote` (plan 3 Task 5).
+	"preview_urls": false,
 	"d1_databases": [{ "binding": "DB", "database_name": "web9-ai" }],
 	"r2_buckets": [{ "binding": "MEDIA", "bucket_name": "web9-ai-media" }],
 	// Scheduled publishing + maintenance; ~1440 invocations/day, inside the free tier (spec §9)

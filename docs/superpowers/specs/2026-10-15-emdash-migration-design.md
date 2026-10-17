@@ -2,7 +2,7 @@
 
 - 日期：2026-10-15
 - 分支：`main`（计划 1 的 PR #2 已合并；计划 2 在 `plan2` 分支）；仓库 `TouchMarsSolutions/web9ai`
-- 进度：计划 1 完成（2026-10-15）；计划 2 完成（本地迁移和安全关口，2026-10-16）；计划 3（部署、生产迁移、切换）未开始
+- 进度：计划 1 完成（2026-10-15）；计划 2 完成（本地迁移和安全关口，2026-10-16）；计划 3（部署、生产迁移、切换）进行中，见 `docs/superpowers/plans/2026-10-17-emdash-plan3-deploy-cutover.md`
 - 状态标记：**已定** = 已验证或已由 owner 拍板；**建议** = 默认方案，可改；**待验证** = 计划第一个里程碑里实测
 
 ## 0. 目标与取舍
@@ -25,7 +25,7 @@
   - `seed/` — 内容模型快照，用于复现环境（schema 变更后用 `site_export` 或手工同步）
   - `.agents/skills/` — 模板自带的 skill，加上新增的 `web9-blocks` skill
 - **已定**：`output: "server"`，EmDash 1.3.x。
-  - 生产：Cloudflare Workers + D1 + R2。不启用 sandboxed 插件。**待定（owner，计划 3）**：worker 压缩后 5044.82 KiB（约 4.9 MiB；计划 2 Task 15，`wrangler deploy --dry-run`），超过 Workers 免费套餐 3 MiB 的上限：用付费套餐（上限 10 MiB），或者先查能不能裁剪。
+  - 生产：Cloudflare Workers + D1 + R2。不启用 sandboxed 插件。**已定（2026-10-17，计划 3）**：Workers 已经取消了压缩后体积的上限，只限未压缩 64 MiB，Free 和 Paid 一样（developers.cloudflare.com/workers/platform/limits，2026-10-17 查）。本站 `wrangler deploy --dry-run` 为 19238.86 KiB（gzip 5061.54 KiB 只作参考），不用裁剪。账号是 Workers Paid（owner 2026-10-09 确认，记在 touchmars.technology 仓库），每个请求的 CPU 默认上限 30 s；Free 只有 10 ms，渲染重的 doc 页会超。
   - **本地和生产用同一份配置（2026-10-15 修订）**：`@astrojs/cloudflare` 14.x 的 `astro dev` 直接跑在 workerd 里，不是 Node（adapter changelog #14306）。D1 和 R2 用 wrangler 的本地模拟，数据在 `.wrangler/state`；dev-bypass 照常可用。这样一来，Workers 兼容性问题在每次本地开发时就会暴露，不用等到部署。原先的 Node + SQLite（`data.db`）只在 POC 阶段使用。
   - 配置直接采用探针项目的做法（用 `--platform cloudflare` 生成后比对过）：`src/` 不变，多一个 `src/worker.ts`；adapter 用 `cloudflare()`，数据库用 `d1({binding:"DB", session:"auto"})`，存储用 `r2({binding:"MEDIA"})`，另加 `wrangler.jsonc` 和 `@emdash-cms/cloudflare`。
 - 当前状态（计划 2 结束）：本地 workerd dev 里完整迁移可从空库重复（首次：`node scripts/migrate.mjs all --dry-run`，`node scripts/migrate.mjs menu --overwrite`，然后 `node scripts/migrate.mjs all`；再跑一次 `all` 不写入任何东西，因为 seed 的菜单与目标不同，直接跑 `all` 会在 `[WOULD_OVERWRITE] menu/primary` 停下，见 §7）；`npm test`、`npm run build`（含公开 CSS 检查）、`npm run typecheck` 通过；CI 跑测试和构建。
@@ -141,15 +141,18 @@
 - **已定**：用 Cloudflare **Workers Builds** 连接 GitHub 仓库。
 - **已定（owner，2026-10-15，计划 1 结束时）**：PR #2 在计划 1 结束时就合并进 `main`，不再等切换。合并前在 `main` 上打了 tag `docusaurus-final`（指向最后一个 Docusaurus 提交 `b2a8b275`）。Worker 的**生产分支直接用 `main`**。原来"迁移期间生产分支用 `emdash`"是为了不让 `main` 上的 Docusaurus 提交触发必然失败的 Worker 构建，合并后这个理由已经不存在。合并不影响线上：`main` 不再有部署旧站的 workflow，GitHub Pages 继续提供 `gh-pages` 上已经构建好的旧站。
 - 切换步骤：
-  1. 在 Cloudflare 后台创建 Worker，连接仓库，生产分支选 `main`（需要 owner 操作）；
+  1. 首次部署用本机 `wrangler deploy`（`CLOUDFLARE_API_TOKEN`）。Workers Builds（连接仓库，生产分支 `main`）在切换稳定后由 owner 在后台连接（2026-10-17 改定，理由见 `docs/superpowers/plans/2026-10-17-emdash-plan3-deploy-cutover.md` Task 5）；
   2. 在 `*.workers.dev` 上验证；
   3. 对生产环境跑迁移；
-  4. 在 Worker 上绑定 `www.web9.ai` custom domain（DNS 已经在 Cloudflare），apex 重定向到 www；
+  4. 在 Worker 上绑定 `www.web9.ai` 和 `web9.ai` 两个 Custom Domain（DNS 已经在 Cloudflare），`src/worker.ts` 把 apex 重定向到 www；
   5. GitHub Pages 保留作为回退：回退靠的是 `gh-pages` 分支上**已经构建好的产物**（Pages 设置：source `gh-pages`，custom domain `www.web9.ai`），可以随时把 DNS 切回去。确认稳定后再关闭。旧站源码完整保存在 tag `docusaurus-final`，需要时从它重建；`legacy/` **不能**重新构建出线上站点（静态资源已经移到 `public/`），不要从它重新部署到 `gh-pages`。原来的 `static/CNAME` 和 `deploy.yml` 也放在 `legacy/static/` 和 `legacy/.github/workflows/`，只作记录，workflow 不会运行。
-- **待验证（切换后）**：Workers 的预览版本是否和生产共用 D1/R2 binding。如果共用，就加一个 staging environment，使用独立的 D1 和 R2，再开启分支预览。
-- **待验证**：D1 和 R2 是由 wrangler 在部署时自动创建，还是需要先手动创建。另外，adapter 还会注入 KV `SESSION` binding 和 `IMAGES` binding（`wrangler.jsonc` 里没有），`d1_databases` 里也还没有 `database_id`：首次部署前都要配置好或做出决定。
+- **已定（2026-10-17）**：不开预览。`wrangler versions upload` 上传的版本（Workers Builds 给非生产分支构建时就是这样做的）和生产共用 D1、R2 binding，而 EmDash 在版本第一次收到请求时跑 core migration，所以一个升级了 emdash 的分支一旦能被访问，就会改生产库的 schema。真正起作用的是 Workers Builds 关掉非生产分支构建（计划 3 Task 5）。`preview_urls: false` 只是不给版本分配预览 URL，上传的版本照样带着生产 binding。`wrangler dev --remote` 也会连生产 D1，不要用。以后需要预览时，加一个用独立 D1、R2 的 staging environment。
+- **已验证（2026-10-17）**：wrangler 按 `wrangler.jsonc` 里的名字连接资源，找不到就创建。D1 `web9-ai`（`721318a8-ef7b-46b0-9e7c-423d1496882a`，WNAM，read replication `auto`，`d1({session:"auto"})` 需要它）和 R2 `web9-ai-media`（WNAM，没有公开访问）已于 2026-10-17 建好。KV `SESSION` 不写名字，首次部署时由 wrangler 建成 `web9-ai-session`。`IMAGES` 不需要另建资源。`wrangler.jsonc` 只写名字、不写 id，和同账号的 itouchmars、touchmars.technology 一样。
 - **首次启动**：EmDash 在空库第一次启动时自动应用一次 `seed/seed.json`（`applySeed`，`onConflict: "skip"`，之后不再应用，改 seed 也没用），写入 settings、collections、taxonomies、menus、widgetAreas；content 只在 setup 向导里选了才导入。所以 seed 只放 Web9.AI 自己的站点信息，不放模板 demo 内容；菜单只放稳定链接（Blog、GitHub），AI/Dev 入口由迁移 runner 建好 docs 后通过 MCP 加。上线后再改站点信息、菜单、widget，走后台或 MCP。计划 2 Task 1 起，seed 还包含块类型、`pages.layout`、`posts`/`pages` 的 `search_text`、5 个 tag term 和 `settings.url`。注意 `applySeed` 只在 `includeContent` 为 true 时写 taxonomy terms（运行时首次启动用的是 `onConflict: "skip"`、不带 `includeContent`；setup 向导取决于是否勾选导入内容），所以 terms 由迁移 runner 的 `terms` 步骤从 seed 补建（计划 2 Task 1 实测）。
-- 备份：首次部署前备份 `EMDASH_ENCRYPTION_KEY`；定时导出 D1，再定期通过 MCP `site_export` 做整站导出。
+- **登录域名（2026-10-17 核实）**：没设 `siteUrl` 和 `EMDASH_SITE_URL`，passkey 的 rpId 就是请求的 hostname。setup 在 workers.dev 上做，passkey 只在 workers.dev 能用；切换后在后台用 Settings › General › Change domain 迁到 `www.web9.ai`。它的自动检查注定失败（Worker 请求自己的 Custom Domain 不会回到本 Worker），所以先从外部 curl `POST /_emdash/api/site/domain-proof` 确认，再点 **Use … anyway**。setup 之后不要再设 `EMDASH_SITE_URL`，否则已有的 passkey 都会失效。空库时第一个完成 setup 的人就是管理员，所以首次部署后 owner 要马上完成 setup。
+- 备份：
+  - **已定（owner，2026-10-17）**：`EMDASH_ENCRYPTION_KEY` 只存在 Cloudflare 的 Worker secret 里（首次部署时用 `--secrets-file` 上传，本地文件随后删除），不另做备份。它只用来加密插件 secret。丢了就生成新 key，再在后台重填插件 secret；今天还没有插件 secret。
+  - 定时导出 D1，再定期通过 MCP `site_export` 做整站导出。
 - 缓存：v1 不配置。`Astro.cache` 的 warning 是预期内的。上线后先测性能，再按 EmDash 文档加 object cache。
 - 模板的 cron trigger（`* * * * *`，用于定时发布）每天约 1440 次调用，在免费额度之内。
 - worker 体积（计划 2 Task 15，`wrangler deploy --dry-run`）：Total Upload 19190.21 KiB，gzip 5044.82 KiB。
@@ -198,7 +201,7 @@
 - `DocsPage.astro` 的侧栏每个语言只取 `limit: 500` 篇 doc，没有 `orderBy`：超过 500 篇时侧栏会静默少掉条目；而且每个 doc 页都打印全部 doc 的 title（title 已限 200 字符，见上面第 1 项）。
 - 路径里有残缺的百分号编码（`/docs/%E0%A4%A`、`/%E0%A4%A`）时返回 500。这是 core 的既有行为，响应不带 `Cache-Control`、不进共享缓存；生产上再确认一次。
 - `npm audit` 有两项：katex（经 mermaid）、postcss-selector-parser（经 `@tailwindcss/typography`）；两项的修复都是 breaking，计划 3 评估后再升级。
-- CI job 已改名为 "Tests and build"（原来是 "Unit tests"）：如果 `main` 的 branch protection 规则要求 "Unit tests" 这个 check，会挡住所有 PR；计划 3 配置 GitHub 时要改成新名字。
+- CI job 已改名为 "Tests and build"（原来是 "Unit tests"）：如果 `main` 的 branch protection 规则要求 "Unit tests" 这个 check，会挡住所有 PR；计划 3 配置 GitHub 时要改成新名字。**已核实（2026-10-17）**：`main` 的 branch protection 没有 required status check，不阻塞。
 - 生产第一次运行迁移 runner：先 `node scripts/migrate.mjs all --dry-run`，再 `node scripts/migrate.mjs menu --overwrite`（seed 里的菜单与目标不同，§7），然后 `node scripts/migrate.mjs all`；再跑一次 `all` 确认全是 `unchanged`，最后 `verify`。
 - 浏览器验收（计划 2 Task 15 Step 5）2026-10-16 补做完毕，结果通过。通过 CDP :9222 借用一个已有标签页逐页检查，做完导航回原页面。
   - 首页：浅色、深色、跟随系统三种主题都检查了，切换主题后 `<html>` 的 class 和颜色都跟着变；`/zh-CN/` 也检查了。
