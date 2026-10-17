@@ -30,16 +30,19 @@
 // Totals over the whole value (spec 2026-10-17 §3.6): render CPU grows with every span and, most, with every mark
 // (plan 2 measured 0.3 s for one block of 1000 spans × 20 marks), so a value holds at most MAX_NODES top-level nodes,
 // MAX_SPANS spans and MAX_TOTAL_MARKS marks, counting blocks, container blocks and table cells (on the normalized
-// grid). Two more totals bound what a per-block or per-table cap cannot. Core's normalizer and Table.astro do work per
+// grid). Three more totals bound what a per-block or per-table cap cannot. Core's normalizer and Table.astro do work per
 // grid slot of every table, however few cells are written (one cell of colspan 100 × rowspan 20 fills 2000 slots and is
 // one span), so a value holds at most MAX_GRID_SLOTS slots; a table whose rows hold no cells is laid out as one cell, but
 // only after every raw row is keyed and copied, so a table is charged max(grid slots, raw rows). And
 // @portabletext/toolkit builds marks with markDefs.find per mark (astro-portabletext's copy, 3.0.3, dist/index.js:81),
 // so render cost is marks × markDefs per block: a value holds at most MAX_MARK_DEFS markDefs (blocks, tables and table
-// cells), counted before they are walked or normalized. Past a total the walk stops with that one problem. Lists that a
-// renderer maps (buttons.buttons, tabs.tabs, tool_grid.tools) must be arrays of objects within a size cap, and their text
-// fields strings: a null item or a number tagline throws at render time, and so does `buttons: null` (core's
-// Buttons.astro defaults only undefined).
+// cells), counted before they are walked or normalized, and one block, table or cell at most MAX_BLOCK_MARK_DEFS, checked
+// after the total (the find runs over one block's list; Table.astro resolves a cell's through a Map, but its lists get
+// the same cap). Core renders every image node and gallery image, and decodes its blurhash (133 µs for 9×9 components),
+// so a value holds at most MAX_IMAGES images, counted before they are checked. Past a total the walk stops with that one
+// problem. Lists that a renderer maps (buttons.buttons, tabs.tabs, tool_grid.tools) must be arrays of objects within a
+// size cap, and their text fields strings: a null item or a number tagline throws at render time, and so does
+// `buttons: null` (core's Buttons.astro defaults only undefined). tabs.default_tab must name one of the tabs.
 // Output is bounded: collecting stops after MAX_PROBLEMS (plain pushes, never spreads of a long list, which
 // throw RangeError past ~120k items) and ends with MORE, so a hostile value cannot make the guard throw.
 // Messages print a value through show(): JSON.stringify overflows the stack on a value nested a few thousand levels
@@ -47,9 +50,9 @@
 // sanitizeHref (emdash utils/url.ts) throws on a non-string, so every field a core or web9 renderer passes to
 // it must be a string when present: link markDef href (marks/Link.astro:21), button.url (Button.astro:21),
 // buttons[].url (Buttons.astro maps Button), file.url (File.astro:21), embed.url (astro/Embed.astro),
-// tool_grid tools[].url and tools[].logo (astro/ToolGrid.astro:29, :34).
+// tool_grid tools[].url and tools[].logo (astro/ToolGrid.astro: the link's href and the logo img's src).
 // Image values (an `image` field, `darkVariant`, PT image and gallery images) are checked for the colour and
-// blurhash fields that core renderers paste into style or decode: a blurhash that does not decode throws.
+// blurhash fields that core renderers paste into style or decode: a blurhash the decoder rejects throws (validBlurhash).
 // An `image` value also carries meta, a free-form record. EmDashImage.astro reads meta.dominantColor and
 // meta.blurhash as fallbacks and builds the src from meta.storageKey in a template string (media/url.ts), which
 // throws for an object without a callable toString; so meta.storageKey must be a string when present.
@@ -60,8 +63,8 @@
 // component per mark (3000 marks on a span overflow the stack), and its sortMarksByOccurences is O(n²) in a
 // block's children (20k spans = 12 s of CPU). So a span has at most MAX_MARKS marks and a block at most
 // MAX_CHILDREN children. buildMarksTree also splits span text on "\n" and splices a "\n" node back in per line from the
-// tail (astro-portabletext's copy, dist/index.js:92), quadratic per span (80k line breaks = 1.6 s), so a span holds at
-// most MAX_SPAN_LINES line breaks and a value at most MAX_TOTAL_LINES (blocks, container blocks and table cells).
+// tail (astro-portabletext's copy, 3.0.3, dist/index.js:91-95), quadratic per span (80k line breaks = 1.6 s), so a span
+// holds at most MAX_SPAN_LINES line breaks and a value at most MAX_TOTAL_LINES (blocks, container blocks and table cells).
 // `_key` reaches template strings (`${_key}-group` in emdash portable-text-blockquote-group.ts:60), which throw for an
 // object without a callable toString, so a `_key` must be a string when present on every node checked here.
 // Ordered-list continuity (emdash content/portable-text-lists.ts): `listId` is only ever a Map key or part of a
@@ -69,7 +72,6 @@
 // `<ol start>` of OrderedList.astro. Both are bounded when present: listId a string of at most MAX_LIST_ID
 // characters, listStart an integer from 1 to MAX_LIST_START.
 import { normalizePortableTextTable } from "@emdash-cms/admin/portable-text-table";
-import { blurhashToImageCssString } from "@unpic/placeholder";
 import { LOGO_SIZE } from "./tool-grid.mjs";
 
 const COLOR = /^(?:#[0-9a-f]{3,8}|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(?:,\s*(?:0|1|0?\.\d+)\s*)?\))$/i;
@@ -82,15 +84,22 @@ const matches = (re) => (v) => typeof v === "string" && re.test(v);
 const numberIn = (min, max) => (v) => typeof v === "number" && Number.isFinite(v) && v >= min && v <= max;
 const integerIn = (min, max) => (v) => Number.isInteger(v) && v >= min && v <= max;
 const BUTTON_STYLE = oneOf("default", "outline", "fill");
-/** Same check core makes (blurhashToImageCssString in Image.astro / EmDashImage.astro); a throw there is a 500. */
+/** The base83 alphabet of blurhash (2.0.5, dist/index.mjs `q`). */
+const BASE83 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#$%*+,-.:;=?@[]^_{|}~";
+/**
+ * True exactly when the decoder core renders with accepts `v`; a throw there is a 500. Image.astro, Gallery.astro and
+ * EmDashImage.astro call @unpic/placeholder's blurhashToImageCssString (0.1.2), which runs blurhash's decode(v, 8, 8)
+ * (2.0.5). decode throws only in its validator: a falsy or shorter than 6 string, or a length other than
+ * 4 + 2 × numX × numY, both read from the first character (one outside the alphabet reads as -1, so it asks for length 4
+ * and always throws). Every other character is read with indexOf, an unknown one as -1: wrong pixels, never a throw; the
+ * BMP and base64 steps that follow take bytes only. So this is the decoder's own test without the decode (133 µs per 9×9
+ * hash; a gallery of 11k of them took 3 s on save). It does not require every character to be base83, which would reject
+ * hashes that render today. pt-guard.blurhash.test.mjs sweeps it against the real decoder and pins both versions.
+ */
 const validBlurhash = (v) => {
 	if (typeof v !== "string") return false;
-	try {
-		blurhashToImageCssString(v);
-		return true;
-	} catch {
-		return false;
-	}
+	const size = BASE83.indexOf(v[0]);
+	return size !== -1 && v.length === 4 + 2 * (Math.floor(size / 9) + 1) * ((size % 9) + 1);
 };
 const COLOR_OK = matches(COLOR);
 const STRING = (v) => typeof v === "string";
@@ -109,6 +118,7 @@ function collector() {
 		slots: 0,
 		markDefs: 0,
 		lines: 0,
+		images: 0,
 		added: 0,
 		add(problem) {
 			this.added++;
@@ -126,19 +136,21 @@ function collector() {
 	};
 }
 
-/** Adds spans, marks, table grid slots, markDefs and line breaks to the value's totals; past one, stops the walk with its problem. */
-function count(out, { spans = 0, marks = 0, slots = 0, markDefs = 0, lines = 0 }) {
+/** Adds spans, marks, table grid slots, markDefs, line breaks and images to the value's totals; past one, stops the walk with its problem. */
+function count(out, { spans = 0, marks = 0, slots = 0, markDefs = 0, lines = 0, images = 0 }) {
 	if (out.full) return;
 	out.spans += spans;
 	out.marks += marks;
 	out.slots += slots;
 	out.markDefs += markDefs;
 	out.lines += lines;
+	out.images += images;
 	if (out.spans > MAX_SPANS) out.stop(`at most ${MAX_SPANS} spans are allowed in total`);
 	else if (out.marks > MAX_TOTAL_MARKS) out.stop(`at most ${MAX_TOTAL_MARKS} marks are allowed in total`);
 	else if (out.slots > MAX_GRID_SLOTS) out.stop(`at most ${MAX_GRID_SLOTS} table cells are allowed in total (counting cells spanned by another)`);
 	else if (out.markDefs > MAX_MARK_DEFS) out.stop(`at most ${MAX_MARK_DEFS} markDefs are allowed in total`);
 	else if (out.lines > MAX_TOTAL_LINES) out.stop(`at most ${MAX_TOTAL_LINES} line breaks are allowed in total`);
+	else if (out.images > MAX_IMAGES) out.stop(`at most ${MAX_IMAGES} images are allowed in total`);
 }
 
 /** Field checks per allowed _type. Paths use `a.b` for nesting and `list[].field` for arrays. */
@@ -242,11 +254,13 @@ const MAX_SPANS = 20000;
 const MAX_TOTAL_MARKS = 5000;
 const MAX_GRID_SLOTS = 20000;
 const MAX_MARK_DEFS = 5000;
+const MAX_BLOCK_MARK_DEFS = 100;
 const MAX_ROWS = 500;
 const MAX_CELLS = 2000;
-const MAX_RECORD_KEYS = 32;
+const MAX_RECORD_KEYS = 16;
 const MAX_SPAN_LINES = 1000;
 const MAX_TOTAL_LINES = 5000;
+const MAX_IMAGES = 500;
 /**
  * Lists a renderer maps: [field, max items, string fields of an item, boolean fields of an item, null allowed].
  * url/logo are in RULES. Core's Buttons.astro defaults the list only for undefined (`const { buttons = [] } = node`),
@@ -297,6 +311,9 @@ function checkBlock(node, where, out) {
 	else {
 		const defs = node.markDefs ?? [];
 		count(out, { markDefs: defs.length });
+		if (out.full) return;
+		// Past the cap the block is rejected unwalked: its marks would only repeat it as unknown keys
+		if (defs.length > MAX_BLOCK_MARK_DEFS) return out.add(`${where} markDefs: at most ${MAX_BLOCK_MARK_DEFS} markDefs are allowed`);
 		for (let k = 0; k < defs.length && !out.full; k++) {
 			const def = defs[k];
 			if (def?._type !== "link") out.add(notAllowed(where, `markDefs[${k}]._type`, def?._type));
@@ -379,12 +396,14 @@ function checkColumns(node, i, out) {
 }
 
 /**
- * A table cell's content: spans only (core renders them inline), within the span, mark and line-break caps; its markDefs
- * within MAX_RECORD_KEYS fields each. Spans are counted by checkTable.
+ * A table cell's content: spans only (core renders them inline), within the span, mark and line-break caps; at most
+ * MAX_BLOCK_MARK_DEFS markDefs, within MAX_RECORD_KEYS fields each. Spans are counted by checkTable.
  */
 function checkCell(cell, at, out) {
 	if (Array.isArray(cell.markDefs)) {
 		count(out, { markDefs: cell.markDefs.length });
+		if (out.full) return;
+		if (cell.markDefs.length > MAX_BLOCK_MARK_DEFS) return out.add(`${at} markDefs: at most ${MAX_BLOCK_MARK_DEFS} markDefs are allowed`);
 		checkDefFields(cell.markDefs, at, out);
 	}
 	if (out.full || cell.content == null) return;
@@ -417,7 +436,7 @@ function checkCell(cell, at, out) {
  * MAX_CELLS and counted toward MAX_GRID_SLOTS for the value, or the raw row count if that is larger (rows without cells
  * become one cell, after every row is keyed and copied), and the spans it renders (empty and padded cells are one span
  * each) count toward MAX_SPANS. The markDefs of the table and of each cell count toward MAX_MARK_DEFS as they are met,
- * before any normalizer run.
+ * before any normalizer run, and each of those lists holds at most MAX_BLOCK_MARK_DEFS.
  */
 function checkTable(node, i, out) {
 	// Every problem this table adds, the table node's and its markDefs' included, skips the normalizer below.
@@ -426,7 +445,8 @@ function checkTable(node, i, out) {
 	if (tooManyFields(node)) out.add(`${where}: at most ${MAX_RECORD_KEYS} fields are allowed`);
 	if (Array.isArray(node.markDefs)) {
 		count(out, { markDefs: node.markDefs.length });
-		checkDefFields(node.markDefs, where, out);
+		if (node.markDefs.length > MAX_BLOCK_MARK_DEFS && !out.full) out.add(`${where} markDefs: at most ${MAX_BLOCK_MARK_DEFS} markDefs are allowed`);
+		else checkDefFields(node.markDefs, where, out);
 	}
 	if (out.full || node.rows == null) return;
 	if (!Array.isArray(node.rows)) return out.add(`${where} rows: must be an array`);
@@ -477,6 +497,16 @@ function checkTable(node, i, out) {
 	let spans = 0;
 	for (const row of normalized.table.rows) for (const cell of row.cells) spans += Math.max(1, cell.content?.length ?? 0);
 	count(out, { spans });
+}
+
+/**
+ * tabs.default_tab, when present (not undefined or null): an integer from 1 to the number of tabs. Tabs.astro opens that
+ * tab; a value that named no tab (a string gave a NaN index) hid every panel.
+ */
+function checkDefaultTab(node, i, out) {
+	if (node.default_tab == null) return;
+	const tabs = Array.isArray(node.tabs) ? Math.min(node.tabs.length, LISTS.tabs[1]) : 0;
+	if (!integerIn(1, tabs)(node.default_tab)) out.add(notAllowed(`#${i} tabs`, "default_tab", node.default_tab));
 }
 
 /** A list a renderer maps (LISTS): an array of objects within its cap (null only where allowed), text fields strings, flags booleans. */
@@ -534,6 +564,10 @@ export function guardPortableText(value) {
 			out.add(`#${i} ${type}: unknown block type`);
 			continue;
 		}
+		// Counted before the image rules run, so a huge gallery is one problem
+		if (type === "image") count(out, { images: 1 });
+		if (type === "gallery" && Array.isArray(node.images)) count(out, { images: node.images.length });
+		if (out.full) break;
 		// astro-portabletext treats any node with a children array as a block and renders those children inline
 		if (type === "block") checkBlock(node, `#${i} block`, out);
 		else {
@@ -543,6 +577,7 @@ export function guardPortableText(value) {
 		if (type === "columns") checkColumns(node, i, out);
 		if (type === "table") checkTable(node, i, out);
 		if (Object.hasOwn(LISTS, type)) checkList(node, type, i, out);
+		if (type === "tabs") checkDefaultTab(node, i, out);
 		checkContainers(node, type, i, out);
 		checkRules(node, RULES[type], `#${i} ${type} `, out);
 	}

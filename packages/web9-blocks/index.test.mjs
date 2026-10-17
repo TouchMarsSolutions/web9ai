@@ -1,7 +1,19 @@
 import { readFileSync } from "node:fs";
+import { isScheduledPolicyRejection } from "emdash";
 import { describe, expect, it, vi } from "vitest";
 import { localizeHref } from "../web9-site/lib/nav.mjs";
-import { BLOCK_IMAGE_FIELDS, HOME_ALTERNATES, IMAGE_FIELDS, PT_FIELDS, beforePublish, beforeSave, cancelDecision, createPlugin, pageMetadata } from "./index.mjs";
+import {
+	BLOCK_IMAGE_FIELDS,
+	HOME_ALTERNATES,
+	IMAGE_FIELDS,
+	PT_FIELDS,
+	PUBLISH_REJECTED,
+	beforePublish,
+	beforeSave,
+	cancelDecision,
+	createPlugin,
+	pageMetadata,
+} from "./index.mjs";
 
 const seed = JSON.parse(readFileSync(new URL("../../seed/seed.json", import.meta.url), "utf8"));
 const callout = { _type: "callout", _key: "c1", tone: "tip", title: "T", body: "probe-word" };
@@ -212,19 +224,22 @@ describe("content:beforeSave", () => {
 
 describe("content:beforePublish / content:beforeSchedule (spec 2026-10-17 §3.2)", () => {
 	const entry = (data, slug = "ok") => ({ collection: "docs", content: { id: "x", slug, data } });
+	const CHECK_FAILED = `${PUBLISH_REJECTED}the content check failed`;
+	// What core stores for a rejected scheduled publish (plugins/content-policy.ts): the reason must pass its own check
+	const scheduled = (decision) => isScheduledPolicyRejection({ collection: "docs", id: "x", pluginId: "web9-blocks", rejectedAt: new Date().toISOString(), reason: decision.reason });
+	it("prefixes every reason with the publish prefix", () => {
+		expect(PUBLISH_REJECTED).toBe("Publish rejected (spec §10): ");
+	});
 	it("allows an entry the save check passes", async () => {
 		expect(await beforePublish(entry({ title: "T", body: [callout] }))).toBeUndefined();
 		expect(await beforePublish({ collection: "docs", content: { id: "x", slug: null } })).toBeUndefined();
 	});
 	it("cancels a draft the save check rejects, and a staged slug over the limit", async () => {
-		expect(await beforePublish(entry({ body: [{ _type: "htmlBlock", _key: "h" }] }))).toEqual({
-			cancel: true,
-			reason: "Publish rejected (spec §10): body: #0 htmlBlock: raw HTML blocks are not allowed; use Markdown or a Web9 block",
-		});
-		expect(await beforePublish(entry({ title: "T" }, "s".repeat(101)))).toEqual({
-			cancel: true,
-			reason: "Publish rejected (spec §10): slug: at most 100 characters (got 101)",
-		});
+		const html = await beforePublish(entry({ body: [{ _type: "htmlBlock", _key: "h" }] }));
+		expect(html).toEqual({ cancel: true, reason: `${PUBLISH_REJECTED}body: #0 htmlBlock: raw HTML blocks are not allowed; use Markdown or a Web9 block` });
+		const slug = await beforePublish(entry({ title: "T" }, "s".repeat(101)));
+		expect(slug).toEqual({ cancel: true, reason: `${PUBLISH_REJECTED}slug: at most 100 characters (got 101)` });
+		for (const d of [html, slug]) expect(scheduled(d)).toBe(true);
 	});
 	it("guards the live schema's fields through ctx.schema", async () => {
 		const schema = { getCollection: async () => ({ fields: [{ slug: "summary", type: "portableText" }] }) };
@@ -239,13 +254,19 @@ describe("content:beforePublish / content:beforeSchedule (spec 2026-10-17 §3.2)
 		expect(d.reason.endsWith("…")).toBe(true);
 		expect(cancelDecision("a\u0007b\tc\nd\u007f")).toEqual({ cancel: true, reason: "a b\tc\nd" });
 		expect(Array.from(cancelDecision("😀".repeat(600)).reason)).toHaveLength(500);
-		expect(cancelDecision(" \u0001 ")).toEqual({ cancel: true, reason: "Publish rejected (spec §10): the content check failed" });
+		expect(cancelDecision(" \u0001 ")).toEqual({ cancel: true, reason: CHECK_FAILED });
+		// core's own check accepts each of them as the stored reason of a rejected schedule
+		for (const decision of [d, cancelDecision("a\u0007b\tc\nd\u007f"), cancelDecision("😀".repeat(600)), cancelDecision(" \u0001 "), cancelDecision(`${"x".repeat(499)}\u0000 `)]) {
+			expect(scheduled(decision), decision.reason.slice(0, 20)).toBe(true);
+		}
 	});
 	it("cancels instead of throwing when the check itself fails (a throw would leave a scheduled entry scheduled)", async () => {
 		const error = vi.spyOn(console, "error").mockImplementation(() => {});
 		try {
 			const ctx = { get schema() { throw new Error("boom"); } };
-			expect(await beforePublish(entry({ title: "T" }), ctx)).toEqual({ cancel: true, reason: "Publish rejected (spec §10): the content check failed" });
+			const failed = await beforePublish(entry({ title: "T" }), ctx);
+			expect(failed).toEqual({ cancel: true, reason: CHECK_FAILED });
+			expect(scheduled(failed)).toBe(true);
 			expect(await beforePublish(undefined)).toBeUndefined();
 			expect(error).toHaveBeenCalledOnce();
 		} finally {

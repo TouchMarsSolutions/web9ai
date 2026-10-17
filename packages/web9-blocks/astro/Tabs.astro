@@ -1,13 +1,13 @@
 ---
 import { renderMarkdown } from "../lib/markdown.mjs";
-import { tabItems } from "../lib/tabs.mjs";
+import { activeTab, tabItems } from "../lib/tabs.mjs";
 
 interface Props {
 	node: { _type: "tabs"; _key: string; tabs?: unknown; default_tab?: number; fullscreen?: boolean };
 }
 const { node } = Astro.props;
 const tabs = tabItems(node);
-const active = Math.min(Math.max((node?.default_tab ?? 1) - 1, 0), Math.max(tabs.length - 1, 0));
+const active = activeTab(node, tabs.length);
 // Unique per render, so two tabs blocks on one page never share ids (a missing or repeated _key used to collide)
 const uid = `w9t-${crypto.randomUUID().slice(0, 8)}`;
 ---

@@ -32,22 +32,22 @@ describe("guardPortableText: runs of core's table normalizer per value", () => {
 	});
 	it("does not run it on a table that already has a problem", () => {
 		const wide = cell();
-		for (let i = 0; i < 40; i++) wide[`x${i}`] = 0;
-		expect(guardPortableText([table([row([wide])])])).toEqual(["#0 table rows[0].cells[0]: at most 32 fields are allowed"]);
+		for (let i = 0; i < 20; i++) wide[`x${i}`] = 0;
+		expect(guardPortableText([table([row([wide])])])).toEqual(["#0 table rows[0].cells[0]: at most 16 fields are allowed"]);
 		expect(normalizePortableTextTable).not.toHaveBeenCalled();
 	});
-	// Pads a record with x0, x1, ... up to 33 own keys.
+	// Pads a record with x0, x1, ... up to 17 own keys.
 	const wide = (record) => {
-		for (let i = 0; Object.keys(record).length < 33; i++) record[`x${i}`] = 0;
+		for (let i = 0; Object.keys(record).length < 17; i++) record[`x${i}`] = 0;
 		return record;
 	};
 	it("does not run it when the table node itself has too many fields", () => {
-		expect(guardPortableText([wide(table([row([cell()])]))])).toEqual(["#0 table: at most 32 fields are allowed"]);
+		expect(guardPortableText([wide(table([row([cell()])]))])).toEqual(["#0 table: at most 16 fields are allowed"]);
 		expect(normalizePortableTextTable).not.toHaveBeenCalled();
 	});
 	it("does not run it when a table-level markDef has too many fields", () => {
 		const def = wide({ _type: "link", _key: `m${keys++}`, href: "/x" });
-		expect(guardPortableText([{ ...table([row([cell()])]), markDefs: [def] }])).toEqual(["#0 table markDefs[0]: at most 32 fields are allowed"]);
+		expect(guardPortableText([{ ...table([row([cell()])]), markDefs: [def] }])).toEqual(["#0 table markDefs[0]: at most 16 fields are allowed"]);
 		expect(normalizePortableTextTable).not.toHaveBeenCalled();
 	});
 });

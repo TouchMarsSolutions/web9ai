@@ -32,9 +32,12 @@ describe("mergeLiveFields / fieldsFor", () => {
 		expect(await fieldsFor("docs")).toEqual(staticFields("docs"));
 		expect(await fieldsFor("docs", { getCollection: async () => null })).toEqual(staticFields("docs"));
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-		expect(await fieldsFor("docs", { getCollection: async () => { throw new Error("db down"); } })).toEqual(staticFields("docs"));
-		expect(warn).toHaveBeenCalledOnce();
-		warn.mockRestore();
+		try {
+			expect(await fieldsFor("docs", { getCollection: async () => { throw new Error("db down"); } })).toEqual(staticFields("docs"));
+			expect(warn).toHaveBeenCalledOnce();
+		} finally {
+			warn.mockRestore();
+		}
 	});
 });
 
@@ -54,6 +57,10 @@ describe("entryProblems", () => {
 			"slug: at most 100 characters (got 101)",
 		]);
 		expect(entryProblems({ title: "t".repeat(200), description: "d".repeat(1000) }, none, { slug: "s".repeat(100) })).toEqual([]);
+	});
+	it("limits category (the docs sidebar label) to 80 characters", () => {
+		expect(entryProblems({ category: "c".repeat(81) }, docs)).toEqual(["category: at most 80 characters (got 81)"]);
+		expect(entryProblems({ category: "c".repeat(80) }, docs)).toEqual([]);
 	});
 	it("treats data that is not an object as empty, and reads only own fields", () => {
 		for (const data of [undefined, null, "x", 5]) expect(entryProblems(data, docs)).toEqual([]);

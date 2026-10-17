@@ -25,8 +25,11 @@ describe("Tabs and ToolGrid", () => {
 	const component = (name) => readFileSync(new URL(`./astro/${name}`, import.meta.url), "utf8");
 	it("render the lists tabItems and toolItems give (a null item or a number tagline used to throw)", () => {
 		const tabs = component("Tabs.astro");
-		expect(tabs).toMatch(/^import \{ tabItems \} from "\.\.\/lib\/tabs\.mjs";$/m);
+		expect(tabs).toMatch(/^import \{ activeTab, tabItems \} from "\.\.\/lib\/tabs\.mjs";$/m);
 		expect(tabs).toContain("const tabs = tabItems(node);");
+		// the open tab comes from activeTab only (a non-integer default_tab used to give a NaN index that hid every panel)
+		expect(tabs).toContain("const active = activeTab(node, tabs.length);");
+		expect(tabs).not.toMatch(/node\?\.default_tab/);
 		const grid = component("ToolGrid.astro");
 		expect(grid).toMatch(/^import \{ logoSize, toolItems \} from "\.\.\/lib\/tool-grid\.mjs";$/m);
 		expect(grid).toContain("const tools = toolItems(node);");

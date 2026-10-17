@@ -1,6 +1,7 @@
 // Length and count limits (spec 2026-10-17 §3.1). One table for the save and publish check (entry-guard.mjs), the write
-// gate (packages/web9-site/lib/write-gate.mjs), scripts/guard-scan.mjs and the menu in Base.astro. A length is a
-// JavaScript string length (UTF-16 code units). Every limit is far above what the site holds today (the spec lists them).
+// gate (packages/web9-site/lib/write-gate.mjs), scripts/guard-scan.mjs, the menu in Base.astro and the docs sidebar
+// (packages/web9-site/lib/docs-nav.mjs). A length is a JavaScript string length (UTF-16 code units). Every limit is far
+// above what the site holds today (the spec lists them).
 export const LIMITS = Object.freeze({
 	title: 200,
 	description: 1000,
@@ -15,8 +16,11 @@ export const LIMITS = Object.freeze({
 	target: 32,
 });
 
-/** The `data` fields whose length the save and publish check limits, in every collection. */
-export const DATA_LIMITS = Object.freeze({ title: LIMITS.title, description: LIMITS.description, excerpt: LIMITS.excerpt });
+/**
+ * The `data` fields whose length the save and publish check limits, in every collection. docs.category is a plain
+ * string field (no max in core) that every docs page prints as a sidebar heading (docs-nav.mjs groupLabel).
+ */
+export const DATA_LIMITS = Object.freeze({ title: LIMITS.title, description: LIMITS.description, excerpt: LIMITS.excerpt, category: LIMITS.label });
 
 /** `field: at most N characters (got M)` when `value` is a string longer than `max`; otherwise null. */
 export function lengthProblem(field, value, max) {

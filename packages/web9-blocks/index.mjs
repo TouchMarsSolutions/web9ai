@@ -130,7 +130,9 @@ export async function beforeSave(event, ctx) {
 }
 
 const MAX_REASON = 500; // core's MAX_CONTENT_POLICY_REASON_LENGTH (plugins/content-policy.ts), in code points
-const CHECK_FAILED = "Publish rejected (spec §10): the content check failed";
+/** Starts every reason the publish and schedule hooks give (core shows it, and stores it for a rejected schedule). */
+export const PUBLISH_REJECTED = "Publish rejected (spec §10): ";
+const CHECK_FAILED = `${PUBLISH_REJECTED}the content check failed`;
 
 /**
  * A cancel decision core accepts (inspectContentPolicyDecision): exactly { cancel, reason }, the reason trimmed and
@@ -153,7 +155,7 @@ export async function beforePublish(event, ctx) {
 	try {
 		const content = event?.content;
 		const problems = entryProblems(content?.data, await fieldsFor(event?.collection, ctx?.schema), { slug: content?.slug });
-		return problems.length ? cancelDecision(`Publish rejected (spec §10): ${problems.join("; ")}`) : undefined;
+		return problems.length ? cancelDecision(`${PUBLISH_REJECTED}${problems.join("; ")}`) : undefined;
 	} catch (error) {
 		console.error("[web9-blocks] the publish check failed; rejecting", error);
 		return cancelDecision(CHECK_FAILED);

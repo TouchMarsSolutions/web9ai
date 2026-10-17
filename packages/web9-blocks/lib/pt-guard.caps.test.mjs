@@ -142,22 +142,46 @@ describe("guardPortableText: markDefs over the whole value (the toolkit runs mar
 	let id = 0;
 	const defs = (n) => Array.from({ length: n }, () => ({ _type: "link", _key: `m${id++}`, href: "/x" }));
 	const withDefs = (n) => ({ ...para([span()]), markDefs: defs(n) });
+	const blocks = (n) => Array.from({ length: n }, () => withDefs(100));
+	const both = (tableDefs, cellDefs) => ({ ...table([row([{ ...cell([]), markDefs: defs(cellDefs) }])]), markDefs: defs(tableDefs) });
 	const MESSAGE = ["at most 5000 markDefs are allowed in total"];
 	it("allows 5000 block markDefs in total", () => {
-		const five = Array.from({ length: 5 }, () => withDefs(1000));
-		expect(guardPortableText(five)).toEqual([]);
-		expect(guardPortableText([...five, withDefs(1)])).toEqual(MESSAGE);
+		expect(guardPortableText(blocks(50))).toEqual([]);
+		expect(guardPortableText([...blocks(50), withDefs(1)])).toEqual(MESSAGE);
 	});
 	it("counts table and cell markDefs toward the same total", () => {
-		const both = (tableDefs, cellDefs) => ({ ...table([row([{ ...cell([]), markDefs: defs(cellDefs) }])]), markDefs: defs(tableDefs) });
-		expect(guardPortableText([both(3000, 2000)])).toEqual([]);
-		expect(guardPortableText([both(3000, 2001)])).toEqual(MESSAGE);
-		expect(guardPortableText([withDefs(2000), both(2000, 1000)])).toEqual([]);
-		expect(guardPortableText([withDefs(2000), both(2000, 1001)])).toEqual(MESSAGE);
+		expect(guardPortableText([...blocks(48), both(100, 100)])).toEqual([]);
+		expect(guardPortableText([...blocks(48), both(100, 100), withDefs(1)])).toEqual(MESSAGE);
+		expect(guardPortableText([...blocks(49), both(50, 51)])).toEqual(MESSAGE);
 	});
 	it("counts markDefs before it walks them, so a huge array is one problem", () => {
 		expect(guardPortableText([withDefs(200000)])).toEqual(MESSAGE);
 		expect(guardPortableText([{ ...table([row([cell([])])]), markDefs: defs(200000) }])).toEqual(MESSAGE);
+		expect(guardPortableText([table([row([{ ...cell([]), markDefs: defs(200000) }])])])).toEqual(MESSAGE);
+	});
+});
+
+describe("guardPortableText: markDefs per block, table and cell (the toolkit's find runs over one block's list)", () => {
+	let id = 0;
+	const defs = (n) => Array.from({ length: n }, () => ({ _type: "link", _key: `d${id++}`, href: "/x" }));
+	const withDefs = (n) => ({ ...para([span()]), markDefs: defs(n) });
+	it("allows at most 100 markDefs on a block, in a container too", () => {
+		expect(guardPortableText([withDefs(100)])).toEqual([]);
+		expect(guardPortableText([withDefs(1), withDefs(101)])).toEqual(["#1 block markDefs: at most 100 markDefs are allowed"]);
+		expect(guardPortableText([{ _type: "cover", _key: "v", content: [withDefs(101)] }])).toEqual(["#0 cover content[0] block markDefs: at most 100 markDefs are allowed"]);
+	});
+	it("allows at most 100 markDefs on a table and on a cell", () => {
+		const both = (tableDefs, cellDefs) => ({ ...table([row([{ ...cell([]), markDefs: defs(cellDefs) }])]), markDefs: defs(tableDefs) });
+		expect(guardPortableText([both(100, 100)])).toEqual([]);
+		expect(guardPortableText([both(101, 0)])).toEqual(["#0 table markDefs: at most 100 markDefs are allowed"]);
+		expect(guardPortableText([both(0, 101)])).toEqual(["#0 table rows[0].cells[0] markDefs: at most 100 markDefs are allowed"]);
+	});
+	it("does not walk a list past the cap: one problem, however bad its entries", () => {
+		const bad = Array.from({ length: 101 }, () => ({ _type: "constructor" }));
+		expect(guardPortableText([{ ...para([span()]), markDefs: bad }])).toEqual(["#0 block markDefs: at most 100 markDefs are allowed"]);
+	});
+	it("reports the value-wide total first when a list passes both", () => {
+		expect(guardPortableText([...Array.from({ length: 49 }, () => withDefs(100)), withDefs(101)])).toEqual(["at most 5000 markDefs are allowed in total"]);
 	});
 });
 
@@ -178,23 +202,23 @@ describe("guardPortableText: fields of table records (core's safeFields tests an
 		return out;
 	};
 	const link = () => ({ _type: "link", _key: `m${keys++}`, href: "/x" });
-	it("allows at most 32 fields on a cell", () => {
-		expect(guardPortableText([table([row([wide(cell([span()]), 32)])])])).toEqual([]);
-		expect(guardPortableText([table([row([cell([]), wide(cell([span()]), 33)])])])).toEqual(["#0 table rows[0].cells[1]: at most 32 fields are allowed"]);
+	it("allows at most 16 fields on a cell", () => {
+		expect(guardPortableText([table([row([wide(cell([span()]), 16)])])])).toEqual([]);
+		expect(guardPortableText([table([row([cell([]), wide(cell([span()]), 17)])])])).toEqual(["#0 table rows[0].cells[1]: at most 16 fields are allowed"]);
 	});
-	it("allows at most 32 fields on a row and on the table, rows or not", () => {
-		expect(guardPortableText([table([wide(row([cell([])]), 32)])])).toEqual([]);
-		expect(guardPortableText([table([row([cell([])]), wide(row([cell([])]), 33)])])).toEqual(["#0 table rows[1]: at most 32 fields are allowed"]);
-		expect(guardPortableText([wide(table([row([cell([])])]), 32)])).toEqual([]);
-		expect(guardPortableText([wide(table([row([cell([])])]), 33)])).toEqual(["#0 table: at most 32 fields are allowed"]);
-		expect(guardPortableText([wide({ _type: "table", _key: "t" }, 33)])).toEqual(["#0 table: at most 32 fields are allowed"]);
+	it("allows at most 16 fields on a row and on the table, rows or not", () => {
+		expect(guardPortableText([table([wide(row([cell([])]), 16)])])).toEqual([]);
+		expect(guardPortableText([table([row([cell([])]), wide(row([cell([])]), 17)])])).toEqual(["#0 table rows[1]: at most 16 fields are allowed"]);
+		expect(guardPortableText([wide(table([row([cell([])])]), 16)])).toEqual([]);
+		expect(guardPortableText([wide(table([row([cell([])])]), 17)])).toEqual(["#0 table: at most 16 fields are allowed"]);
+		expect(guardPortableText([wide({ _type: "table", _key: "t" }, 17)])).toEqual(["#0 table: at most 16 fields are allowed"]);
 	});
-	it("allows at most 32 fields on a table or cell markDef", () => {
+	it("allows at most 16 fields on a table or cell markDef", () => {
 		const withCellDefs = (def) => table([row([{ ...cell([]), markDefs: [link(), def] }])]);
-		expect(guardPortableText([withCellDefs(wide(link(), 32))])).toEqual([]);
-		expect(guardPortableText([withCellDefs(wide(link(), 33))])).toEqual(["#0 table rows[0].cells[0] markDefs[1]: at most 32 fields are allowed"]);
-		expect(guardPortableText([{ ...table([row([cell([])])]), markDefs: [wide(link(), 32)] }])).toEqual([]);
-		expect(guardPortableText([{ ...table([row([cell([])])]), markDefs: [link(), wide(link(), 33)] }])).toEqual(["#0 table markDefs[1]: at most 32 fields are allowed"]);
+		expect(guardPortableText([withCellDefs(wide(link(), 16))])).toEqual([]);
+		expect(guardPortableText([withCellDefs(wide(link(), 17))])).toEqual(["#0 table rows[0].cells[0] markDefs[1]: at most 16 fields are allowed"]);
+		expect(guardPortableText([{ ...table([row([cell([])])]), markDefs: [wide(link(), 16)] }])).toEqual([]);
+		expect(guardPortableText([{ ...table([row([cell([])])]), markDefs: [link(), wide(link(), 17)] }])).toEqual(["#0 table markDefs[1]: at most 16 fields are allowed"]);
 	});
 });
 
@@ -260,5 +284,26 @@ describe("guardPortableText: block shapes that crash their renderer (spec 2026-1
 			'#0 tool_grid tools[0].featured: value "yes" is not allowed',
 		]);
 		expect(guardPortableText([{ _type: "buttons", _key: "k", buttons: [{ text: 5 }, { text: "ok" }] }])).toEqual(["#0 buttons buttons[0].text: value 5 is not allowed"]);
+	});
+});
+
+describe("guardPortableText: images over the whole value (core renders, and decodes a blurhash, per image)", () => {
+	const image = (k) => ({ _type: "image", _key: `i${k}`, asset: { _ref: "x" } });
+	const images = (n) => Array.from({ length: n }, (_, k) => image(k));
+	const gallery = (n) => ({ _type: "gallery", _key: "g", images: Array.from({ length: n }, () => ({ asset: { _ref: "x" } })) });
+	const MESSAGE = ["at most 500 images are allowed in total"];
+	it("allows at most 500 images, counting image nodes and gallery images", () => {
+		expect(guardPortableText(images(500))).toEqual([]);
+		expect(guardPortableText(images(501))).toEqual(MESSAGE);
+		expect(guardPortableText([gallery(500)])).toEqual([]);
+		expect(guardPortableText([gallery(501)])).toEqual(MESSAGE);
+		expect(guardPortableText([image(0), gallery(250), image(1), gallery(248)])).toEqual([]);
+		expect(guardPortableText([image(0), gallery(250), image(1), gallery(249)])).toEqual(MESSAGE);
+	});
+	it("counts a gallery's images before it checks them, so a huge gallery is one problem", () => {
+		expect(guardPortableText([gallery(1), { _type: "gallery", _key: "h", images: Array.from({ length: 200000 }, () => ({ blurhash: 1 })) }])).toEqual(MESSAGE);
+	});
+	it("leaves a gallery whose images are not an array to the other checks", () => {
+		for (const bad of [null, "x", { length: 9999 }]) expect(guardPortableText([{ _type: "gallery", _key: "g", images: bad }])).toEqual([]);
 	});
 });
