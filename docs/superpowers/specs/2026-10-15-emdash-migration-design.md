@@ -141,7 +141,7 @@
 - **已定**：用 Cloudflare **Workers Builds** 连接 GitHub 仓库。
 - **已定（owner，2026-10-15，计划 1 结束时）**：PR #2 在计划 1 结束时就合并进 `main`，不再等切换。合并前在 `main` 上打了 tag `docusaurus-final`（指向最后一个 Docusaurus 提交 `b2a8b275`）。Worker 的**生产分支直接用 `main`**。原来"迁移期间生产分支用 `emdash`"是为了不让 `main` 上的 Docusaurus 提交触发必然失败的 Worker 构建，合并后这个理由已经不存在。合并不影响线上：`main` 不再有部署旧站的 workflow，GitHub Pages 继续提供 `gh-pages` 上已经构建好的旧站。
 - 切换步骤：
-  1. 首次部署用本机 `wrangler deploy`（`CLOUDFLARE_API_TOKEN`）。Workers Builds（连接仓库，生产分支 `main`）在切换稳定后由 owner 在后台连接（2026-10-17 改定，理由见 `docs/superpowers/plans/2026-10-17-emdash-plan3-deploy-cutover.md` Task 5）；
+  1. 首次部署用本机 `wrangler deploy`（`CLOUDFLARE_API_TOKEN`）。Workers Builds（连接仓库，生产分支 `main`）在切换稳定后由 owner 在后台连接（2026-10-17 改定，理由见 `docs/superpowers/plans/2026-10-17-emdash-plan3-deploy-cutover.md` Task 5）。**已连接（2026-10-17，我用 API 连接）**：只有 `main` 一个 trigger，合并到 `main` 就是部署；
   2. 在 `*.workers.dev` 上验证；
   3. 对生产环境跑迁移；
   4. 在 Worker 上绑定 `www.web9.ai` 和 `web9.ai` 两个 Custom Domain（DNS 已经在 Cloudflare），`src/worker.ts` 把 apex 重定向到 www。做法：`wrangler.jsonc` 的 `routes` 写成 `custom_domain: true`。用 Custom Domain 而不是普通 route，是因为 Cloudflare 会为它建 DNS 记录和证书，删掉 GitHub Pages 的记录后不需要另建源站记录。EmDash 的 Change domain 对此没有要求，它只要新域名用 https 直接服务本站、不跳转。非交互的 `wrangler deploy` 会不提示、直接覆盖冲突的 DNS 记录，所以按计划 3 Task 4 Step 3 的顺序做：
@@ -166,6 +166,19 @@
   - **已定（owner，2026-10-17）**：`EMDASH_ENCRYPTION_KEY` 只存在 Cloudflare 的 Worker secret 里（首次部署时用 `--secrets-file` 上传，本地文件随后删除），不另做备份。它只用来加密插件 secret。丢了就生成新 key，再在后台重填插件 secret；今天还没有插件 secret。
   - 定时导出 D1，再定期通过 MCP `site_export` 做整站导出。
 - 缓存：v1 不配置。`Astro.cache` 的 warning 是预期内的。上线后先测性能，再按 EmDash 文档加 object cache。
+- **图片（2026-10-17，切换后）**：页面打开慢，原因不在 CDN（站点本来就由 Cloudflare 边缘提供），而在图片。旧站的图片原样搬了过来，`public/img` 有 33 MB，最大的一张 2.9 MB。
+  - `scripts/optimize-images.mjs` 原地压缩，路径和格式不变，内容里的 `/img/...` URL 不用改：
+    - 宽度超过 1600 px 的缩到 1600 px（文档正文最宽约 900 CSS px）；
+    - 超过 300 KB 的重新编码，PNG 转成 256 色 palette，JPEG 用 mozjpeg q82；
+    - 省不到 10% 就不写；
+    - 已经是 palette 的 PNG 不再量化（再量化只会掉颜色），所以第二次运行什么都不写。
+  - 第一次运行改了 55 张：26.0 MB → 5.8 MB，`public/img` 从 33 MB 降到 12 MB。
+  - `scripts/lib/raster-images.test.mjs` 是守门测试：`public/img` 和 `public/cover` 下每张 PNG、JPEG 的宽度不超过 1600 px，大小不超过 1 MB。上限用 1 MB 而不是 300 KB，因为照片存成 PNG，量化后可能还是很大（`event/dinner_background_6.png` 895 KB），而换格式就得改 URL。
+  - `public/_headers` 给 `/img/*` 和 `/cover/*` 设 `Cache-Control: public, max-age=86400, stale-while-revalidate=604800`：
+    - Workers 静态资源的默认值是 `public, max-age=0, must-revalidate`，浏览器每张图都要回源验证一次；
+    - 文件名不带 hash，所以不设 immutable，换掉的图最多一天后才生效；
+    - build 会在 `_headers` 开头加上 `/_astro/*` 的 immutable 规则。如果这个文件里已经有规则在 `/_astro/` 下的路径上设了 Cache-Control，build 就不加了。测试钉住这一点。
+  - 首页的三个 SVG 暂不处理。
 - 模板的 cron trigger（`* * * * *`，用于定时发布）每天约 1440 次调用，在免费额度之内。
 - worker 体积（计划 2 Task 15，`wrangler deploy --dry-run`）：Total Upload 19190.21 KiB，gzip 5044.82 KiB。
 
