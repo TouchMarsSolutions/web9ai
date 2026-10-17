@@ -1,6 +1,8 @@
 import { ContentSaveRejectedError, definePlugin } from "emdash";
-import { guardBlockImages, guardImageValue, guardPortableText } from "./lib/pt-guard.mjs";
+import { PT_FIELDS, entryProblems, fieldsFor } from "./lib/entry-guard.mjs";
 import { extractBlockText } from "./lib/search-text.mjs";
+
+export { BLOCK_IMAGE_FIELDS, IMAGE_FIELDS, PT_FIELDS } from "./lib/entry-guard.mjs";
 
 const ID = "web9-blocks";
 const VERSION = "0.1.0";
@@ -105,37 +107,21 @@ export const BLOCKS = [
 /** `_type`s of this plugin's blocks; only their text is mirrored into search_text. */
 const BLOCK_TYPES = new Set(BLOCKS.map((b) => b.type));
 
-/** Portable Text fields per collection: all are guarded on every save; the first one feeds search_text. */
-export const PT_FIELDS = { docs: ["body"], posts: ["content"], pages: ["content"] };
-
-/** `image` fields per collection: guarded on every save (colour and blurhash values reach style and a decoder). */
-export const IMAGE_FIELDS = { posts: ["featured_image"] };
-
 /**
- * `blocks` fields per collection, and in each the paths of the `image` values inside a block type (the same
- * colour and blurhash values, rendered by <Image> in the hero and feature_grid components). Pinned to the seed.
+ * content:beforeSave. Rejects unsafe blocks, image values and over-long fields (spec §10; spec 2026-10-17 §3.1) in the
+ * pinned fields plus the live schema's (ctx.schema, schema:read), then mirrors this plugin's block text into
+ * search_text, because core search only indexes text/alt/caption/code strings (spec §4).
  */
-export const BLOCK_IMAGE_FIELDS = { pages: { layout: { hero: ["image"], feature_grid: ["features[].image"] } } };
-
-/**
- * content:beforeSave. Rejects unsafe blocks and image values (spec §10), then mirrors this plugin's block
- * text into search_text, because core search only indexes text/alt/caption/code strings (spec §4).
- */
-export async function beforeSave({ content, collection }) {
-	const fields = PT_FIELDS[collection] ?? [];
-	const imageFields = IMAGE_FIELDS[collection] ?? [];
-	const blockFields = Object.entries(BLOCK_IMAGE_FIELDS[collection] ?? {});
-	if (!fields.length && !imageFields.length && !blockFields.length) return content;
-	const problems = [
-		...fields.flatMap((f) => guardPortableText(content[f]).map((p) => `${f}: ${p}`)),
-		...imageFields.flatMap((f) => guardImageValue(content[f]).map((p) => `${f}: ${p}`)),
-		...blockFields.flatMap(([f, paths]) => guardBlockImages(content[f], paths).map((p) => `${f}: ${p}`)),
-	];
+export async function beforeSave(event, ctx) {
+	const { content, collection } = event;
+	const problems = entryProblems(content, await fieldsFor(collection, ctx?.schema));
 	if (problems.length) throw new ContentSaveRejectedError(`Save rejected (spec §10): ${problems.join("; ")}`.slice(0, 1000));
-	const [main] = fields;
+	// search_text comes from the first pinned Portable Text field: a collection without one keeps its content as it is.
+	const main = Object.hasOwn(PT_FIELDS, collection) ? PT_FIELDS[collection][0] : undefined;
+	if (main === undefined) return content;
 	// Updates pass only the changed fields; when the body didn't change, keep the stored search_text
 	// (so a caller-sent one is dropped, not stored).
-	if (main === undefined || content[main] === undefined) {
+	if (content[main] === undefined) {
 		if (!("search_text" in content)) return content;
 		const { search_text: _dropped, ...rest } = content;
 		return rest;
@@ -186,8 +172,8 @@ export function createPlugin() {
 	return definePlugin({
 		id: ID,
 		version: VERSION,
-		// content:beforeSave is skipped without this capability
-		capabilities: ["content:write"],
+		// content:beforeSave is skipped without content:write; ctx.schema exists only with schema:read (plugins/context.ts)
+		capabilities: ["content:write", "schema:read"],
 		hooks: {
 			"content:beforeSave": beforeSave,
 			"page:metadata": pageMetadata,

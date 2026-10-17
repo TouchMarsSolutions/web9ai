@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { localizeHref } from "../web9-site/lib/nav.mjs";
 import { BLOCK_IMAGE_FIELDS, HOME_ALTERNATES, IMAGE_FIELDS, PT_FIELDS, beforeSave, createPlugin, pageMetadata } from "./index.mjs";
 
@@ -166,6 +166,44 @@ describe("content:beforeSave", () => {
 	it("replaces a caller-sent search_text when the body is saved", async () => {
 		const saved = await beforeSave({ collection: "docs", content: { body: [callout], search_text: "spam" } });
 		expect(saved.search_text).toBe("T\nprobe-word");
+	});
+	it("rejects an over-long title, description or excerpt in any collection (spec 2026-10-17 §3.1)", async () => {
+		await expect(beforeSave({ collection: "docs", content: { title: "t".repeat(201) } })).rejects.toMatchObject({
+			name: "ContentSaveRejectedError",
+			message: "Save rejected (spec §10): title: at most 200 characters (got 201)",
+		});
+		await expect(beforeSave({ collection: "docs", content: { description: "d".repeat(1001) } })).rejects.toMatchObject({
+			message: expect.stringContaining("description: at most 1000 characters (got 1001)"),
+		});
+		await expect(beforeSave({ collection: "posts", content: { excerpt: "e".repeat(1001) } })).rejects.toMatchObject({ message: expect.stringContaining("excerpt: at most 1000") });
+		await expect(beforeSave({ collection: "other", content: { title: "t".repeat(201) } })).rejects.toMatchObject({ name: "ContentSaveRejectedError" });
+		const ok = { title: "t".repeat(200), description: "d".repeat(1000), search_text: "kept" };
+		expect(await beforeSave({ collection: "other", content: ok })).toBe(ok);
+	});
+	it("guards the live schema's portableText and image fields too (ctx.schema, schema:read)", async () => {
+		const schema = { getCollection: async (slug) => ({ slug, fields: [{ slug: "summary", type: "portableText" }, { slug: "cover", type: "image" }] }) };
+		await expect(beforeSave({ collection: "docs", content: { summary: [{ _type: "htmlBlock" }] } }, { schema })).rejects.toMatchObject({
+			message: expect.stringContaining("summary: #0 htmlBlock"),
+		});
+		await expect(beforeSave({ collection: "products", content: { cover: { dominantColor: "red;position:fixed" } } }, { schema })).rejects.toMatchObject({
+			message: expect.stringContaining("cover: dominantColor"),
+		});
+		// search_text still comes from the pinned field only: a collection without one keeps its content as it is
+		const products = { summary: [] };
+		expect(await beforeSave({ collection: "products", content: products }, { schema })).toBe(products);
+	});
+	it("falls back to the pinned fields when the schema read fails", async () => {
+		const schema = { getCollection: async () => { throw new Error("db down"); } };
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		await expect(beforeSave({ collection: "docs", content: { body: [{ _type: "htmlBlock" }] } }, { schema })).rejects.toMatchObject({
+			message: expect.stringContaining("body: #0 htmlBlock"),
+		});
+		expect((await beforeSave({ collection: "docs", content: { body: [callout] } }, { schema })).search_text).toBe("T\nprobe-word");
+		expect(warn).toHaveBeenCalled();
+		warn.mockRestore();
+	});
+	it("declares schema:read (ctx.schema exists only with it) besides content:write", () => {
+		expect(createPlugin().capabilities).toEqual(expect.arrayContaining(["content:write", "schema:read"]));
 	});
 });
 
