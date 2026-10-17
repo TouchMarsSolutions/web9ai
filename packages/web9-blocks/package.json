@@ -9,6 +9,7 @@
     "./astro": "./astro/index.mjs",
     "./markdown": "./lib/markdown.mjs",
     "./html": "./lib/html.mjs",
+    "./to-markdown": "./lib/to-markdown.mjs",
     "./styles.css": "./astro/blocks.css"
   },
   "peerDependencies": {

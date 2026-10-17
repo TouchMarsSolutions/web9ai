@@ -127,7 +127,7 @@
   - **发布**：MCP 的 `content_create` 默认创建草稿（已实测）。要直接上线，传 `status: "published"`，或者之后再调用 `content_publish`。
   - 写入时 guard：hook 拒绝 `htmlBlock`、`iframe`、带 `html` 的 `embed`、未知 `_type` 和 core 块里会被拼进 `class`/`style` 的非法字段值（计划 2 Task 3），错误码 `SAVE_REJECTED`。
 - **已验证（计划 1 Task 10）**：agent 只通过 MCP（一次 `content_create`，`status: "published"`，`body` 是 Markdown 字符串，块用单独一行 `<!--ec:block {json} -->`）从头写了一篇带 callout ×2、tabs、表格的 doc（slug `ai-e2e`）。workerd 上页面返回 200，所有块都渲染了，页面里没有残留的 `ec:block` 文本。(a) 没写 `_key` 的块存下来**也没有** `_key`：原样存储，runtime 不会补，页面渲染不受影响；写了 `_key` 的块原样保留。所以 skill 要求每个块都带唯一 `_key`（后台编辑器的表现见 §3 的 Task 11 结果：没有 `_key` 的块能正常编辑，保存时编辑器会补上 key；只走 MCP 的内容仍然没有 key）。(b) 表格**可以**通过 `ec:block` 写入：core 的 `table` 块 JSON 原样存下，页面渲染成 `<table>`，不需要退回 Portable Text JSON 数组。同一次创建里，`content:beforeSave` 钩子还写入了 `search_text`（含 callout 和 tabs 的文字，不含表格），`search` 能找到这篇。cookbook 在 `.agents/skills/web9-blocks/SKILL.md`。
-- 让 AI 读站点：`/llms.txt` 路由，从 `docs` 集合生成；可以再加 `/docs/{slug}.md`，用 `emdash/client` 的 `portableTextToMarkdown` 输出。
+- 让 AI 读站点（计划 2 Task 13）：`/llms.txt`（en doc）和 `/zh-CN/llms.txt`（有翻译的 zh-CN doc），按侧栏分组列出，每个链接指向 `/docs/{slug}.md`。`.md` 由 `@web9/blocks/to-markdown` 的 `blocksToMarkdown` 生成：core 文本、代码、图片用 `emdash/client` 的 `portableTextToMarkdown`；web9 块、表格、分隔线写成 Markdown；`embed` 只在站点会渲染成播放器（YouTube、Vimeo，与 `embedSrc` 一致）时写成指向原始 URL 的链接，否则丢掉；`htmlBlock` 和未知块丢掉，输出里永远没有 `ec:block` JSON；站内相对链接和图片改成 `https://www.web9.ai/...`，不安全的链接和图片 URL（与 `sanitizeHref` 同一规则）只留文字或整块丢掉。内容由 AI agent 不经审核发布，所以任何格式错误的值只会让那个节点被丢掉，不会让页面 500；四个路由的所有响应（含 404）都带 `X-Content-Type-Options: nosniff`。`.md` 只返回已发布的版本：草稿、预览、编辑模式下 `getEmDashEntry` 返回的草稿副本一律 404（响应带公开缓存头）。zh-CN 的 `.md` 只在有翻译时存在。站内搜索另外通过 `WebMcpSearch`（Task 4）暴露给支持 WebMCP 的浏览器 agent。
 
 ## 9. 部署与运维
 
