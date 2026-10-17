@@ -38,3 +38,29 @@ export function groupDocs(entries, locale) {
 	}
 	return [...groups.values()];
 }
+
+/**
+ * The docs sidebar (spec 2026-10-17 docs UX §3.2): the current section only, as on the old site. Docs at the section
+ * root come first, then one group per category in groupDocs order; only the category holding the current doc is open.
+ */
+export function docsSidebar(groups, section, currentSlug) {
+	const mine = groups.filter((g) => g.key.startsWith(`${section}/`));
+	const isRoot = (g) => g.key === `${section}/general`;
+	return {
+		rootItems: mine.filter(isRoot).flatMap((g) => g.items),
+		categories: mine
+			.filter((g) => !isRoot(g))
+			.map(({ key, label, items }) => ({ key, label, open: items.some((e) => e.data.slug === currentSlug), items })),
+	};
+}
+
+/** The breadcrumb trail after the home icon: section, category (none for "general"), then the doc title. */
+export function breadcrumbs(data, locale) {
+	const section = data.section ?? "ai";
+	const category = data.category ?? "general";
+	return [
+		groupLabel(section, "general", locale),
+		...(category === "general" ? [] : [groupLabel(section, category, locale)]),
+		data.title,
+	];
+}
