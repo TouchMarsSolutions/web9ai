@@ -9,7 +9,8 @@
 // margin takes no minus sign anywhere: a minus after a number or % (0-256px) is still a negative margin.
 // font-size takes no em, rem, % or larger/smaller keywords: relative sizes compound through nested elements.
 // line-height is normal or a unitless number from 1 to 4.
-// CSS-wide keywords (inherit, initial, unset, revert, revert-layer) fail on every property: they copy a parent's value.
+// CSS-wide keywords (inherit, initial, unset, revert, revert-layer) fail on every property: inherit copies the
+// parent's value (unset does too on inherited properties), and the rest take a value from outside this grammar.
 // Box properties are block-only; markdown.mjs enforces that, because this module sees only values.
 export const CSS_FUNCTIONS = new Set([
 	"rgb", "rgba", "hsl", "hsla", "hwb",

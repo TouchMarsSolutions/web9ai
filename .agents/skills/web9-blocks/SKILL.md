@@ -24,7 +24,7 @@ Endpoint: `<site>/_emdash/api/mcp` with `Authorization: Bearer <token>`. In this
 - Editing an existing body: `content_get` with `"markdown": true` returns `body` as Markdown plus `ec:block` lines; edit that and send the whole `body` back.
 - Translations share the slug with the en doc. `content_get` and `content_update` take `"locale": "zh-CN"` to scope the slug lookup; `content_publish` and `revision_list` have no `locale`, so for a translation use the item's ULID `id` (from `content_get`) in every call.
 - Locking: an update or publish fails with `ENTRY_LOCKED` while someone has the doc open in the admin. Tell the user who holds it; use `overrideLock` only if they ask.
-- Undo: `revision_list` {collection, id} → `revision_restore` {revisionId} (replaces the draft only) → `content_get` for the new `_rev` → `content_publish`.
+- Undo: `revision_list` {collection, id} returns each revision's `data`; send the earlier `body` back with `content_update` (the save check runs on it) → `content_get` for the new `_rev` → `content_publish`. Do not use `revision_restore`: like `content_publish`, `content_duplicate` and `content_restore`, it copies stored data without re-running the save check, so a revision saved under older rules would come back unchecked.
 
 ## Body = Markdown + block lines
 
@@ -44,7 +44,7 @@ Always include a unique `_key` in every ec:block JSON, unique within the doc: ke
 
 ## Block reference
 
-Full Markdown (GFM, `:::tip Title … :::` admonitions, ```` ```mermaid ```` fences) works only in callout `body`, details `body` and tab `body`. Callout `title`, details `summary` and tool `tagline` are inline Markdown only (bold, links, code); tool_grid `title`, tab `label` and tool `name` are plain text. Raw HTML is sanitized: inline `style` keeps only cosmetic properties (no `position`, no `url()`), and `class`/`id` are removed. Do not try to style content with classes.
+Full Markdown (GFM, `:::tip Title … :::` admonitions, ```` ```mermaid ```` fences) works only in callout `body`, details `body` and tab `body`. Callout `title`, details `summary` and tool `tagline` are inline Markdown only (bold, links, code); tool_grid `title`, tab `label` and tool `name` are plain text. Raw HTML is sanitized: inline `style` keeps only cosmetic properties (no `position`, no `url()`), and `class`/`id` are removed. Do not try to style content with classes. A link there must be a site path (`/docs/x`), a `#fragment` or an absolute `https:`, `http:`, `mailto:` or `tel:` url; any other href (a relative path, `//host`) and any `//host` image src is dropped when the page renders, with no save error.
 
 The site rejects some blocks on save (`SAVE_REJECTED`, the message lists each problem as `body: #<index> <type> …`):
 - `htmlBlock`, `iframe` and any `_type` outside this allow list: `block` (paragraphs, headings, list items), `blockquoteGroup`, `break`, `table`, `file`, `pullquote`, `video`, `image`, `gallery`, `columns`, `cover`, `button`, `buttons`, `code`, `embed`, `callout`, `tabs`, `details`, `mermaid`, `tool_grid`, `investment_warning`;

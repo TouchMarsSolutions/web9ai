@@ -6374,8 +6374,8 @@ Expected：`git status --short` 没有输出（`.local/`、`.wrangler/`、`dist/
 3. **生产首次启动**：空 D1 上 EmDash 自动应用 seed（块类型、字段、`settings.url`；tag terms 不写，由第 4 步 runner 的 `terms` 步骤建）。setup 向导会用 owner 填的 title、tagline 覆盖 seed 里的 settings（`emdash/dist/astro/routes/api/setup/index.mjs`），所以向导里要填 `Web9.AI` 和原来的 tagline。如果生产库不是从空库建的，先 `schema_create_field` 补 `search_text`，再上线带 hook 的插件（hook 的 `errorPolicy` 是 abort）。
 4. **生产迁移**：owner 建管理员账号（passkey），拿 admin token；设好 `EMDASH_URL=https://<worker>.workers.dev` 和 `EMDASH_TOKEN=<admin token>` 后，先 `node scripts/migrate.mjs all --dry-run`，再 `node scripts/migrate.mjs menu --overwrite`（seed 的菜单与目标不同），然后 `node scripts/migrate.mjs all`，再跑一次 `all` 确认 0 写入，再 `verify`（`verify` 也读 `EMDASH_URL`）。
 5. **切换**：Worker 绑定 `www.web9.ai`，apex 重定向到 www；GitHub Pages（`gh-pages` 上已构建的旧站）保留作回退，稳定后关闭。
-6. **AI 账号**：owner 邀请 Editor 账号、passkey 注册、创建 PAT（spec §8）。安全关口已经在计划 2 落地，这一步才可以做。
-7. **切换后**：看 `/_emdash/api/redirects/404s`，给还在被访问的旧 URL 补规则（doc 的 `/tags/*`、`/markdown-page` 等现在会 404）；确认 `site_import_*` 等导入路径是否经过 `content:beforeSave`（不经过的话，AI 账号不能有导入权限）。
+6. **AI 账号**：owner 邀请 Editor 账号、passkey 注册、创建 PAT（spec §8）。计划 2 只落地了写入 guard；创建 PAT 之前，spec §12「AI PAT 之前」的每一项都要先做到。
+7. **切换后**：看 `/_emdash/api/redirects/404s`，给还在被访问的旧 URL 补规则（doc 的 `/tags/*`、`/markdown-page` 等现在会 404）。`site_import_*` 等导入路径不经过 `content:beforeSave`（已确认，见 spec §12「AI PAT 之前」），AI 账号不能有导入权限。
 8. **清理**：生产迁移验证完以后删掉 `legacy/`。依赖它的测试都有 `skipIf`，删掉后自动跳过；同时删掉只为迁移存在的代码和测试：`scripts/lib/legacy-tree.mjs`、`docs-payloads.mjs`、`posts.mjs`、`redirects.mjs` 及其测试、`scripts/lib/legacy-convert.test.mjs`，`migrate.mjs` 只保留 `menu`、`home`、`verify`（或整个删掉）；`docs-nav.test.mjs` 里对照 legacy 的那组也删掉。
 
 ## 未决事项（已知，不阻塞计划 2）
@@ -6391,4 +6391,4 @@ Expected：`git status --short` 没有输出（`.local/`、`.wrangler/`、`dist/
 - 搜索只搜当前语言（已写进 spec §4）。
 - worker 压缩后约 4.9 MiB，超过免费套餐上限（计划 3 第 1 步决定）。
 - `upsertEntry` 不比较 taxonomy（`content_get` 不返回它们）：只改了 post 的 tag，runner 会报 `unchanged`，不会更新。要改 tag 就在后台或用 MCP 直接改。
-- `/zh-CN/blog/rss.xml`、`/zh-CN/blog/atom.xml` 没有重定向（只有 en 的两条，在 `astro.config.mjs`）；切换后看 404 日志再决定。
+- 旧站四个 feed（`/blog/rss.xml`、`/blog/atom.xml`、`/zh-CN/blog/rss.xml`、`/zh-CN/blog/atom.xml`）都在 `astro.config.mjs` 里 301 到 `/rss.xml`，`verify` 会检查；切换后看 404 日志里还有没有别的 feed URL。

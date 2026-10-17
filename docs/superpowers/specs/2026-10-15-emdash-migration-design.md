@@ -181,6 +181,15 @@
 
 ## 12. 未决事项（计划 2 结束时已知，计划 3 的输入）
 
+- **AI PAT 之前**：计划 2 落地的只是 `content:beforeSave` 里的写入 guard（§10）。创建 AI Editor 账号的 PAT（计划 3 路线图第 6 步）之前，以下每一项都要先做到：
+  - 长度上限：post 和 doc 的 slug、title，term 的 label，menu 的 label，在 REST/MCP 层或 core 里加上限（`beforeSave` 拿不到 slug，修不了）。例：Editor 写一个 5 MB 的菜单 label（core `api/schemas/menus.ts` 只有 `min(1)`），`Base.astro` 在每个页面打印它两次；doc title 同理出现在每个 doc 页的侧栏（计划 2 Task 3 N3(b)）。
+  - publish、schedule、duplicate、trash restore、`revision_restore` 都不重新跑 guard。今天库里的值都过了 guard；以后收紧规则时，要先重新扫描已存的内容和所有 revision。skill 的撤销流程因此用 `content_update` 写回旧 `body`，不用 `revision_restore`。
+  - `PT_FIELDS`、`IMAGE_FIELDS`、`BLOCK_IMAGE_FIELDS`（`packages/web9-blocks/index.mjs`）钉在 seed 上，不读线上 schema：Admin 新加的 portableText、image 字段或 collection 不受 guard 保护，加字段时要同步改这三张表。
+  - `sections` 只要 `content:write` 就能写（core `astro/middleware/auth.ts` 的 SCOPE_RULES），没有 guard；只要没有页面渲染它就是安全的，所以给它加 guard 之前，任何页面都不能渲染 `sections`。
+  - `site_import_*`（site transfer import）和 WordPress import 不经过 `content:beforeSave`；它们要 `transfer:import`、`import:execute`（Admin），transfer 还要管理员批准。所以 AI 的 token 永远不能有 transfer 或 import scope，管理员也不能批准它发起的 transfer 请求。
+  - 媒体一直经 `/_emdash/api/media/file/...` 提供（`sandbox` CSP、`nosniff`、SVG 和 PDF 作为附件），不改成公开的 R2 域名：那样上传的 SVG 会不带这些头直接内联渲染。
+- `DocsPage.astro` 的侧栏每个语言只取 `limit: 500` 篇 doc，没有 `orderBy`：超过 500 篇时侧栏会静默少掉条目；而且每个 doc 页都打印全部 doc 的 title（与上面长度上限同一类问题）。
+- 路径里有残缺的百分号编码（`/docs/%E0%A4%A`、`/%E0%A4%A`）时返回 500。这是 core 的既有行为，响应不带 `Cache-Control`、不进共享缓存；生产上再确认一次。
 - `npm audit` 有两项：katex（经 mermaid）、postcss-selector-parser（经 `@tailwindcss/typography`）；两项的修复都是 breaking，计划 3 评估后再升级。
 - CI job 已改名为 "Tests and build"（原来是 "Unit tests"）：如果 `main` 的 branch protection 规则要求 "Unit tests" 这个 check，会挡住所有 PR；计划 3 配置 GitHub 时要改成新名字。
 - 生产第一次运行迁移 runner：先 `node scripts/migrate.mjs all --dry-run`，再 `node scripts/migrate.mjs menu --overwrite`（seed 里的菜单与目标不同，§7），然后 `node scripts/migrate.mjs all`；再跑一次 `all` 确认全是 `unchanged`，最后 `verify`。
