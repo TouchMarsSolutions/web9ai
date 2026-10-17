@@ -28,7 +28,7 @@
   - 生产：Cloudflare Workers + D1 + R2。不启用 sandboxed 插件。**待定（owner，计划 3）**：worker 压缩后 5044.82 KiB（约 4.9 MiB；计划 2 Task 15，`wrangler deploy --dry-run`），超过 Workers 免费套餐 3 MiB 的上限：用付费套餐（上限 10 MiB），或者先查能不能裁剪。
   - **本地和生产用同一份配置（2026-10-15 修订）**：`@astrojs/cloudflare` 14.x 的 `astro dev` 直接跑在 workerd 里，不是 Node（adapter changelog #14306）。D1 和 R2 用 wrangler 的本地模拟，数据在 `.wrangler/state`；dev-bypass 照常可用。这样一来，Workers 兼容性问题在每次本地开发时就会暴露，不用等到部署。原先的 Node + SQLite（`data.db`）只在 POC 阶段使用。
   - 配置直接采用探针项目的做法（用 `--platform cloudflare` 生成后比对过）：`src/` 不变，多一个 `src/worker.ts`；adapter 用 `cloudflare()`，数据库用 `d1({binding:"DB", session:"auto"})`，存储用 `r2({binding:"MEDIA"})`，另加 `wrangler.jsonc` 和 `@emdash-cms/cloudflare`。
-- 当前状态（计划 2 结束）：本地 workerd dev 里完整迁移可从空库重复（`node scripts/migrate.mjs all`，第二次 0 写入）；`npm test`、`npm run build`（含公开 CSS 检查）、`npm run typecheck` 通过；CI 跑测试和构建。
+- 当前状态（计划 2 结束）：本地 workerd dev 里完整迁移可从空库重复（首次：`node scripts/migrate.mjs all --dry-run`，`node scripts/migrate.mjs menu --overwrite`，然后 `node scripts/migrate.mjs all`；再跑一次 `all` 不写入任何东西，因为 seed 的菜单与目标不同，直接跑 `all` 会在 `[WOULD_OVERWRITE] menu/primary` 停下，见 §7）；`npm test`、`npm run build`（含公开 CSS 检查）、`npm run typecheck` 通过；CI 跑测试和构建。
 - **已验证（计划 1 Task 5）**：本地 dev 跑在 workerd 里（`navigator.userAgent` 为 `Cloudflare-Workers`），`marked` 和 `sanitize-html`（包括它依赖的 postcss 样式解析）都能正常渲染和过滤。
 
 ## 2. 内容模型
@@ -183,5 +183,7 @@
 
 - `npm audit` 有两项：katex（经 mermaid）、postcss-selector-parser（经 `@tailwindcss/typography`）；两项的修复都是 breaking，计划 3 评估后再升级。
 - CI job 已改名为 "Tests and build"（原来是 "Unit tests"）：如果 `main` 的 branch protection 规则要求 "Unit tests" 这个 check，会挡住所有 PR；计划 3 配置 GitHub 时要改成新名字。
-- 生产第一次运行迁移 runner 必须先 `--dry-run`，再带 `--overwrite`（seed 里的菜单与目标不同，§7），最后不带参数再跑一次确认全是 `unchanged`，然后 `verify`。
-- 其余已知问题（Mermaid 深色文字、标题没有 `id`、热链图片、`tool_grid` 宽 logo 等）记在计划 2 文末的"未决事项"里。
+- 生产第一次运行迁移 runner：先 `node scripts/migrate.mjs all --dry-run`，再 `node scripts/migrate.mjs menu --overwrite`（seed 里的菜单与目标不同，§7），然后 `node scripts/migrate.mjs all`；再跑一次 `all` 确认全是 `unchanged`，最后 `verify`。
+- 浏览器验收（计划 2 Task 15 Step 5）还没做：当时 Chrome（CDP :9222）里没有 `localhost:4321` 的标签页。已用 curl、HTML 和 MCP 检查代替，只有这些没有目视确认：各页截图、主题切换后的颜色、深色主题下的 Mermaid、浏览器控制台、后台里 `tool_grid` 的展开、YouTube 嵌入的版式。
+- 开发环境（dev）的一条 warning：`[astro-portabletext] Cache missed for unknown component on node type "@span"`。原因是 emdash core 的 `Table.astro`（`emdash/src/components/Table.astro`）里嵌套的 `<PortableText>` 覆盖了 astro-portabletext 的全局 context，表格之后的默认 `Mark.astro`（strong/em/code）就会走 `getUnknownComponent`。只在 dev 出现（受 `import.meta.env.DEV` 控制），生产不会出现；没有内容丢失（表格 105 个单元格与旧站一致，链接、粗体、标题、callout 都在）。`lambda` 是目前唯一有表格后接粗体、斜体或行内代码的 doc。
+- 其余已知问题（Mermaid 深色文字、标题没有 `id`、热链图片、`tool_grid` 宽 logo 等）记在计划 2 文末的"未决事项"里（`docs/superpowers/plans/2026-10-15-emdash-plan2-migration-local.md`）。

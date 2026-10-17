@@ -6359,7 +6359,7 @@ Expected：`git status --short` 没有输出（`.local/`、`.wrangler/`、`dist/
 全部满足才算计划 2 完成：
 
 1. `npm test`、`npm run build`（`postbuild` 的公开 CSS 检查 PASS）、`npm run typecheck`（0 errors）在最终代码上通过；浅克隆 + Node 22 的 CI 模拟通过（Task 14 Step 8）。
-2. 从空的本地库，`node scripts/migrate.mjs all` 写入 35 篇 doc（26 en + 9 zh-CN）、菜单、5 个 tag term、2 篇 post（1 篇草稿）、73 条重定向、2 个首页；第二次运行 0 写入；`verify` 是 54/54 页面、74/74 重定向。
+2. 从空的本地库，首次运行（`all --dry-run`，`menu --overwrite`，`all`）写入 35 篇 doc（26 en + 9 zh-CN）、菜单、5 个 tag term、2 篇 post（1 篇草稿）、83 条重定向、2 个首页；再跑一次 `all` 0 写入；`verify` 是 54/54 页面、86/86 重定向。
 3. 内容安全关口生效：写入时拒绝 `htmlBlock`、`iframe`、带 `html` 的 `embed`、未知块和危险的样式值（docs、posts、pages 都覆盖）；渲染时用 web9 的 `htmlBlock`/`embed`；公开 CSS 里没有遮罩类 utility，也没有被降级的 `light-dark()`。
 4. `/llms.txt`、`/zh-CN/llms.txt` 和全部 `.md` 里没有 `ec:block`；fallback 页面的 canonical 指向 en URL。
 5. spec、`CLAUDE.md`、`AGENTS.md`、`.agents/skills/web9-blocks/SKILL.md` 记录了本计划的结论。
@@ -6372,7 +6372,7 @@ Expected：`git status --short` 没有输出（`.local/`、`.wrangler/`、`dist/
 1. **部署配置**：`wrangler.jsonc` 里 D1 的 `database_id`（或确认 wrangler 自动创建）、R2 bucket、adapter 注入的 KV `SESSION` 和 `IMAGES` binding；**先决定套餐**：worker 压缩后约 4.9 MiB（Task 15 的 `wrangler deploy --dry-run`），超过免费套餐 3 MiB，owner 选付费套餐（10 MiB）或者先查能不能裁剪；用 workerd 跑一次构建产物。
 2. **Workers Builds**：连接仓库，生产分支 `main`，构建命令 `npm run build`（`postbuild` 的 CSS 检查失败会挡住部署）。在第一次推 `main` 以外的分支之前，确认预览版本是否和生产共用 D1/R2（spec §9 待验证）。首次部署前备份 `EMDASH_ENCRYPTION_KEY`。在 `*.workers.dev` 上验证。
 3. **生产首次启动**：空 D1 上 EmDash 自动应用 seed（块类型、字段、`settings.url`；tag terms 不写，由第 4 步 runner 的 `terms` 步骤建）。setup 向导会用 owner 填的 title、tagline 覆盖 seed 里的 settings（`emdash/dist/astro/routes/api/setup/index.mjs`），所以向导里要填 `Web9.AI` 和原来的 tagline。如果生产库不是从空库建的，先 `schema_create_field` 补 `search_text`，再上线带 hook 的插件（hook 的 `errorPolicy` 是 abort）。
-4. **生产迁移**：owner 建管理员账号（passkey），拿 admin token；`EMDASH_URL=https://<worker>.workers.dev EMDASH_TOKEN=<admin token> node scripts/migrate.mjs all`，再跑一次确认 0 写入，再 `verify`（`verify` 也读 `EMDASH_URL`）。
+4. **生产迁移**：owner 建管理员账号（passkey），拿 admin token；设好 `EMDASH_URL=https://<worker>.workers.dev` 和 `EMDASH_TOKEN=<admin token>` 后，先 `node scripts/migrate.mjs all --dry-run`，再 `node scripts/migrate.mjs menu --overwrite`（seed 的菜单与目标不同），然后 `node scripts/migrate.mjs all`，再跑一次 `all` 确认 0 写入，再 `verify`（`verify` 也读 `EMDASH_URL`）。
 5. **切换**：Worker 绑定 `www.web9.ai`，apex 重定向到 www；GitHub Pages（`gh-pages` 上已构建的旧站）保留作回退，稳定后关闭。
 6. **AI 账号**：owner 邀请 Editor 账号、passkey 注册、创建 PAT（spec §8）。安全关口已经在计划 2 落地，这一步才可以做。
 7. **切换后**：看 `/_emdash/api/redirects/404s`，给还在被访问的旧 URL 补规则（doc 的 `/tags/*`、`/markdown-page` 等现在会 404）；确认 `site_import_*` 等导入路径是否经过 `content:beforeSave`（不经过的话，AI 账号不能有导入权限）。
