@@ -20,9 +20,10 @@
 // - A bare link (GFM: "http://", "https://", "ftp://" or "www." and a domain character) runs to the next whitespace or
 //   "<", and marked's url tokenizer then drops what may not end it one piece per pass (_backpedal): a trailing "?", "!",
 //   ".", ",", ":", ";", "*", "_", "'", '"', "~" or ")", or an entity "&name;" at the end, each pass rescanning the run (a
-//   link and 24000 ")" took 0.3 s, 8000 "&a;" 0.6 s). A table cell ends the run at its "|", and an unmatched "(" cuts the
-//   first pass short, so the steps before each of those count too. Each link start left after a cut rescans the rest of
-//   the run, so link starts per run are capped as well ("www.a(" repeated took 0.2 s).
+//   link and 24000 ")" took 0.3 s, 8000 "&a;" 0.6 s). A table cell ends the run at its "|", emphasis and strikethrough
+//   at their closing "*", "_" or "~" (marked lexes their inner text on its own), and an unmatched "(" cuts the first pass
+//   short, so the steps before each of those count too. Each link start left after a cut rescans the rest of the run,
+//   so link starts per run are capped as well ("www.a(" repeated took 0.2 s).
 // - List and quote markers nest one container each, and marked recurses per container: about 1900 markers on one line
 //   overflow the stack and the render throws (fewer on a smaller stack). Nesting by indentation needs a quadratic number
 //   of characters, so only markers on one line are capped.
@@ -91,9 +92,10 @@ export function markdownDensity(src) {
 
 /**
  * The most _backpedal steps at the end of a bare link, and the most link starts in one run, in linear time. A link's
- * steps are those before the run end, before each "|" in the run (a table cell ends there) and before each "(" in it
- * (an unmatched one cuts the first pass there: one more step); a "(" that does close, or a "|" outside a table, only
- * makes the count higher than marked's.
+ * steps are those before the run end, before each "|" in the run (a table cell ends there), before each "*", "_" and "~"
+ * (emphasis and strikethrough lex their inner text on its own, so a link inside ends at the closer) and before each "("
+ * (an unmatched one cuts the first pass there: one more step); a "(" that does close, or a "|", "*", "_" or "~" that
+ * closes nothing, only makes the count higher than marked's.
  */
 function links(text) {
 	// steps[e]: the trailing punctuation characters and "&name;" entities that end at e, one step each
@@ -120,7 +122,7 @@ function links(text) {
 		// walk the run from its end: `most` is the largest count over the ends at or after i
 		let most = steps[run.index + run[0].length];
 		for (let i = run.index + run[0].length - 1, j = starts.length - 1; j >= 0; i--) {
-			if (text[i] === "|") most = Math.max(most, steps[i]);
+			if (text[i] === "|" || text[i] === "*" || text[i] === "_" || text[i] === "~") most = Math.max(most, steps[i]);
 			else if (text[i] === "(") most = Math.max(most, steps[i] + 1);
 			if (i === starts[j]) {
 				linkTail = Math.max(linkTail, most);

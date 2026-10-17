@@ -71,8 +71,15 @@ describe("markdownDensity", () => {
 		expect(markdownDensity("WWW.a/)) http://)) www.-))").linkTail).toBe(2);
 		expect(markdownDensity("a/)) (b).").linkTail).toBe(0);
 	});
-	it("counts the steps before each | (a table cell ends there) and before each ( (an unmatched one cuts the first pass)", () => {
+	it("counts the steps before each | (a table cell ends there), * _ ~ (emphasis and strikethrough end there) and ( (an unmatched one cuts the first pass)", () => {
 		expect(markdownDensity("|http://a.b/)))|x|").linkTail).toBe(3);
+		// emphasis and strikethrough lex their inner text on its own: a link inside ends at the closer
+		expect(markdownDensity("*http://a.b/)))*&x ~~www.a/..~~#").linkTail).toBe(3);
+		expect(markdownDensity("_http://a.b/))_=x").linkTail).toBe(2);
+		// the same characters inside a link, or closing it, count no more than they did
+		expect(markdownDensity("see *http://a.b/x* and **www.a.b/y.** ok").linkTail).toBe(3);
+		expect(markdownDensity("http://a.b/x_y*z~w").linkTail).toBe(0);
+		expect(markdownDensity("_http://a.b/path_to_file_").linkTail).toBe(1);
 		expect(markdownDensity("http://a.b/...(x").linkTail).toBe(4);
 		// before the link start, or after a space or "<", it is another run
 		expect(markdownDensity(")))|http://a.b/ x))) y<)))").linkTail).toBe(0);
@@ -131,7 +138,7 @@ describe("per field", () => {
 		// one closing parenthesis, as in a Wikipedia link inside parentheses
 		expect(guardPortableText([callout("(see http://a.b/x) and https://en.wikipedia.org/wiki/A_(b).)")])).toEqual([]);
 	});
-	it("caps each shape marked backpedals at 16 and 17: trailing ), entities, a table cell, a cut at an unmatched (", () => {
+	it("caps each shape marked backpedals at 16 and 17: trailing ), entities, a table cell, a cut at an unmatched (, emphasis", () => {
 		const SHAPES = {
 			"trailing )": (n) => linkWithTail(")".repeat(n)),
 			entities: (n) => linkWithTail("&a;".repeat(n)),
@@ -139,6 +146,8 @@ describe("per field", () => {
 			"a table cell": (n) => `|a|\n|-|\n|${linkWithTail(")".repeat(n), LIMITS.markdown - 10)}|`,
 			// the first pass stops at the "(", then the dots go one per pass
 			"a cut at an unmatched (": (n) => linkWithTail(`${".".repeat(n - 1)}(a`),
+			// the inner text of emphasis or strikethrough ends at its closer, here followed by more punctuation
+			...Object.fromEntries(["*", "_", "~"].map((d) => [`inside ${d}…${d}&x`, (n) => `${d}${linkWithTail(")".repeat(n), LIMITS.markdown - 4)}${d}&x`])),
 		};
 		for (const [what, text] of Object.entries(SHAPES)) {
 			expect(guardPortableText([callout(text(LINK_TAIL))]), what).toEqual([]);
@@ -158,6 +167,10 @@ describe("per field", () => {
 		expect(guardPortableText([callout(`http://a.b/${"&a;".repeat(8000)}`)])).toEqual(message(8000));
 		expect(guardPortableText([callout(`|a|\n|-|\n|http://a.b/${")".repeat(24000)}|`)])).toEqual(message(24000));
 		expect(guardPortableText([callout(`http://a.b/${".".repeat(24000)}(a`)])).toEqual(message(24001));
+		// the closer's own characters count too ("**" and "~~" one more)
+		for (const [d, n] of [["*", 24000], ["**", 24001], ["_", 24000], ["__", 24001], ["~", 24000], ["~~", 24001]]) {
+			expect(guardPortableText([callout(`${d}http://a.b/${")".repeat(24000)}${d}&x`)]), d).toEqual(message(n));
+		}
 	});
 	it("caps the link starts in one run at 16 and 17", () => {
 		expect(guardPortableText([callout("www.a(".repeat(LINK_STARTS))])).toEqual([]);
@@ -173,16 +186,17 @@ describe("per field", () => {
 			for (let prev; prev !== s; n++) [prev, s] = [s, _backpedal.exec(s)?.[0] ?? ""];
 			return n;
 		};
-		const units = ["http://a", "www.b", ...TAIL_CHARS, "(", "|", "&a;", "&", "&#1;", "x", "/"];
+		const units = ["http://a", "www.b", ...TAIL_CHARS, "**", "__", "~~", "(", "|", "&a;", "&", "&#1;", "x", "/"];
 		let seed = 1;
 		const random = (n) => (seed = (seed * 48271) % 2147483647) % n;
 		for (let t = 0; t < 4000; t++) {
 			let run = "http://a";
 			for (let k = random(14); k > 0; k--) run += units[random(units.length)];
 			const { linkTail } = markdownDensity(run);
-			// every link start, ending at the run end or at a "|" as a table cell does
+			// every link start, ending at the run end, at a "|" as a table cell does, or at a "*", "_" or "~" as the inner
+			// text of emphasis and strikethrough does
 			for (let i = 0; i < run.length; i++) {
-				for (const end of [run.length, ...[...run].keys()].filter((e) => e > i && (e === run.length || run[e] === "|"))) {
+				for (const end of [run.length, ...[...run].keys()].filter((e) => e > i && (e === run.length || "|*_~".includes(run[e])))) {
 					const link = url.exec(run.slice(i, end));
 					if (link && link[2] !== "@") expect(passes(link[0]), run).toBeLessThanOrEqual(linkTail);
 				}
@@ -283,6 +297,7 @@ describe("the worst fuzzed pattern of each class renders within budget at its ca
 		["entities at the end of a bare link", linkWithTail("&a;".repeat(16)), `http://a.b/${"&a;".repeat(8000)}`],
 		["a bare link in a table cell", `|a|\n|-|\n|${linkWithTail(")".repeat(16), LIMITS.markdown - 10)}|`, `|a|\n|-|\n|http://a.b/${")".repeat(24000)}|`],
 		["a bare link cut at an unmatched (", linkWithTail(`${".".repeat(15)}(a`), `http://a.b/${".".repeat(24000)}(a`],
+		["a bare link inside emphasis, closed before more punctuation", `*${linkWithTail(")".repeat(16), LIMITS.markdown - 4)}*&x`, `*http://a.b/${")".repeat(24000)}*&x`],
 		["link starts in one run, each cut at (", dense("www.a(", 16), "www.a(".repeat(4166)],
 		["ordered markers on one line", `${"1. ".repeat(8)}a`, `${"1. ".repeat(2000)}a`],
 	];
