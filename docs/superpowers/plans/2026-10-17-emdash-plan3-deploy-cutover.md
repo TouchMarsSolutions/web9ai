@@ -606,11 +606,12 @@ owner 的操作：在 Workers & Pages › `web9-ai` › Settings › Build 里�
 连上后，下一次合并到 `main` 的部署日志里应该能看到 `check-public-css: ok`，部署的 version 和本地部署的一致。
 
 **状态（2026-10-17，已完成，用 API 连接，owner 没有操作）**：
-- Cloudflare 的 GitHub App 早已装在 `TouchMarsSolutions` 上（installation `20239202`，仓库 id `638111631`），所以不用 owner 授权。
+- Cloudflare 的 GitHub App（`cloudflare-workers-and-pages`，installation `139987976`）早已装在 `TouchMarsSolutions`（org 的 account id `20239202`，仓库 id `638111631`）上，但它是 "Only select repositories"，`web9ai` 不在里面，见下面"第一次合并"一条。当时以为不用 owner 授权，错了。
 - 接口：`PUT /accounts/{account}/builds/repos/connections` 建仓库连接，`POST /accounts/{account}/builds/triggers` 建 trigger，`PATCH /accounts/{account}/builds/triggers/{trigger}/environment_variables` 设环境变量。
-- 只有一个 trigger `Deploy main`（`4354954d…`）：`branch_includes: ["main"]`，build `npm run build`，deploy `npx wrangler deploy`，root `/`，build cache 关，`NODE_VERSION` 起初是 `22.22.0`，同日改成 `24.16.0`（owner 问为什么不用 24：Worker 在生产里跑在 workerd 上，Node 只用来构建；本机的构建和测试都在 24.16.0 上跑，CI 仍用 22，检查 engines 的下限 `>=22.22.0`）。没有非生产分支的 trigger，别的分支 push 不会构建，效果等于后台的 "Builds for non-production branches: off"。
-- owner 之后在后台 Settings › Build 又试了一次 Connect，报 "An internal error prevented the form from submitting"，原因可能是连接已经存在，没有核实。核对过，那次尝试没留下任何东西：仍然只有这一个 trigger，修改时间等于创建时间，环境变量没变。要改设置，编辑现有的 trigger，不要再点 Connect。
-- 第一次自动部署是图片 PR（spec §9"图片"）合并到 `main` 时，检查结果记在那个 PR 的评论里。
+- 只有一个 trigger `Deploy main`（`4354954d…`）：`branch_includes: ["main"]`，build `npm run build`，deploy `npx wrangler deploy`，root `/`，build cache 关，`NODE_VERSION` 起初是 `22.22.0`，同日改成 `24.16.0`（owner 问为什么不用 24：Worker 在生产里跑在 workerd 上，Node 只用来构建），再改成 `24.22.0`（owner 指出这是 24 LTS 的最新版，2026-10-14 发布）。仓库根目录的 `.nvmrc` 也是 `24.22.0`，本机 nvm 在仓库里自动用它，所以本机和生产构建是同一个版本。CI 仍用 22，检查 engines 的下限 `>=22.22.0`。没有非生产分支的 trigger，别的分支 push 不会构建，效果等于后台的 "Builds for non-production branches: off"。
+- owner 之后在后台 Settings › Build 又试了一次 Connect，报 "An internal error prevented the form from submitting"，原因可能是连接已经存在，也可能是 App 看不到这个仓库（下一条），没有核实。核对过，那次尝试没留下任何东西：仍然只有这一个 trigger，修改时间等于创建时间，环境变量没变。要改设置，编辑现有的 trigger，不要再点 Connect。
+- **第一次合并没有触发构建**（PR #9，`b1fdef61`）：构建列表是空的，合并提交上也没有 Cloudflare 的 check run。原因是 GitHub App 的仓库列表里没有 `web9ai`，GitHub 不把这个仓库的 push 发给 Cloudflare；用 API 建连接和 trigger 时都不检查这一点。用 API 把仓库加进 installation 返回 403（`gh` 的 OAuth token 不行），owner 在 org 设置里加上了 `web9ai`（2026-10-17）。PR #9 先手动部署（version `8f60a94f`，结果见 PR #9 的评论）。
+- 第一次自动部署是加 `.nvmrc` 的 PR 合并时，检查结果记在那个 PR 的评论里。
 
 ---
 
