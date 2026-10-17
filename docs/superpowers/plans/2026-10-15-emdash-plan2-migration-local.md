@@ -6367,6 +6367,8 @@ Expected：`git status --short` 没有输出（`.local/`、`.wrangler/`、`dist/
 
 ## 计划 3 路线图（部署、生产迁移、切换）
 
+执行计划：`docs/superpowers/plans/2026-10-17-emdash-plan3-deploy-cutover.md`（2026-10-17）。
+
 不在本计划内。按顺序：
 
 1. **部署配置**：`wrangler.jsonc` 里 D1 的 `database_id`（或确认 wrangler 自动创建）、R2 bucket、adapter 注入的 KV `SESSION` 和 `IMAGES` binding；**先决定套餐**：worker 压缩后约 4.9 MiB（Task 15 的 `wrangler deploy --dry-run`），超过免费套餐 3 MiB，owner 选付费套餐（10 MiB）或者先查能不能裁剪；用 workerd 跑一次构建产物。

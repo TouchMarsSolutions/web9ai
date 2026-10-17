@@ -4,6 +4,14 @@
 	"main": "./src/worker.ts",
 	"compatibility_date": "2026-02-24",
 	"compatibility_flags": ["nodejs_compat"],
+	"observability": { "enabled": true },
+	// The Worker answers on workers.dev until the cutover and keeps it after: the owner's first passkey is bound to
+	// that hostname until Change domain moves the login (plan 3 Task 4). wrangler may turn workers.dev off once
+	// routes are configured unless it is set explicitly.
+	"workers_dev": true,
+	// No preview URLs: a preview version shares the production D1 and R2 bindings, and EmDash runs core migrations
+	// on the first request, so a branch that upgrades emdash would migrate the production database (plan 3).
+	"preview_urls": false,
 	"d1_databases": [{ "binding": "DB", "database_name": "web9-ai" }],
 	"r2_buckets": [{ "binding": "MEDIA", "bucket_name": "web9-ai-media" }],
 	// Scheduled publishing + maintenance; ~1440 invocations/day, inside the free tier (spec §9)
