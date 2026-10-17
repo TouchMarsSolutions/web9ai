@@ -25,7 +25,8 @@
 // The normalizer de-duplicates keys with a linear suffix scan per key (reserveKey), so repeated keys cost quadratic time
 // at render: a table whose own, row or cell `_key`s repeat is rejected, and that check runs before the normalizer.
 // The normalizer also copies the table, each row, each cell and each table or cell markDef through safeFields, which runs
-// a regex over every own key, so each of those records holds at most MAX_RECORD_KEYS fields (checked before it runs).
+// a regex over every own key, so each of those records holds at most MAX_RECORD_KEYS fields: checked in the walk, and a
+// table with any problem, a wide table node or markDef included, is never passed to the normalizer.
 // Totals over the whole value (spec 2026-10-17 §3.6): render CPU grows with every span and, most, with every mark
 // (plan 2 measured 0.3 s for one block of 1000 spans × 20 marks), so a value holds at most MAX_NODES top-level nodes,
 // MAX_SPANS spans and MAX_TOTAL_MARKS marks, counting blocks, container blocks and table cells (on the normalized
@@ -33,11 +34,12 @@
 // grid slot of every table, however few cells are written (one cell of colspan 100 × rowspan 20 fills 2000 slots and is
 // one span), so a value holds at most MAX_GRID_SLOTS slots; a table whose rows hold no cells is laid out as one cell, but
 // only after every raw row is keyed and copied, so a table is charged max(grid slots, raw rows). And
-// @portabletext/toolkit builds marks with markDefs.find per mark (dist/index.js:65), so render cost is marks × markDefs
-// per block: a value holds at most MAX_MARK_DEFS markDefs (blocks, tables and table cells), counted before they are
-// walked or normalized. Past a total the walk stops with that one problem. Lists that a renderer maps (buttons.buttons,
-// tabs.tabs, tool_grid.tools) must be arrays of objects within a size cap, and their text fields strings: a null item or
-// a number tagline throws at render time, and so does `buttons: null` (core's Buttons.astro defaults only undefined).
+// @portabletext/toolkit builds marks with markDefs.find per mark (astro-portabletext's copy, 3.0.3, dist/index.js:81),
+// so render cost is marks × markDefs per block: a value holds at most MAX_MARK_DEFS markDefs (blocks, tables and table
+// cells), counted before they are walked or normalized. Past a total the walk stops with that one problem. Lists that a
+// renderer maps (buttons.buttons, tabs.tabs, tool_grid.tools) must be arrays of objects within a size cap, and their text
+// fields strings: a null item or a number tagline throws at render time, and so does `buttons: null` (core's
+// Buttons.astro defaults only undefined).
 // Output is bounded: collecting stops after MAX_PROBLEMS (plain pushes, never spreads of a long list, which
 // throw RangeError past ~120k items) and ends with MORE, so a hostile value cannot make the guard throw.
 // Messages print a value through show(): JSON.stringify overflows the stack on a value nested a few thousand levels
@@ -418,6 +420,8 @@ function checkCell(cell, at, out) {
  * before any normalizer run.
  */
 function checkTable(node, i, out) {
+	// Every problem this table adds, the table node's and its markDefs' included, skips the normalizer below.
+	const added = out.added;
 	const where = `#${i} table`;
 	if (tooManyFields(node)) out.add(`${where}: at most ${MAX_RECORD_KEYS} fields are allowed`);
 	if (Array.isArray(node.markDefs)) {
@@ -428,7 +432,6 @@ function checkTable(node, i, out) {
 	if (!Array.isArray(node.rows)) return out.add(`${where} rows: must be an array`);
 	if (node.rows.length > MAX_ROWS) return out.add(`${where} rows: at most ${MAX_ROWS} rows are allowed`);
 	let cells = 0;
-	const added = out.added;
 	// The keys core's reserveKey puts in one set; a missing, empty or non-string key is replaced by a generated one.
 	const seen = new Set();
 	const checkUnique = (key, at) => {
