@@ -172,3 +172,18 @@ describe("write gate middleware", () => {
 		expect([...source.matchAll(/return tooLarge\(\)/g)]).toHaveLength(2);
 	});
 });
+
+describe("AI token preconditions (spec 2026-10-17 §3.4)", () => {
+	const sourceFiles = (dir) =>
+		readdirSync(new URL(`../../${dir}`, import.meta.url), { recursive: true })
+			.filter((f) => /\.(astro|mjs|ts|tsx|js)$/.test(f) && !/\.test\.mjs$/.test(f) && !f.includes("node_modules"))
+			.map((f) => `${dir}/${f}`);
+	it("no page renders sections: they are writable with content:write and have no guard", () => {
+		const files = [...sourceFiles("src"), ...sourceFiles("packages")];
+		expect(files).toContain("src/layouts/Base.astro");
+		for (const file of files) expect(raw(file), file).not.toMatch(/\bgetSections?\b/);
+	});
+	it("media stay behind /_emdash/api/media/file (sandbox CSP, nosniff): no public R2 URL", () => {
+		for (const file of ["astro.config.mjs", "wrangler.jsonc"]) expect(raw(file), file).not.toMatch(/publicUrl/);
+	});
+});

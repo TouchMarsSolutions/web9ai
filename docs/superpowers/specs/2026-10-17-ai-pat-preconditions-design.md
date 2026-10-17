@@ -45,7 +45,7 @@
 
 | # | 项 | 做法 |
 |---|---|---|
-| 1 | 长度上限 | `data` 里的字段（title、description、excerpt）由 guard 检查，保存和发布时都跑；slug、菜单项、term、byline 由新增的 `src/middleware.ts` 写入闸门检查；菜单在渲染时截断兜底 |
+| 1 | 长度上限 | `data` 里的字段（title、description、excerpt）由 guard 检查，保存和发布时都跑；slug、`seo.image`、byline 的 `roleLabel`、菜单项、term、byline 由新增的 `src/middleware.ts` 写入闸门检查；菜单在渲染时截断，footer 的菜单 widget 渲染前检查 |
 | 2 | 发布、恢复等不重跑 guard | `content:beforePublish`/`beforeSchedule` 重跑整套 guard 并检查 slug，fail closed；新增 `scripts/guard-scan.mjs`，扫描所有条目、回收站、revision、菜单、term、byline |
 | 3 | 字段表钉在 seed 上 | hook 用 `schema:read` 读线上的 portableText/image 字段，和钉死的表取并集；`migrate verify` 加 schema 漂移检查 |
 | 4 | `sections` | 测试锁定 `src/`、`packages/` 不调用 `getSection`/`getSections` |
@@ -65,45 +65,58 @@
 | content `data.description` | 1000 | 227 | guard（保存、发布） |
 | content `data.excerpt` | 1000 | 20 | guard（保存、发布） |
 | content `slug` | 100 | 16 | 闸门；发布 hook（待生效 slug） |
-| 菜单项 `label` | 80 | 6 | 闸门；渲染截断 |
-| 菜单项 `customUrl` | 2048 | 44 | 闸门 |
-| `menu_set_items` 的项数 | 50 | 6 | 闸门；渲染只取前 50 |
+| content `seo.image` | 2048 | 无 | 闸门 |
+| content `bylines[].roleLabel` | 80 | 无 | 闸门 |
+| 菜单项 `label` | 80 | 6 | 闸门；渲染截断；footer 菜单 widget 渲染前检查 |
+| 菜单项 `customUrl` | 2048 | 44 | 闸门；footer 菜单 widget 渲染前检查 |
+| 菜单项 `titleAttr` | 200 | 无 | 闸门；footer 菜单 widget 渲染前检查 |
+| 菜单项 `target` | 32 | 6 | 闸门 |
+| `menu_set_items` 的项数 | 50 | 4 | 闸门；渲染只取前 50；footer 菜单 widget 渲染前检查 |
 | term `label` | 80 | 11 | 闸门 |
 | term `slug` | 100 | 11 | 闸门 |
-| byline `displayName` | 80 | 无 | 闸门 |
-| byline `slug` | 100 | 无 | 闸门 |
+| byline `displayName` | 80 | 无 | 闸门（REST `admin/bylines` 和 MCP） |
+| byline `slug` | 100 | 无 | 闸门（REST `admin/bylines` 和 MCP） |
+
+"现有最大值"是 2026-10-17 在本地库里读出来的（MCP 只读，39 个条目、1 个菜单、5 个 term）。`seo.image`、`roleLabel`、`titleAttr` 和 byline 现在库里没有值。
 
 **guard 里的长度**（title、description、excerpt）：按字段名作用于所有 collection，值是字符串时才检查，其他类型交给 core。保存时（`beforeSave`）、发布时（§3.2）、扫描时（§3.2）用的是同一个函数。
 
 **写入闸门**（`src/middleware.ts`，判定逻辑放在纯函数 `packages/web9-site/lib/write-gate.mjs`，单测覆盖）：
 
-- 只看 POST、PUT、PATCH，路径命中下表才读请求体。用 `request.clone().text()` 读，然后 `JSON.parse`，不看 Content-Type，因为 core 也不看。解析失败、请求体不是对象或数组、Content-Length 超过 10 MB 时一律放行，交给 core 报错。闸门只拦能确定超长的请求。
-- 路径用 middleware 的 `context.url.pathname`，不用 `request.url`。Astro 7 已经把它解码过（反复 `decodeURI` 直到不再变化），也合并了重复斜杠（`astro/dist/core/util/normalized-url.js`），路由匹配用的也是同一个值。按 `/` 切段，去掉空段，不再自己解码：再解码一次可能在 `%` 上抛错，导致放行。
-- REST：
+- 只看 POST、PUT、PATCH，`context.routePattern` 命中下面的表才读请求体。用 `readGatedBody(request.clone().body)` 读，去掉开头的 BOM（否则 `JSON.parse` 抛错，闸门就放行了），然后 `JSON.parse`，不看 Content-Type，因为 core 也不看。解析失败、stream 出错、请求体不是对象或数组时放行，交给 core 报错。闸门只拦能确定超长的请求。
+- 闸门按 `context.routePattern` 判定，也就是 Astro 匹配到的、由 emdash 注入的路由 pattern，从不看 URL。原因：Astro 用解码后的路径字符串做路由匹配，而 `context.url.pathname` 又被 URL setter 规范化了一次（`\` 变成 `/`，dot segment 被解析掉，`node_modules/astro/dist/core/fetch/fetch-state.js:236-239`），按路径判定的闸门和路由会对不上：`PUT …/terms/a%5Cb` 和 `…/terms/%252E%252E` 都到了 `terms/[slug]`，却绕过了按路径判定的闸门（评审时发现，已修，用 live 探针验证）。匹配到的 pattern 就是将要运行的路由，两边不会不一致。
+- 请求体上限 10 MiB（`MAX_GATED_BODY_BYTES`，等于 core 的 `MAX_BODY_SIZE`）。超限时（声明的 Content-Length 超限，或没有 Content-Length 的 chunked body 读到超限），闸门自己返回 413，格式同该路由：REST 是 `PAYLOAD_TOO_LARGE`（同 core），MCP 是 SDK 的 JSON-RPC 413（`code: -32000`，`id: null`，message 里写的是 SDK 自己的 4 MiB 上限）。原因：core 的 `parseBody` 只拒绝声明了超限 Content-Length 的请求，chunked body 没有上限（`node_modules/emdash/src/api/parse.ts:31-39`），放行等于闸门对 chunked 的大请求失效。读 body 时边读边数，超限就停，不缓冲剩下的部分。
+- REST（路径写成路由 pattern）：
 
-  | 路径 | 检查 |
+  | 路由 pattern | 检查 |
   |---|---|
-  | `/_emdash/api/content/{c}`、`/_emdash/api/content/{c}/{id}` | `slug` |
-  | `/_emdash/api/menus/{name}/items`、`/_emdash/api/menus/{name}/items/{id}` | `label`、`customUrl` |
-  | `/_emdash/api/taxonomies/{name}/terms`、`.../terms/{slug}`、`.../terms/{slug}/translations` | `label`、`slug` |
+  | `/_emdash/api/content/[collection]`、`/_emdash/api/content/[collection]/[id]` | `slug`、`seo.image`、`bylines[].roleLabel` |
+  | `/_emdash/api/menus/[name]/items`、`/_emdash/api/menus/[name]/items/[id]` | `label`、`customUrl`、`titleAttr`、`target` |
+  | `/_emdash/api/taxonomies/[name]/terms`、`/_emdash/api/taxonomies/[name]/terms/[slug]`、`/_emdash/api/taxonomies/[name]/terms/[slug]/translations` | `label`、`slug` |
+  | `/_emdash/api/admin/bylines`、`/_emdash/api/admin/bylines/[id]`、`/_emdash/api/admin/bylines/[id]/translations` | `displayName`、`slug` |
 
 - MCP（`/_emdash/api/mcp`）：请求体是一条消息或消息数组。每条 `method: "tools/call"` 按 `params.name` 检查 `params.arguments`：
 
   | 工具 | 检查 |
   |---|---|
-  | `content_create`、`content_update` | `slug` |
-  | `menu_set_items` | `items` 的长度，以及每项的 `label`、`customUrl`（items 是平铺的，没有嵌套） |
+  | `content_create`、`content_update` | `slug`、`seo.image`、`bylines[].roleLabel` |
+  | `menu_set_items` | `items` 的长度，以及每项的 `label`、`customUrl`、`titleAttr`、`target`（items 是平铺的，没有嵌套） |
   | `taxonomy_create_term`、`taxonomy_update_term` | `label`、`slug` |
   | `byline_create`、`byline_update` | `displayName`、`slug` |
 
 - 超长时：
   - REST 返回 400，body 用 core 的错误格式 `{ "success": false, "error": { "code": "VALIDATION_ERROR", "message": … } }`，带 `Cache-Control: private, no-store`（同 core `api/error.ts`）；
   - MCP 单条消息返回 HTTP 200 加 JSON-RPC error（`code: -32602`），`id` 照抄请求；batch 返回 HTTP 400 加一个 `id: null` 的 JSON-RPC error。
-- 闸门认识的路径和工具会随 core 升级变化：
-  - 一个测试把 `node_modules/emdash/src/mcp/server.ts` 注册的全部工具名，以及 `astro/routes/api/{content,menus,taxonomies}` 下的路由文件，钉成快照。
-  - core 升级新增工具或路由时，测试失败，提醒人重新核对闸门。
+- 闸门认识的路由和工具会随 core 升级变化。`packages/web9-site/write-gate.core.test.mjs` 把下面这些钉成快照（emdash 自带 `src/`，从 `node_modules` 读）：
+  - `node_modules/emdash/src/mcp/server.ts` 注册的全部 MCP 工具名；
+  - `astro/integration/routes.ts` 注入的、content、menus、taxonomies、admin/bylines、widget-areas、mcp 下的全部路由 pattern，闸门用到的每一条都必须在里面；
+  - `astro/routes/api/{content,menus,taxonomies,admin/bylines,widget-areas}` 下的路由文件；
+  - `parse.ts` 的 10 MiB 上限，以及 MCP SDK 的 413 格式。
+- core 升级新增工具或路由、或改了 pattern 的名字时，测试失败，提醒人重新核对闸门，再更新快照。
 
-**渲染兜底**：`Base.astro` 的菜单只取前 50 项，`label` 按 80 截断，超出部分换成 `…`，不切开 surrogate pair。菜单出现在每一页，而且没有 hook 和发布这第二道关；其他字符串的第二道关见 §6。
+**渲染兜底**：
+- `Base.astro` 的菜单只取前 50 项，`label` 按 80 截断，超出部分换成 `…`，不切开 surrogate pair。菜单出现在每一页，而且没有 hook 和发布这第二道关；其他字符串的第二道关见 §6。
+- footer 的菜单 widget：`SafeWidgetArea` 对 area 里每个 menu widget 读它指向的菜单（`getMenu`）。任何一个菜单不通过 `menuIsSafe`，或者读取时抛错，整个 area 不渲染（fail closed）。`menuIsSafe` 检查：项数不超过 50，`label` 不超过 80，`url` 不超过 2048，`titleAttr` 不超过 200。原因：core 的 `WidgetRenderer` 把这些字段原样打印，没有截断。`target` 只在写入时限制（闸门和 `guard-scan`），渲染端不查。
 
 ### 3.2 发布时重跑 guard、全库扫描（第 2 项）
 
@@ -125,9 +138,13 @@
   - 每个 collection 的 `content_list`（全部状态、全部 locale，翻页到底）和 `content_list_trashed`；
   - 每个条目的 `revision_list`（`limit: 50`）；
   - `menu_list` 给出的每个菜单（`menu_get`），`taxonomy_list` 给出的每个 taxonomy 的 term（翻页到底），`byline_list`（翻页到底）。
-- 对每份 content data 跑 guard。条目查 `slug`，revision 查 `data._slug`。菜单、term、byline 查 §3.1 的长度。
+- 对每份 content data 跑 guard。条目查 `slug`，revision 查 `data._slug`。
+- 条目另查 `content_list` 返回的 `seo.image` 和 `bylines[].roleLabel`。回收站里的条目查不了这两项：`content_list_trashed` 不返回它们，`content_get` 又排除回收站的行。闸门限制了写入，但从回收站恢复既不经过闸门也不经过 hook。
+- 菜单查每项的 `label`、`customUrl`、`url`、`titleAttr`、`target` 和项数；term、byline 查 §3.1 的长度。
+- 不覆盖 widget area：没有读 widget 的 MCP 工具，`SafeWidgetArea` 渲染时检查每个 area 并 fail closed（§3.1）。
 - `revision_list` 的 `total` 大于返回数时，记一条问题（"只扫了最新的 N 个"）。
-- 输出 `collection/id[@revision]: 问题`，最后一行是汇总。有任何问题时退出码为 1。
+- 输出 `collection/id[@revision]: 问题`，每发现一条就打印一条，最后一行是汇总。有任何问题时退出码为 1。
+- fail loud：读不到的东西不算"0 个问题"。MCP 返回的形状不对、cursor 重复、`nextCursor` 不是非空字符串，或者列出的条数和 core 给的 `total` 对不上，都直接中止：退出码为 1，不打印汇总行。
 - 规则收紧后、部署前都要跑它；`CLAUDE.md` 的 Commands 写进这条命令。
 
 ### 3.3 线上 schema（第 3 项）
@@ -142,6 +159,8 @@
 - 对线上每个 collection，portableText 字段、image 字段，以及每个 `blocks` 字段里每个 block type 的每个版本中的 image 路径（image 字段，加 repeater 子字段里的 image），都必须在钉死的表里；
 - 否则打印 `schema drift: …`，退出码为 1。
 
+`migrate verify` 因此要读 schema，需要能调 MCP 的 token。读 schema 出错时，在页面和 redirect 的结果都打印之后，以退出码 1 结束，不把读不到当作没有漂移。
+
 ### 3.4 `sections` 和媒体（第 4、6 项）
 
 在 `packages/web9-site/render-sinks.test.mjs` 增加两条测试：
@@ -150,9 +169,9 @@
 
 ### 3.5 AI 的 token（第 5 项）
 
-改写上级 spec §9 的"AI 发布"段：AI 用单独的 Editor 账号，token 通过 OAuth device flow 获得。不用 PAT：PAT 只能由 Admin 给自己生成，生成出来是 Admin 权限。
+改写上级 spec §8 的"AI 管理内容"段：AI 用单独的 Editor 账号，token 通过 OAuth device flow 获得。不用 PAT：PAT 只能由 Admin 给自己生成，生成出来是 Admin 权限。
 
-runbook（写进上级 spec §9）：
+runbook（写进上级 spec §8）：
 1. Admin 在后台建 AI 用户，角色选 Editor。
 2. 在 AI 的运行环境里调 `POST /_emdash/api/oauth/device/code`，body 为 `{"scope":"content:read content:write media:read media:write"}`。一定要显式传 scope：不传的话默认还会给 `schema:read`。
 3. 用 AI 用户登录后台，打开 `/_emdash/admin/device`，输入 user code 并批准。运行环境轮询 `/_emdash/api/oauth/device/token`，拿到 access token 和 refresh token。
@@ -169,18 +188,29 @@ runbook（写进上级 spec §9）：
 
 **body 总量**：
 - 顶层节点不超过 2000（141）；
-- 整个值里的 span 总数不超过 20000（203）：block 的 children、容器里 block 的 children、表格单元格的 content 都计入；
+- 整个值里的 span 总数不超过 20000（203）：block 的 children、容器里 block 的 children、表格单元格的 content 都计入；表格按 core 的 normalizer 铺好的网格计，补出来的空格子每个算一个 span；
 - 整个值里的 mark 总数不超过 5000（77），同样的计入范围。单页 CPU 主要花在 mark 上：计划 2 实测 1000 span × 20 mark 的块约 0.3 s（`buildMarksTree`）。只限 span 总数时，一页仍可以有 40 万个 mark；限到 5000 个后，按实测比例估算约 0.08 s；
+- 整个值里的表格网格格子总数不超过 20000（109）：core 的 normalizer 和 `Table.astro` 对每个网格格子都要做一遍工作，写下来的单元格再少也一样（一个 colspan 100 × rowspan 20 的单元格铺出 2000 个格子，只算 1 个 span）。每张表按 max(网格格子数, 原始行数) 计，因为没有 cell 的行会被排成一个格子，但要先把每一行都加 key 并复制一遍；
+- 整个值里的 markDefs 总数不超过 5000（49）：`@portabletext/toolkit` 对每个 mark 做一次 `markDefs.find`（astro-portabletext 3.0.3 的副本，`dist/index.js:81`），渲染成本是 mark 数 × markDefs 数。block、容器里的 block、表格和表格单元格的 markDefs 都计入，在逐项检查和交给 normalizer 之前先计；
+- 换行：一个 span 的文字最多 1000 个换行，整个值最多 5000 个（现有最大值：一个 span 1 个，整个值 3 个）。原因：toolkit 把每个 span 按 `\n` 切开，再从尾部一行一行把 `\n` 节点插回去（`dist/index.js:92`），每个 span 是平方级（8 万个换行约 1.6 s）。block、容器里的 block 和表格单元格里的 span 都计入；
 - 一个 `tabs` 块的 tab 不超过 20（6），一个 `tool_grid` 块的 tool 不超过 100（8），一个 `buttons` 块的 button 不超过 10（0）。
 
+span、mark、网格格子、markDefs、换行这五项总量中任何一项超限，检查就在那一处停止，不再往下走，并记一条"最多 N 个"的问题。
+
 **表格**（core 结构：`table.rows[]` 是 `{ _type: "tableRow", cells[] }`，cell 是 `{ _type: "tableCell", content: Span[], markDefs?, ... }`）：
-- `rows` 存在时必须是数组，每张表不超过 500 行（13）、2000 个单元格（78）；
+- `rows` 存在时必须是数组，每张表不超过 500 行（13）、写下来的单元格不超过 2000 个（78）；
 - row 必须是对象，`cells` 存在时必须是数组；cell 必须是对象，`content` 存在时必须是数组；
 - `content` 里只能是 span，span 不能有 children，`marks` 存在时是数组且不超过 20 个；
-- mark 的名字和 markDefs 交给 core 的 `normalizePortableTextTable` 处理，它已经有边界。
+- 表格、row、cell 的 `_key` 在这张表里不能重复（缺失、空或非字符串的 key 由 core 生成，不查）：core 的 normalizer 对每个 key 做一次线性的后缀扫描来去重（`reserveKey`），重复的 key 让渲染时间变成平方级；
+- 表格、row、cell，以及表格和单元格的 markDef，每条记录最多 32 个字段（现有最大值 5）：normalizer 对每条记录的每个 key 跑一遍正则并复制整条记录（`safeFields`，`node_modules/@emdash-cms/admin/dist/portable-text-table.js:494`）。过宽的记录在上面几项检查里就被拒，不会交给 normalizer；
+- guard 自己跑 core 的 `normalizePortableTextTable`，和 `Table.astro` 是同一个模块、同一个 specifier：
+  - core 排不出来的表直接拒绝，单元格里的 mark 名字和 markDefs 不合法也在这里被拒；
+  - "2000 个单元格"指的是 normalizer 铺出来的网格（宽 × 高，colspan 和 rowspan 最多各按 100 算），另外写下来的单元格最多 2000 个；网格格子数还要计入上面 20000 的总量；
+  - 只对没有其他问题的表运行，所以 normalizer 看到的永远是已经过了形状、key 和字段数检查的表。
 
 **块结构**：
 - `buttons.buttons`、`tabs.tabs`、`tool_grid.tools` 存在时必须是数组，元素必须是对象；
+- `buttons.buttons: null` 被拒：core 的 `Buttons.astro` 只给 undefined 设默认值（`buttons = []`），null 会抛错；`tabs.tabs` 和 `tool_grid.tools` 为 null 则通过，因为 web9 的 Tabs、ToolGrid 把 null 当空列表；
 - button 的 `text`，tab 的 `label`、`body`，tool 的 `name`、`tagline`、`url`、`logo` 存在时必须是字符串；
 - tool 的 `featured` 存在时必须是布尔值。
 
@@ -199,7 +229,9 @@ runbook（写进上级 spec §9）：
   - `verify` 为 54/54 页面、86/86 redirect，没有 schema drift；
   - `guard-scan` 0 个问题。
 - 本地 dev 探针：
-  - 超长的 slug、菜单 label、term label、byline displayName 经 REST 和 MCP 写入，都被拒，库里没有写进任何东西；
+  - 超长的 slug、菜单 label、term label、byline displayName 经 REST 和 MCP 写入，都被拒，库里没有写进任何东西；byline 走 REST 的 `/_emdash/api/admin/bylines`；
+  - 两条会让路径判定和路由对不上的路径：`PUT /_emdash/api/taxonomies/{name}/terms/a%5Cb` 和 `…/terms/%252E%252E`，超长的 term label 都被拒；
+  - 超过 10 MiB 的 chunked body（没有 Content-Length）写到闸门管的路由：返回 413，REST 是 `PAYLOAD_TOO_LARGE`，MCP 是 JSON-RPC 413，库里没有写进任何东西；
   - 超长 title 经 MCP 保存被拒；
   - 一个草稿的 title 超长时（只能用旧规则下写入的数据构造，无法构造时用单测替身验证 handler），发布被取消；
   - batch 请求被拒。
@@ -220,3 +252,10 @@ runbook（写进上级 spec §9）：
 | 渲染截断只做菜单，不做标题、term、byline | 标题和 slug 有发布 hook 做第二道关；term、byline 只出现在 post 列表和 tag 页，绕过闸门的存量由 `guard-scan` 发现；菜单在每一页、又没有第二道关 | 绕过闸门的超长 term 或 byline 会让列表页变长，直到扫描发现 |
 | 另加 mark 总数上限 5000 | 批准的设计只限 span 总数；单页 CPU 由 mark 数决定（计划 2 的测量），20000 个 span 各带 20 个 mark 时约 6 s | 合法内容的 mark 超过 5000（现有最大 77）时被拒，可以调高 |
 | AI 的 scope 改成 `content:read content:write media:read media:write` | `content:write` 不隐含 `content:read`，没有读权限 AI 无法 `content_list`；`menus:manage`、`taxonomies:manage` 已被 `content:write` 隐含 | AI 缺权限时报错，再按需加 |
+| 闸门按 `context.routePattern` 判定，不看 URL（批准的设计和 §3.1 初稿用 `context.url.pathname`） | Astro 用解码后的路径字符串做路由匹配，`context.url.pathname` 又被规范化过一次，两者会对不上，`terms/a%5Cb` 和 `terms/%252E%252E` 就绕过了按路径判定的闸门；匹配到的 pattern 就是将要运行的路由 | emdash 升级改了 pattern 的名字时，快照测试失败；在人处理之前，那条路由不受检查 |
+| 闸门另加 `seo.image`、byline 的 `roleLabel`、菜单项的 `titleAttr` 和 `target`，以及 REST `admin/bylines` | 同属 Editor token 能写、core 的 schema 没有上限的字符串，又渲染到页面上：`seo.image` 进 og:image，`roleLabel` 进文章页的署名，`titleAttr` 进 footer 菜单 widget；byline 原来只管了 MCP 一条路 | 合法的长值被拒：上限远高于现有值，可以调整 |
+| 超过 10 MiB 的请求体由闸门返回 413，批准的设计是放行交给 core | core 只拒绝声明了超限 Content-Length 的请求，chunked body 没有上限；放行等于闸门对 chunked 的大请求失效 | 合法的、超过 10 MiB 的写入被拒；声明了长度时，core 本来就会拒 |
+| `SafeWidgetArea` 检查 footer 的菜单 widget，不通过就不渲染 | core 的 `WidgetRenderer` 不截断菜单项的 `label` 和 `titleAttr`；菜单没有 hook，也没有发布这第二道关 | footer 区域消失，直到菜单修好；`guard-scan` 会报告是哪个菜单 |
+| guard 自己跑 core 的表格 normalizer（`@emdash-cms/admin/portable-text-table`） | `Table.astro` 渲染的就是它的输出；只有跑同一个函数，才知道 core 排不排得出这张表、铺出多少格子 | 它是 emdash 的传递依赖，没有写进 `web9-blocks/package.json`：emdash 升级把它挪走时 import 失败，测试会发现 |
+| 表格的"单元格"改指网格格子 | 渲染成本跟网格格子数成正比，一个 colspan × rowspan 的单元格就能占几千个格子，写下来的单元格数管不住 | 合法的大表被拒：网格上限 2000，现有最大 78 |
+| 发布和定时发布被拒时，reason 文案相同（`Publish rejected (spec §10): …`），错误码不同（`PUBLISH_REJECTED`、`SCHEDULE_REJECTED`） | 同一个 handler 注册为 `beforePublish` 和 `beforeSchedule`，错误码由 core 按动作给出 | 只看 reason 分不出是发布还是定时发布，要看错误码 |
