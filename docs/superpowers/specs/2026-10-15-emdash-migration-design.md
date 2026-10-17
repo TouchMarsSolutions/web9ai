@@ -1,7 +1,8 @@
 # Web9.AI 迁移到 EmDash + Astro — 架构设计
 
 - 日期：2026-10-15
-- 分支：`emdash`（仓库 `TouchMarsSolutions/web9ai`）
+- 分支：`main`（计划 1 的 PR #2 已合并；计划 2 在 `plan2` 分支）；仓库 `TouchMarsSolutions/web9ai`
+- 进度：计划 1 完成（2026-10-15）；计划 2 完成（本地迁移和安全关口，2026-10-16）；计划 3（部署、生产迁移、切换）未开始
 - 状态标记：**已定** = 已验证或已由 owner 拍板；**建议** = 默认方案，可改；**待验证** = 计划第一个里程碑里实测
 
 ## 0. 目标与取舍
@@ -24,10 +25,10 @@
   - `seed/` — 内容模型快照，用于复现环境（schema 变更后用 `site_export` 或手工同步）
   - `.agents/skills/` — 模板自带的 skill，加上新增的 `web9-blocks` skill
 - **已定**：`output: "server"`，EmDash 1.3.x。
-  - 生产：Cloudflare Workers + D1 + R2。不启用 sandboxed 插件，免费套餐即可。
+  - 生产：Cloudflare Workers + D1 + R2。不启用 sandboxed 插件。**待定（owner，计划 3）**：worker 压缩后 5044.82 KiB（约 4.9 MiB；计划 2 Task 15，`wrangler deploy --dry-run`），超过 Workers 免费套餐 3 MiB 的上限：用付费套餐（上限 10 MiB），或者先查能不能裁剪。
   - **本地和生产用同一份配置（2026-10-15 修订）**：`@astrojs/cloudflare` 14.x 的 `astro dev` 直接跑在 workerd 里，不是 Node（adapter changelog #14306）。D1 和 R2 用 wrangler 的本地模拟，数据在 `.wrangler/state`；dev-bypass 照常可用。这样一来，Workers 兼容性问题在每次本地开发时就会暴露，不用等到部署。原先的 Node + SQLite（`data.db`）只在 POC 阶段使用。
   - 配置直接采用探针项目的做法（用 `--platform cloudflare` 生成后比对过）：`src/` 不变，多一个 `src/worker.ts`；adapter 用 `cloudflare()`，数据库用 `d1({binding:"DB", session:"auto"})`，存储用 `r2({binding:"MEDIA"})`，另加 `wrangler.jsonc` 和 `@emdash-cms/cloudflare`。
-- 当前状态：`emdash` 分支在 Node 环境下 `npm run build` 和 `npm run typecheck` 都通过（0 errors），说明 `componentsEntry` 的解析和 `marked` / `sanitize-html` 的打包都没问题。
+- 当前状态（计划 2 结束）：本地 workerd dev 里完整迁移可从空库重复（`node scripts/migrate.mjs all`，第二次 0 写入）；`npm test`、`npm run build`（含公开 CSS 检查）、`npm run typecheck` 通过；CI 跑测试和构建。
 - **已验证（计划 1 Task 5）**：本地 dev 跑在 workerd 里（`navigator.userAgent` 为 `Cloudflare-Workers`），`marked` 和 `sanitize-html`（包括它依赖的 postcss 样式解析）都能正常渲染和过滤。
 
 ## 2. 内容模型
@@ -145,6 +146,7 @@
 - 备份：首次部署前备份 `EMDASH_ENCRYPTION_KEY`；定时导出 D1，再定期通过 MCP `site_export` 做整站导出。
 - 缓存：v1 不配置。`Astro.cache` 的 warning 是预期内的。上线后先测性能，再按 EmDash 文档加 object cache。
 - 模板的 cron trigger（`* * * * *`，用于定时发布）每天约 1440 次调用，在免费额度之内。
+- worker 体积（计划 2 Task 15，`wrangler deploy --dry-run`）：Total Upload 19190.21 KiB，gzip 5044.82 KiB。
 
 ## 10. 风险
 
@@ -176,3 +178,10 @@
 - `blocks.css` 里用了 `@apply`，所以必须由 `global.css` 用 `@import "@web9/blocks/styles.css"` 引入，块组件里不再各自 import CSS。
 - 扫描范围：`@import "tailwindcss" source(none)`，再用 `@source` 只扫 `src/` 和 `packages/web9-blocks/astro`。测试文件、`docs/`、`legacy/`、`scripts/`、`seed/`、`public/` 和内容都不扫：否则它们里面的单词（包括 sanitizer 测试里的 `fixed inset-0 z-50 bg-black`）会生成真实的 utility（已实测，见 §10）。
 - 分期（2026-10-15 修订）：计划 1 把 docs 页面和 web9 块改成 Tailwind；计划 2 只重写 `Base.astro`（页头、页脚、主题），`posts/[slug]` 只给正文容器加 `prose`；blog 列表和文章页的整体重写留给以后的样式计划，在此之前模板 blog 页面可能有 preflight 带来的细小样式差异。
+
+## 12. 未决事项（计划 2 结束时已知，计划 3 的输入）
+
+- `npm audit` 有两项：katex（经 mermaid）、postcss-selector-parser（经 `@tailwindcss/typography`）；两项的修复都是 breaking，计划 3 评估后再升级。
+- CI job 已改名为 "Tests and build"（原来是 "Unit tests"）：如果 `main` 的 branch protection 规则要求 "Unit tests" 这个 check，会挡住所有 PR；计划 3 配置 GitHub 时要改成新名字。
+- 生产第一次运行迁移 runner 必须先 `--dry-run`，再带 `--overwrite`（seed 里的菜单与目标不同，§7），最后不带参数再跑一次确认全是 `unchanged`，然后 `verify`。
+- 其余已知问题（Mermaid 深色文字、标题没有 `id`、热链图片、`tool_grid` 宽 logo 等）记在计划 2 文末的"未决事项"里。
