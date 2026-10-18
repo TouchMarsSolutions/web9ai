@@ -64,7 +64,8 @@
   - 数据来自 `headingAnchors` 里 h2、h3 的条目（Docusaurus 默认的范围），纯函数 `tocEntries`。少于 2 条就不显示。
   - ≥ 1280 px：右侧一列（约 220 px），sticky，`max-height: calc(100dvh - 5rem)`，自己滚动。一个小脚本给当前节的链接设 `aria-current="true"`，样式随之高亮：当前节是窗口顶部下 6rem 那条线之上的最后一个标题，在 `scroll` 和 `resize` 时每个动画帧重算一次（`IntersectionObserver` 只在标题穿过观察边界时触发，这条规则的线在别处，它会晚触发，滚动时高亮落后）。只在当前节变化时才写 `aria-current`；页面滚到底时改取视口内的最后一个标题，因为很短的最后一节永远到不了那条线。
   - < 1280 px：正文顶部一个 `<details>`，`<summary>` 是 "On this page"（zh-CN："本页目录"），默认收起。
-- **锚点落点**（浏览器验收时发现，2026-10-17 补入本节）：文档图片是 `loading="lazy"` 且没有 width/height（旧站的 ideal-image 两者都有），跳到 `#id` 时上方图片陆续加载会把目标往下推，落点偏短。DocsPage 里一个小脚本在有待定目标时，每当正文尺寸变化就用 `scrollIntoView` 把目标重新对齐（标题的 `scroll-margin-top` 5rem 让它落在 header 下面）；用户一操作（wheel、touch、按键、按下）或 5 秒后就停止。只有会移动本页的跳转才设目标：带修饰键或非主键的点击、`target` 不是 `_self` 的链接、指向别的文档的链接都不设；reload 和前进/后退恢复浏览器记住的阅读位置，也不设。已知并接受：同一页两个 hash 之间的前进/后退会经 `hashchange` 设目标，5 秒内页面尺寸再变就会把页面拉到那个标题。给图片加上尺寸（后续提议）后，这个脚本可以删掉。
+- **锚点落点**（浏览器验收时发现，2026-10-17 补入本节）：文档图片是 `loading="lazy"` 且没有 width/height（旧站的 ideal-image 两者都有），跳到 `#id` 时上方图片陆续加载会把目标往下推，落点偏短。DocsPage 里一个小脚本在有待定目标时，每当正文尺寸变化就用 `scrollIntoView` 把目标重新对齐（标题的 `scroll-margin-top` 5rem 让它落在 header 下面）；用户一操作（wheel、touch、按键、按下）或 5 秒后就停止。只有会移动本页的跳转才设目标：带修饰键或非主键的点击、`target` 不是 `_self` 的链接、指向别的文档的链接都不设；reload 和前进/后退恢复浏览器记住的阅读位置，也不设。已知并接受：同一页两个 hash 之间的前进/后退会经 `hashchange` 设目标，5 秒内页面尺寸再变就会把页面拉到那个标题。
+  - 2026-10-18 补：`/img`、`/cover` 下的图片现在带 width/height（`src/components/ContentImage.astro`，尺寸来自 `packages/web9-site/lib/image-sizes.json`），加载前后零位移（浏览器实测 35 张图，加载后尺寸与线上逐张一致）。脚本仍然保留：Mermaid 在浏览器里绘制，源码文本换成 SVG 后高度会变（`learn_ai_coding` 页首那张从 144 px 变成 304 px），外链图片（core 渲染，无尺寸）也会在加载时撑开。
 - **去掉 description 引言**：正文上方不再显示 `doc.data.description`，它仍然在 `<meta name="description">` 里。语言链接移到 header 的下拉里，正文上方也不再显示。
 - 布局：容器 1400 px，`grid-cols-[240px_minmax(0,1fr)]`，≥ 1280 px 时加第三列 `220px`。正文列约 850 px，和现在（约 888 px）接近，图片宽度上限（spec §9"图片"，1600 px）不用改。
 
