@@ -19,8 +19,8 @@ export function blockText(block) {
 export const isHeading = (block) => block?._type === "block" && typeof block.style === "string" && /^h[2-6]$/.test(block.style);
 
 /** The old site's custom ids for one doc: { "<heading text>": "<id>" }. */
-export function legacyIdsFor(locale, slug) {
-	const key = `${locale}/${slug}`;
+export function legacyIdsFor(locale, docSlug) {
+	const key = `${locale}/${docSlug}`;
 	return Object.hasOwn(LEGACY, key) ? LEGACY[key] : {};
 }
 

@@ -55,7 +55,7 @@ const menuItems = (menuResult.data?.items ?? [])
 	.map((item) => ({ ...item, label: clampText(item.label, LIMITS.label), href: localizeHref(item.url, locale) }));
 const homeHref = localizeHref("/", locale);
 // Header (spec 2026-10-17 docs UX §3.1): site links on the left with the current section highlighted, external links on
-// the right; below 1024 px they all move into the drawer (§3.3).
+// the right; below 64rem (Tailwind's lg) they all move into the drawer (§3.3).
 const activeHref = activeMenuHref(menuItems, Astro.url.pathname, docNav);
 // nav.mjs is untyped JS, so splitMenu's result is `any`: give it the menu item type
 const { internal: siteLinks, external: externalLinks }: { internal: typeof menuItems; external: typeof menuItems } = splitMenu(menuItems);
@@ -312,7 +312,7 @@ const isLoggedIn = !!Astro.locals.user;
 				btn.addEventListener("click", () => setTheme(nextTheme(THEMES.find((t) => t === btn.dataset.current) ?? "system"))),
 			);
 
-			// Drawer below 1024 px (spec 2026-10-17 docs UX §3.3): a modal <dialog>, so the browser traps focus, makes the
+			// Drawer below 64rem (the spec's 1024 px; spec 2026-10-17 docs UX §3.3): a modal <dialog>, so the browser traps focus, makes the
 			// page inert and closes it on Esc. Its id has a colon, which github-slugger strips: no heading id can equal it.
 			const drawer = document.getElementById("site:drawer") as HTMLDialogElement | null;
 			const drawerOpen = document.querySelector<HTMLButtonElement>("[data-drawer-open]");
@@ -360,12 +360,14 @@ const isLoggedIn = !!Astro.locals.user;
 			document.addEventListener("keydown", (e) => {
 				if (e.key !== "Escape") return;
 				document.querySelectorAll<HTMLDetailsElement>("details[data-dropdown][open]").forEach((d) => {
+					// focus returns to the summary only when it was inside this dropdown, not when Esc was pressed elsewhere
+					const focusWasInside = d.contains(document.activeElement);
 					d.open = false;
-					d.querySelector("summary")?.focus();
+					if (focusWasInside) d.querySelector("summary")?.focus();
 				});
 			});
 
-			// ⌘K / Ctrl+K focuses the visible search box; below 1024 px it opens the drawer first
+			// ⌘K / Ctrl+K focuses the visible search box; below 64rem it opens the drawer first
 			document.addEventListener("keydown", (e) => {
 				if ((e.metaKey || e.ctrlKey) && e.key === "k") {
 					e.preventDefault();
