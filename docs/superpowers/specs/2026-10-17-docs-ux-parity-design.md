@@ -115,6 +115,7 @@
   - 深色和浅色主题下代码高亮可读，主题按钮按三态循环，刷新后保持；
   - 控制台没有报错。
 - 上线后：`check-page.mjs` 对几页查标记（`id="what-is-not"`、`aria-label="Breadcrumbs"`、`On this page`；`/docs/guide` 上再查 `id="txt2txt"`（标题整句是行内代码，经过 marks 树），`/docs/ai-tools-adhoc` 上查 `id="knowledge-base"`（en 下的旧自定义 id，标题是中文）），`verify` 仍是 54/54、86/86。
+- zh-CN 页面的 chrome（2026-10-18 补）：aria-label 跟页面语言走（`packages/web9-site/lib/ui-labels.mjs`），zh-CN 用旧站 Docusaurus zh-Hans 的说法（主导航、页面路径、主页面、文档侧边栏、「…的直接链接」），回退页也一样（chrome 是 zh-CN 的）。en 标签不变，上面的标记照旧。`check-page.mjs` 查 `/zh-CN/docs/learn_ai_coding` 的 `aria-label="页面路径"`、`aria-label="目标不是什么？的直接链接"`，并用 `--absent` 查不出现 `aria-label="Breadcrumbs"` 和 `Direct link to`。sidebar 的爬取改认 `data-docs-sidebar`（它的 label 随语言变）。
 
 ## 6. 不在范围内
 

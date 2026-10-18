@@ -4,6 +4,7 @@ import { PortableText } from "emdash/ui";
 import { headingAnchors, idsByKey, legacyIdsFor, tocEntries } from "../../packages/web9-site/lib/anchors.mjs";
 import { breadcrumbs, docSection, docsSidebar, groupDocs } from "../../packages/web9-site/lib/docs-nav.mjs";
 import { LANGUAGES, localizeHref } from "../../packages/web9-site/lib/nav.mjs";
+import { uiLabels } from "../../packages/web9-site/lib/ui-labels.mjs";
 import Base from "../layouts/Base.astro";
 import ContentImage from "./ContentImage.astro";
 import DocsSidebar from "./DocsSidebar.astro";
@@ -49,6 +50,7 @@ const toc = tocEntries(anchors);
 const editing = Boolean(getEditMeta(doc.data.body));
 const showToc = toc.length >= 2 && !editing;
 const tocLabel = locale === "zh-CN" ? "本页目录" : "On this page";
+const labels = uiLabels(locale);
 
 // A fallback page shows the en text, so search engines are pointed at the en URL.
 const canonicalLocale = fallbackLocale ?? locale;
@@ -88,10 +90,10 @@ const notTranslated: Record<string, string> = {
 			<DocsSidebar sidebar={sidebar} prefix={prefix} currentSlug={doc.data.slug} />
 		</aside>
 		<div class="min-w-0 py-6">
-			<nav aria-label="Breadcrumbs" class="mb-5 text-sm">
+			<nav aria-label={labels.breadcrumbs} class="mb-5 text-sm">
 				<ol class="m-0 flex list-none flex-wrap items-center gap-1.5 p-0 text-text-secondary">
 					<li class="flex">
-						<a href={localizeHref("/", locale)} aria-label="Home" class="flex text-text-secondary hover:text-brand">
+						<a href={localizeHref("/", locale)} aria-label={labels.home} class="flex text-text-secondary hover:text-brand">
 							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 								<path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
 								<path d="M9 22V12h6v10"></path>

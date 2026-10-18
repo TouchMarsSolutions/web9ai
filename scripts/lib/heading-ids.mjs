@@ -118,8 +118,8 @@ function docHrefsWithin(html, isStart) {
 	return [...hrefs];
 }
 
-/** The doc links of every `<nav aria-label="Docs">` (the docs sidebar), once each. */
-export const navDocHrefs = (html) => docHrefsWithin(html, (t) => t.name === "nav" && t.attrs.get("aria-label") === "Docs");
+/** The doc links of every `<nav data-docs-sidebar>` (the docs sidebar; its label depends on the locale), once each. */
+export const navDocHrefs = (html) => docHrefsWithin(html, (t) => t.name === "nav" && t.attrs.has("data-docs-sidebar"));
 
 /** The doc links of the site header's menu, once each. */
 export const headerDocHrefs = (html) => docHrefsWithin(html, (t) => t.name === "header");

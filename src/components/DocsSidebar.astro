@@ -1,6 +1,9 @@
 ---
 // The docs sidebar (spec 2026-10-17 docs UX §3.2): the current section only; each category is a <details>, open only
-// around the current doc. No JS. DocsPage renders it twice: the desktop column and the drawer.
+// around the current doc. No JS. DocsPage renders it twice: the desktop column and the drawer. data-docs-sidebar is what
+// scripts/check-heading-ids.mjs crawls (the label changes with the locale).
+import { uiLabels } from "../../packages/web9-site/lib/ui-labels.mjs";
+
 interface Props {
 	sidebar: { rootItems: any[]; categories: { key: string; label: string; open: boolean; items: any[] }[] };
 	prefix: string;
@@ -11,7 +14,7 @@ const linkClass =
 	"block rounded px-2 py-1.5 text-text-secondary hover:bg-surface hover:text-text aria-[current=page]:bg-surface aria-[current=page]:font-medium aria-[current=page]:text-brand";
 ---
 
-<nav aria-label="Docs" class="text-[0.92rem]">
+<nav aria-label={uiLabels(Astro.currentLocale ?? "en").docs} data-docs-sidebar class="text-[0.92rem]">
 	<ul class="m-0 list-none space-y-0.5 p-0">
 		{
 			sidebar.rootItems.map((e) => (

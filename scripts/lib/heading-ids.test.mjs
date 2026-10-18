@@ -146,10 +146,14 @@ describe("headingProblems", () => {
 });
 
 describe("navDocHrefs", () => {
-	const nav = (links) => `<nav aria-label="Docs" class="x"><ul>${links.map((h) => `<li><a class="l" href="${h}">t</a></li>`).join("")}</ul></nav>`;
+	const nav = (links) => `<nav aria-label="文档侧边栏" data-docs-sidebar class="x"><ul>${links.map((h) => `<li><a class="l" href="${h}">t</a></li>`).join("")}</ul></nav>`;
 	it("lists the doc links of every Docs nav, once each", () => {
 		const html = `<nav aria-label="Main"><a href="/docs/other">no</a></nav>${nav(["/docs/a", "/docs/b"])}<dialog>${nav(["/docs/b", "/docs/c"])}</dialog>`;
 		expect(navDocHrefs(html)).toEqual(["/docs/a", "/docs/b", "/docs/c"]);
+	});
+	it("goes by data-docs-sidebar, not by the label", () => {
+		expect(navDocHrefs(`<nav aria-label="Docs"><a href="/docs/a">a</a></nav>`)).toEqual([]);
+		expect(navDocHrefs(`<nav data-docs-sidebar=""><a href="/zh-CN/docs/a">a</a></nav>`)).toEqual(["/zh-CN/docs/a"]);
 	});
 });
 
