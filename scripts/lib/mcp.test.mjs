@@ -1,6 +1,9 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { checkMarkers } from "./markers.mjs";
-import { authMode, defaultToken, listOf, parseRpcBody, rpc, unwrapToolResult } from "./mcp.mjs";
+import { authMode, callTool, defaultToken, listOf, parseRpcBody, rpc, unwrapToolResult } from "./mcp.mjs";
 
 describe("parseRpcBody", () => {
 	it("parses plain JSON", () => {
@@ -83,9 +86,61 @@ describe("authMode", () => {
 		env({ EMDASH_AUTH: "ai" });
 		expect(() => authMode()).toThrow(/needs EMDASH_URL/);
 	});
-	it("keeps the AI token out of the scripts that use defaultToken (REST, admin work)", () => {
+	it("makes every caller but scripts/mcp.mjs refuse the AI mode before any request", async () => {
 		env({ EMDASH_AUTH: "ai", EMDASH_URL: "https://site.test" });
-		expect(() => defaultToken()).toThrow(/covers MCP calls only/);
+		const fetch = vi.fn();
+		vi.stubGlobal("fetch", fetch);
+		expect(() => defaultToken()).toThrow(/works with scripts\/mcp\.mjs only/);
+		await expect(callTool("content_list", {})).rejects.toThrow(/works with scripts\/mcp\.mjs only/);
+		expect(fetch).not.toHaveBeenCalled();
+		vi.unstubAllGlobals();
+	});
+});
+
+describe("rpc as the AI Editor (ai option)", () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+	const NOW = Date.parse("2026-10-17T12:00:00Z");
+	const setup = () => {
+		const dir = mkdtempSync(join(tmpdir(), "mcp-ai-"));
+		for (const [name, text] of [
+			["ai-refresh-token", "ec_ort_r"],
+			["ai-access-token", "ec_oat_old"],
+			["ai-access-token.expires-at", new Date(NOW + 30 * 60_000).toISOString()],
+		]) {
+			writeFileSync(join(dir, name), `${text}\n`, { mode: 0o600 });
+		}
+		const refresh = vi.fn(async () => Response.json({ data: { access_token: "ec_oat_new", expires_in: 3600 } }));
+		return { dir, refresh, ai: { dir, fetch: refresh, now: () => NOW } };
+	};
+	const answer = () => Response.json({ jsonrpc: "2.0", id: 1, result: { tools: [] } });
+
+	it("sends the stored token to the site's MCP endpoint", async () => {
+		const { ai, refresh } = setup();
+		const mcp = vi.fn(async () => answer());
+		vi.stubGlobal("fetch", mcp);
+		expect((await rpc("tools/list", {}, { url: "https://site.test/", ai })).result).toEqual({ tools: [] });
+		expect(String(mcp.mock.calls[0][0])).toBe("https://site.test/_emdash/api/mcp");
+		expect(mcp.mock.calls[0][1].headers.Authorization).toBe("Bearer ec_oat_old");
+		expect(refresh).not.toHaveBeenCalled();
+	});
+
+	it("on a 401 refreshes and resends the same request with the new token", async () => {
+		const { ai, refresh } = setup();
+		const mcp = vi.fn(async (_url, init) => (init.headers.Authorization === "Bearer ec_oat_new" ? answer() : new Response("", { status: 401 })));
+		vi.stubGlobal("fetch", mcp);
+		expect((await rpc("tools/list", {}, { url: "https://site.test", ai })).result).toEqual({ tools: [] });
+		expect(mcp.mock.calls.map(([, init]) => init.headers.Authorization)).toEqual(["Bearer ec_oat_old", "Bearer ec_oat_new"]);
+		expect(mcp.mock.calls[1][1].body).toBe(mcp.mock.calls[0][1].body);
+		expect(refresh).toHaveBeenCalledOnce();
+	});
+
+	it("without the ai option, an explicit token is sent as is", async () => {
+		const mcp = vi.fn(async () => answer());
+		vi.stubGlobal("fetch", mcp);
+		await rpc("tools/list", {}, { url: "https://site.test", token: "x" });
+		expect(mcp.mock.calls[0][1].headers.Authorization).toBe("Bearer x");
 	});
 });
 

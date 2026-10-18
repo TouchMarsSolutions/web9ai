@@ -1,7 +1,7 @@
 // Minimal client for the EmDash MCP endpoint (JSON-RPC over Streamable HTTP; stateless, no initialize needed).
 // Env: EMDASH_URL (default http://localhost:4321), EMDASH_TOKEN (default: contents of .local/dev-token).
-// EMDASH_AUTH=ai uses the AI Editor account's token instead (lib/ai-token.mjs: renewed before it expires and on a 401);
-// it needs EMDASH_URL, excludes EMDASH_TOKEN, and covers MCP calls only.
+// EMDASH_AUTH=ai is for scripts/mcp.mjs only: it passes the `ai` option, which uses the AI Editor account's token
+// (lib/ai-token.mjs: renewed before it expires and on a 401); every other caller then refuses to run (defaultToken).
 import { readFileSync } from "node:fs";
 import { withAiToken } from "./ai-token.mjs";
 
@@ -54,18 +54,19 @@ export function authMode() {
 }
 
 export function defaultToken() {
-	// REST calls read this (redirects, guard-scan): admin work, which the AI account has no scopes for
-	if (authMode() === "ai") throw new Error("EMDASH_AUTH=ai covers MCP calls only; this REST call needs EMDASH_TOKEN");
+	// migrate and guard-scan read this: admin work, which the AI account has no scopes for
+	if (authMode() === "ai") throw new Error("EMDASH_AUTH=ai works with scripts/mcp.mjs only; this script needs EMDASH_TOKEN");
 	if (process.env.EMDASH_TOKEN) return process.env.EMDASH_TOKEN;
 	return readFileSync(new URL("../../.local/dev-token", import.meta.url), "utf8").trim();
 }
 
 let nextId = 1;
 
-export async function rpc(method, params = {}, { url = process.env.EMDASH_URL ?? "http://localhost:4321", token } = {}) {
+/** `ai`: call as the AI Editor account; the object holds lib/ai-token.mjs options (`{}` for the defaults). */
+export async function rpc(method, params = {}, { url = process.env.EMDASH_URL ?? "http://localhost:4321", token, ai } = {}) {
 	const payload = JSON.stringify({ jsonrpc: "2.0", id: nextId++, method, params });
 	const send = (bearer) =>
-		fetch(`${url}/_emdash/api/mcp`, {
+		fetch(new URL("/_emdash/api/mcp", url), {
 			method: "POST",
 			headers: {
 				Authorization: `Bearer ${bearer}`,
@@ -74,7 +75,7 @@ export async function rpc(method, params = {}, { url = process.env.EMDASH_URL ??
 			},
 			body: payload,
 		});
-	const res = token === undefined && authMode() === "ai" ? await withAiToken(url, send) : await send(token ?? defaultToken());
+	const res = ai ? await withAiToken(url, send, ai) : await send(token ?? defaultToken());
 	const body = await res.text();
 	if (!res.ok) throw new Error(`MCP HTTP ${res.status}: ${body.slice(0, 200)}`);
 	return parseRpcBody(body);

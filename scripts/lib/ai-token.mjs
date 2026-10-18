@@ -1,9 +1,12 @@
 // The AI Editor account's OAuth tokens (spec 2026-10-17-ai-pat-preconditions §3.5): an access token that lasts an hour
 // and a refresh token that lasts 90 days, in .local/ai-access-token and .local/ai-refresh-token (mode 600, never
-// committed). A refresh issues a new access token and revokes the previous one at once; the refresh token does not
-// rotate. The access token's expiry is not in the token, so each refresh writes it to .local/ai-access-token.expires-at.
-// Nothing here prints or throws a token.
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
+// committed). A refresh issues a new access token and revokes every earlier one at once, so refreshes are serialized
+// with a lock file and each caller re-reads the files under it: one refresh per expiry, however many processes run.
+// The access token's expiry is not in the token, so each refresh writes it to .local/ai-access-token.expires-at, and
+// the first one records the issuing site in .local/ai-token-site; no token is sent to another site. Nothing here
+// prints or throws a token.
+import { randomBytes } from "node:crypto";
+import { closeSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,8 +14,17 @@ export const AI_TOKEN_DIR = fileURLToPath(new URL("../../.local/", import.meta.u
 const ACCESS = "ai-access-token";
 const EXPIRES = "ai-access-token.expires-at";
 const REFRESH = "ai-refresh-token";
+const SITE = "ai-token-site";
+const LOCK = "ai-access-token.lock";
 /** Renew this long before the expiry, so a token never runs out in the middle of a run. */
 const MARGIN_MS = 5 * 60_000;
+/** A refresh gives up after 15 s, so a lock older than a minute was left by a process that died. */
+const REFRESH_TIMEOUT_MS = 15_000;
+const LOCK_STALE_MS = 60_000;
+const LOCK_WAIT_MS = 30_000;
+/** Printable ASCII only: anything else would make fetch throw an error that quotes the whole header. */
+const TOKEN = /^[\x21-\x7e]+$/;
+const LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
 const NEW_DEVICE_CODE = "approve a new device code as ai-agent@web9.ai (spec 2026-10-17-ai-pat-preconditions §3.5)";
 
 function read(dir, name) {
@@ -24,36 +36,81 @@ function read(dir, name) {
 	}
 }
 
-/** Private and atomic: a mode-600 temp file renamed over the old one, so a reader never sees half a token. */
+/** Private and atomic: a new mode-600 temp file renamed over the old one, so a reader never sees half a token. */
 function writePrivate(dir, name, text) {
-	const tmp = join(dir, `.${name}.${process.pid}.tmp`);
-	writeFileSync(tmp, `${text}\n`, { mode: 0o600 });
-	renameSync(tmp, join(dir, name));
-}
-
-/** The tokens go only to an https site, or to this machine (the dev server). */
-function assertSafeSite(url) {
-	const { protocol, hostname } = new URL(url);
-	if (protocol !== "https:" && !["localhost", "127.0.0.1", "[::1]"].includes(hostname)) {
-		throw new Error(`the AI token is sent only over https (or to localhost), not to ${protocol}//${hostname}`);
+	const tmp = join(dir, `.${name}.${randomBytes(6).toString("hex")}.tmp`);
+	try {
+		writeFileSync(tmp, `${text}\n`, { mode: 0o600, flag: "wx" });
+		renameSync(tmp, join(dir, name));
+	} catch (e) {
+		rmSync(tmp, { force: true });
+		throw e;
 	}
 }
 
-/** The stored access token and its expiry (ms since the epoch; null when unknown). */
-export function readAccess(dir = AI_TOKEN_DIR) {
-	const expiresAt = Date.parse(read(dir, EXPIRES) ?? "");
-	return { token: read(dir, ACCESS), expiresAt: Number.isNaN(expiresAt) ? null : expiresAt };
+/** The site's origin, once it is https (or this machine) and the one that issued the tokens. */
+function checkSite(dir, url) {
+	const { protocol, hostname, origin } = new URL(url);
+	if (protocol !== "https:" && !LOCAL_HOSTS.includes(hostname)) {
+		throw new Error(`the AI token is sent only over https (or to localhost), not to ${protocol}//${hostname}`);
+	}
+	const issuer = read(dir, SITE);
+	if (issuer && issuer !== origin) {
+		throw new Error(`the AI token was issued by ${issuer}, not ${origin} (after a device flow on another site, delete ${join(dir, SITE)})`);
+	}
+	return origin;
 }
 
-/** Exchanges the refresh token for a new access token, stores it with its expiry, and returns it. */
-export async function refreshAccess(url, { dir = AI_TOKEN_DIR, fetch = globalThis.fetch, now = Date.now } = {}) {
-	assertSafeSite(url);
+async function withLock(dir, fn) {
+	const lock = join(dir, LOCK);
+	const start = Date.now();
+	for (;;) {
+		try {
+			closeSync(openSync(lock, "wx", 0o600));
+			break;
+		} catch (e) {
+			if (e.code !== "EEXIST") throw e;
+		}
+		let age = 0;
+		try {
+			age = Date.now() - statSync(lock).mtimeMs;
+		} catch {} // released meanwhile: try again
+		if (age > LOCK_STALE_MS) rmSync(lock, { force: true });
+		else if (Date.now() - start > LOCK_WAIT_MS) throw new Error(`AI token: ${lock} is still held after 30 s`);
+		await new Promise((r) => setTimeout(r, 50 + Math.random() * 50));
+	}
+	try {
+		return await fn();
+	} finally {
+		rmSync(lock, { force: true });
+	}
+}
+
+/** The stored access token (null when missing or malformed) and its expiry (ms since the epoch; null when unknown). */
+export function readAccess(dir = AI_TOKEN_DIR) {
+	const expiresAt = Date.parse(read(dir, EXPIRES) ?? "");
+	const token = read(dir, ACCESS);
+	return { token: token && TOKEN.test(token) ? token : null, expiresAt: Number.isNaN(expiresAt) ? null : expiresAt };
+}
+
+const fresh = (dir, now) => {
+	const { token, expiresAt } = readAccess(dir);
+	return token && expiresAt !== null && expiresAt - now() > MARGIN_MS ? token : null;
+};
+
+// The caller holds the lock.
+async function refresh(origin, { dir = AI_TOKEN_DIR, fetch = globalThis.fetch, now = Date.now } = {}) {
 	const refreshToken = read(dir, REFRESH);
 	if (!refreshToken) throw new Error(`no AI refresh token in ${join(dir, REFRESH)}: ${NEW_DEVICE_CODE}`);
-	const res = await fetch(`${url}/_emdash/api/oauth/token/refresh`, {
+	if (!TOKEN.test(refreshToken)) throw new Error(`${join(dir, REFRESH)} is not a token: ${NEW_DEVICE_CODE}`);
+	const res = await fetch(new URL("/_emdash/api/oauth/token/refresh", origin), {
 		method: "POST",
-		headers: { "Content-Type": "application/json" },
+		// the header passes emdash's CSRF check on public routes whatever Origin the runtime sends
+		headers: { "Content-Type": "application/json", "X-EmDash-Request": "1" },
 		body: JSON.stringify({ grant_type: "refresh_token", refresh_token: refreshToken }),
+		// a redirect would re-post the refresh token to wherever Location points, past checkSite
+		redirect: "error",
+		signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS),
 	});
 	const body = await res.json().catch(() => null);
 	if (!res.ok) {
@@ -62,31 +119,48 @@ export async function refreshAccess(url, { dir = AI_TOKEN_DIR, fetch = globalThi
 		// INVALID_GRANT: the refresh token expired or was revoked, or the user was disabled or lost the scopes
 		throw new Error(`AI token refresh failed: ${detail}${code === "INVALID_GRANT" ? `; ${NEW_DEVICE_CODE}` : ""}`);
 	}
-	const { access_token: token, expires_in: expiresIn } = body?.data ?? {};
-	if (typeof token !== "string" || !/^\S+$/.test(token)) throw new Error("AI token refresh failed: the answer has no access token");
+	const { access_token: token, refresh_token: rotated, expires_in: expiresIn } = body?.data ?? {};
+	if (typeof token !== "string" || !TOKEN.test(token)) throw new Error("AI token refresh failed: the answer has no access token");
+	const seconds = Number.isFinite(expiresIn) && expiresIn > 0 && expiresIn <= 86_400 ? expiresIn : 3600;
+	const expires = new Date(now() + seconds * 1000).toISOString();
+	// emdash does not rotate refresh tokens today; if it starts to, the old one is already revoked
+	if (typeof rotated === "string" && TOKEN.test(rotated) && rotated !== refreshToken) writePrivate(dir, REFRESH, rotated);
 	// the token first: a crash between the two writes leaves an old expiry, which only makes the next run refresh again
 	writePrivate(dir, ACCESS, token);
-	const seconds = Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : 3600;
-	writePrivate(dir, EXPIRES, new Date(now() + seconds * 1000).toISOString());
+	writePrivate(dir, EXPIRES, expires);
+	if (!read(dir, SITE)) writePrivate(dir, SITE, origin);
 	return token;
+}
+
+/** Exchanges the refresh token for a new access token, stores it with its expiry, and returns it. */
+export async function refreshAccess(url, opts = {}) {
+	const dir = opts.dir ?? AI_TOKEN_DIR;
+	const origin = checkSite(dir, url);
+	return withLock(dir, () => refresh(origin, opts));
 }
 
 /** A usable access token: the stored one while it has more than 5 minutes left, otherwise a refreshed one. */
 export async function aiAccessToken(url, opts = {}) {
-	assertSafeSite(url);
-	const { token, expiresAt } = readAccess(opts.dir);
-	if (token && expiresAt !== null && expiresAt - (opts.now ?? Date.now)() > MARGIN_MS) return token;
-	return refreshAccess(url, opts);
+	const dir = opts.dir ?? AI_TOKEN_DIR;
+	const now = opts.now ?? Date.now;
+	const origin = checkSite(dir, url);
+	return fresh(dir, now) ?? withLock(dir, async () => fresh(dir, now) ?? refresh(origin, opts));
 }
 
 /**
- * Calls `send(token)` with a usable access token. On a 401 it retries once: with the token another process stored
- * meanwhile (its refresh revoked ours), or else with a freshly refreshed one. A second 401 is returned as is.
+ * Calls `send(token)` with a usable access token. On a 401 it retries once, with the token stored since (another
+ * process's refresh revoked ours) or else a freshly refreshed one; both under the lock. A second 401 is returned as is.
  */
 export async function withAiToken(url, send, opts = {}) {
+	const dir = opts.dir ?? AI_TOKEN_DIR;
 	const token = await aiAccessToken(url, opts);
 	const res = await send(token);
 	if (res.status !== 401) return res;
-	const stored = readAccess(opts.dir).token;
-	return send(stored && stored !== token ? stored : await refreshAccess(url, opts));
+	await res.body?.cancel();
+	const origin = checkSite(dir, url);
+	const retry = await withLock(dir, async () => {
+		const stored = readAccess(dir).token;
+		return stored && stored !== token ? stored : refresh(origin, opts);
+	});
+	return send(retry);
 }
