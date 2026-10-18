@@ -150,8 +150,9 @@ const notTranslated: Record<string, string> = {
 </Base>
 
 <script>
-	// "On this page" (spec 2026-10-17 docs UX §3.2): the current section is the last heading above a line 6rem below the
-	// top of the window (an anchor jump lands a heading 5rem down, so it counts at once); every TOC (right column and
+	// "On this page" (spec 2026-10-17 docs UX §3.2): the current section is the last heading above a line 1rem below
+	// where an anchor jump lands a heading (its scroll-margin-top: the header's height plus 1rem, so a heading reached
+	// through the TOC counts at once; 96 px with the 4rem header, the fallback); every TOC (right column and
 	// inline) marks its link with aria-current. That line moves with every scroll frame, so the rule is re-evaluated on
 	// scroll and resize, once per animation frame: an IntersectionObserver only fires when a heading crosses its root
 	// margin, which is too late for a rule about a line elsewhere (the previous section stayed lit after the next
@@ -166,12 +167,14 @@ const notTranslated: Record<string, string> = {
 		.map((id) => article?.querySelector<HTMLElement>(`:is(h2, h3)#${CSS.escape(id)}`) ?? null)
 		.filter((h): h is HTMLElement => h !== null);
 	if (tocHeadings.length) {
+		const margin = parseFloat(getComputedStyle(tocHeadings[0]).scrollMarginTop);
+		const line = Number.isFinite(margin) ? margin + 16 : 96;
 		let currentId = "";
 		const update = () => {
 			// scrollY > 0: a page that does not scroll at all keeps the top rule (its first section)
 			const atBottom = window.scrollY > 0 && window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 2;
 			let current = tocHeadings[0];
-			for (const h of tocHeadings) if (h.getBoundingClientRect().top < (atBottom ? window.innerHeight : 96)) current = h;
+			for (const h of tocHeadings) if (h.getBoundingClientRect().top < (atBottom ? window.innerHeight : line)) current = h;
 			if (current.id === currentId) return;
 			currentId = current.id;
 			for (const a of tocLinks) {
@@ -272,24 +275,25 @@ const notTranslated: Record<string, string> = {
 </script>
 
 <style>
-	/* The sticky columns sit below the 4rem sticky header (Base.astro .site-header). Their viewport heights stay here,
-	   out of utility classes (check-public-css). This also stops the sidebar showing through the translucent header. */
+	/* The sticky columns sit below the sticky header (Base.astro .site-header, --nav-height in tokens.css). Their
+	   viewport heights stay here, out of utility classes (check-public-css). This also stops the sidebar showing through
+	   the translucent header. */
 	.docs-sidebar,
 	.docs-toc {
 		position: sticky;
-		top: 4rem;
+		top: var(--nav-height);
 		align-self: start;
 		overflow-y: auto;
 		padding-block: 1.5rem;
 	}
 	.docs-sidebar {
-		max-height: calc(100dvh - 4rem);
+		max-height: calc(100dvh - var(--nav-height));
 	}
 	.docs-toc {
-		max-height: calc(100dvh - 5rem);
+		max-height: calc(100dvh - var(--nav-height) - 1rem);
 	}
-	/* A heading reached through its #anchor clears the sticky header */
+	/* A heading reached through its #anchor clears the sticky header; the TOC script reads this */
 	.docs-article :global(:is(h2, h3, h4, h5, h6)[id]) {
-		scroll-margin-top: 5rem;
+		scroll-margin-top: calc(var(--nav-height) + 1rem);
 	}
 </style>
