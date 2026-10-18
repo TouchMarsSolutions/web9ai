@@ -1,6 +1,7 @@
 # 文档站 UX 对齐旧站（设计）
 
 - 状态：owner 于 2026-10-17 批准（"行为对齐，视觉沿用新站"；"只做渲染层"；代码高亮用方案 A）。
+- 实现：2026-10-17 实现（分支 `docs-ux-parity`），浏览器验收通过（1440 / 1024 / 390 px，CDP）：header 高亮、section sidebar、面包屑、TOC 跟随滚动和末节、抽屉（焦点、Esc、遮罩、Tab、滚动锁、跨 lg 自动关）、⌘K、主题循环、代码配色、编辑模式不出 TOC/高亮；渲染后的标题 id 与旧站逐页一致（52 页、214 个）。验收中修了两处行为：TOC 高亮滞后（改为 scroll + rAF），以及图片无尺寸导致锚点跳转落点偏移（锚点保持脚本；给图片补尺寸是后续工作）。
 - 上级 spec：`docs/superpowers/specs/2026-10-15-emdash-migration-design.md`（§10 安全模型、§11 样式规则）。
 - 对照：旧站是 `gh-pages` 上的 Docusaurus 构建产物（`git archive origin/gh-pages` 解到本地，`python3 -m http.server` 打开 `.html`）；新站是 `https://www.web9.ai`。2026-10-17 用 CDP 在 1440 px 和 390 px 下逐页对照过 `/docs/learn_ai_coding`、`/docs/ai-tools-adhoc`。
 
@@ -31,7 +32,7 @@
 ### 3.1 Header（所有页面，`src/layouts/Base.astro`）
 
 - 左边：logo 图标加站名，再接菜单里的站内链接（AI、Dev、Blog）。
-  - 图标是从 `public/img/web9.png` 裁出来的 64 px PNG（新文件 `public/img/logo-64.png`，约 5 KB，显示 32 px）。旧站用的 `logo.svg` 有 277 KB，不用。
+  - 图标是从 `public/img/web9.png` 裁出来的 64 px PNG（新文件 `public/img/logo-64.png`，约 10 KB，显示 32 px）。旧站用的 `logo.svg` 有 277 KB，不用。
   - 当前 section 的链接高亮（主色加 `aria-current="page"`）。判定是纯函数 `activeMenuHref`（`packages/web9-site/lib/nav.mjs`）：
     - doc 页：菜单项的 URL 是 `/docs/<slug>`（可带 `/zh-CN` 前缀），并且这个 slug 的 doc 和当前 doc 在同一个 section。DocsPage 把 `section` 和 `slug → section` 的表传给 Base；
     - `/posts`、`/posts/*`、`/tag/*`、`/category/*`：URL 是 `/posts` 的菜单项；
