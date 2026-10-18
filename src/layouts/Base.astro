@@ -6,7 +6,9 @@ import { createPublicPageContext } from "emdash/page";
 import LiveSearch from "emdash/ui/search";
 import WebMcpSearch from "emdash/ui/webmcp-search";
 import { Font } from "astro:assets";
-import { linkRel, localizeHref } from "../../packages/web9-site/lib/nav.mjs";
+import LanguageMenu from "../components/LanguageMenu.astro";
+import ThemeToggle from "../components/ThemeToggle.astro";
+import { activeMenuHref, homeLanguages, linkRel, localizeHref, splitMenu } from "../../packages/web9-site/lib/nav.mjs";
 import { LIMITS, clampText } from "../../packages/web9-blocks/lib/limits.mjs";
 import { resolveBlogSiteIdentity } from "../utils/site-identity";
 import "../styles/global.css";
@@ -26,9 +28,13 @@ interface Props {
 	author?: string | null;
 	/** Pass content reference for plugin page contributions on content pages */
 	content?: { collection: string; id: string; slug?: string | null };
+	/** Doc pages: the doc's section and a slug -> section map of the docs the page loaded, for the active menu item */
+	docNav?: { section: string; sectionOf: Record<string, string> };
+	/** Language menu links (DocsPage passes the doc's translations); other pages link each locale's home page */
+	languages?: { code: string; label: string; href: string }[];
 }
 
-const { title, pageTitle, description, image, canonical, robots, type = "website", publishedTime, modifiedTime, author, content } =
+const { title, pageTitle, description, image, canonical, robots, type = "website", publishedTime, modifiedTime, author, content, docNav, languages } =
 	Astro.props;
 const [settingsResult, menuResult] = await Promise.all([getSiteSettingsWithCacheHint(), getMenuWithCacheHint("primary")]);
 if (Astro.cache?.enabled) {
@@ -48,6 +54,12 @@ const menuItems = (menuResult.data?.items ?? [])
 	.slice(0, LIMITS.menuItems)
 	.map((item) => ({ ...item, label: clampText(item.label, LIMITS.label), href: localizeHref(item.url, locale) }));
 const homeHref = localizeHref("/", locale);
+// Header (spec 2026-10-17 docs UX §3.1): site links on the left with the current section highlighted, external links on
+// the right; below 1024 px they all move into the drawer (§3.3).
+const activeHref = activeMenuHref(menuItems, Astro.url.pathname, docNav);
+// nav.mjs is untyped JS, so splitMenu's result is `any`: give it the menu item type
+const { internal: siteLinks, external: externalLinks }: { internal: typeof menuItems; external: typeof menuItems } = splitMenu(menuItems);
+const languageLinks = languages ?? homeLanguages();
 
 // Build public page context for plugin contributions; SEO data is rendered securely by EmDashHead
 const pageCtx = createPublicPageContext({
@@ -68,18 +80,6 @@ const pageCtx = createPublicPageContext({
 });
 
 const isLoggedIn = !!Astro.locals.user;
-
-const THEME_BUTTONS = [
-	{ theme: "light", label: "Light mode" },
-	{ theme: "dark", label: "Dark mode" },
-	{ theme: "system", label: "System theme" },
-];
-const ICONS: Record<string, string> = {
-	light:
-		'<circle cx="12" cy="12" r="5"></circle><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"></path>',
-	dark: '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>',
-	system: '<rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><path d="M8 21h8M12 17v4"></path>',
-};
 ---
 
 <!doctype html>
@@ -106,11 +106,46 @@ const ICONS: Record<string, string> = {
 	<body>
 		<EmDashBodyStart page={pageCtx} />
 		<header class="site-header border-b border-border-subtle">
-			<nav class="mx-auto flex max-w-[1200px] flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:h-16 sm:flex-nowrap sm:px-6 sm:py-0">
-				<a href={homeHref} class="text-lg font-semibold tracking-tight text-text hover:text-brand">
-					{siteLogo ? <img src={siteLogo.url} alt={siteLogo.alt || siteTitle} class="-my-2 block h-12 w-auto" /> : siteTitle}
+			<nav class="mx-auto flex h-16 max-w-[1400px] items-center gap-6 px-4 sm:px-6" aria-label="Main">
+				<button
+					type="button"
+					class="-ms-2 flex size-10 cursor-pointer items-center justify-center rounded text-text hover:bg-surface lg:hidden"
+					aria-label="Menu"
+					aria-haspopup="dialog"
+					aria-expanded="false"
+					aria-controls="site-drawer"
+					data-drawer-open
+				>
+					<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+						<path d="M3 6h18M3 12h18M3 18h18"></path>
+					</svg>
+				</button>
+				<a href={homeHref} class="flex shrink-0 items-center gap-2 text-lg font-semibold tracking-tight text-text hover:text-brand">
+					{
+						siteLogo ? (
+							<img src={siteLogo.url} alt={siteLogo.alt || siteTitle} class="block h-8 w-auto" />
+						) : (
+							<Fragment>
+								<img src="/img/logo-64.png" alt="" width="32" height="32" class="block size-8" />
+								{siteTitle}
+							</Fragment>
+						)
+					}
 				</a>
-				<div class="flex w-full flex-wrap items-center gap-x-5 gap-y-2 sm:ms-auto sm:w-auto sm:flex-nowrap sm:gap-x-6">
+				<div class="hidden items-center gap-5 lg:flex">
+					{
+						siteLinks.map((item) => (
+							<a
+								class="font-medium text-text hover:text-brand aria-[current=page]:text-brand"
+								href={item.href} target={item.target} rel={linkRel(item.target)}
+								aria-current={activeHref && item.href === activeHref ? "page" : undefined}
+							>
+								{item.label}
+							</a>
+						))
+					}
+				</div>
+				<div class="ms-auto hidden items-center gap-4 lg:flex">
 					<LiveSearch
 						placeholder="Search..."
 						class="site-search"
@@ -120,19 +155,81 @@ const ICONS: Record<string, string> = {
 						collections={["docs", "posts", "pages"]}
 						routeMap={{ docs: `${localePrefix}/docs/:slug` }}
 					/>
-					<div class="flex flex-wrap gap-x-5 gap-y-1 text-sm">
-						{
-							menuItems.map((item) => (
-								<a class="text-text hover:text-brand" href={item.href} target={item.target} rel={linkRel(item.target)}>
-									{item.label}
-								</a>
-							))
-						}
-					</div>
+					<LanguageMenu languages={languageLinks} locale={locale} />
+					{
+						externalLinks.map((item) => (
+							<a class="flex items-center gap-1 text-sm text-text hover:text-brand" href={item.href} target={item.target} rel={linkRel(item.target)}>
+								{item.label}
+								<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+									<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14 21 3"></path>
+								</svg>
+							</a>
+						))
+					}
+					<ThemeToggle />
 					{isLoggedIn && <a href="/_emdash/admin" class="text-sm text-text-secondary hover:text-text">Admin</a>}
 				</div>
 			</nav>
 		</header>
+		<dialog id="site-drawer" class="site-drawer" aria-label="Menu">
+			<div class="flex h-16 items-center justify-between border-b border-border-subtle px-4">
+				<a href={homeHref} class="flex items-center gap-2 font-semibold tracking-tight text-text">
+					{
+						siteLogo ? (
+							<img src={siteLogo.url} alt={siteLogo.alt || siteTitle} class="block h-7 w-auto" />
+						) : (
+							<Fragment>
+								<img src="/img/logo-64.png" alt="" width="28" height="28" class="block size-7" />
+								{siteTitle}
+							</Fragment>
+						)
+					}
+				</a>
+				<button
+					type="button"
+					class="flex size-9 cursor-pointer items-center justify-center rounded text-text-secondary hover:bg-surface hover:text-text"
+					aria-label="Close menu"
+					data-drawer-close
+					autofocus
+				>
+					<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+						<path d="M18 6 6 18M6 6l12 12"></path>
+					</svg>
+				</button>
+			</div>
+			<div class="space-y-5 px-4 py-4">
+				<LiveSearch
+					placeholder="Search..."
+					class="site-search drawer-search"
+					inputClass="site-search-input"
+					resultsClass="site-search-results"
+					resultClass="site-search-result"
+					collections={["docs", "posts", "pages"]}
+					routeMap={{ docs: `${localePrefix}/docs/:slug` }}
+				/>
+				<ul class="m-0 list-none space-y-0.5 p-0">
+					{
+						menuItems.map((item) => (
+							<li>
+								<a
+									class="block rounded px-2 py-1.5 font-medium text-text hover:bg-surface aria-[current=page]:bg-surface aria-[current=page]:text-brand"
+									href={item.href} target={item.target} rel={linkRel(item.target)}
+									aria-current={activeHref && item.href === activeHref ? "page" : undefined}
+								>
+									{item.label}
+								</a>
+							</li>
+						))
+					}
+				</ul>
+				<div class="flex items-center justify-between gap-4 border-y border-border-subtle py-2">
+					<LanguageMenu languages={languageLinks} locale={locale} variant="list" />
+					<ThemeToggle />
+				</div>
+				<slot name="drawer" />
+				{isLoggedIn && <a href="/_emdash/admin" class="block text-sm text-text-secondary hover:text-text">Admin</a>}
+			</div>
+		</dialog>
 		<WebMcpSearch collections={["docs", "posts", "pages"]} routeMap={{ docs: `${localePrefix}/docs/:slug` }} />
 
 		<main class="site-main">
@@ -140,7 +237,7 @@ const ICONS: Record<string, string> = {
 		</main>
 
 		<footer class="border-t border-border-subtle bg-bg-subtle">
-			<div class="mx-auto max-w-[1200px] px-6 pt-16 pb-8">
+			<div class="mx-auto max-w-[1400px] px-6 pt-16 pb-8">
 				<div class="mb-12 grid grid-cols-1 gap-8 sm:grid-cols-2 sm:gap-12 lg:grid-cols-[2fr_1fr_1fr_1fr]">
 					<div class="max-w-[280px] sm:col-span-2 lg:col-span-1">
 						<a href={homeHref} class="text-lg font-semibold tracking-tight text-text">
@@ -172,42 +269,20 @@ const ICONS: Record<string, string> = {
 						<SafeWidgetArea name="footer" />
 					</div>
 				</div>
-				<div class="flex flex-col items-center gap-4 border-t border-border pt-6 text-center sm:flex-row sm:justify-between sm:text-left">
+				<div class="border-t border-border pt-6 text-center sm:text-left">
 					<p class="text-sm text-muted">Powered by <a class="text-text-secondary" href="https://emdashcms.com">EmDash</a></p>
-					<div class="flex gap-1 rounded bg-surface p-1" role="group" aria-label="Theme">
-						{
-							THEME_BUTTONS.map((b) => (
-								<button
-									type="button"
-									data-theme-btn={b.theme}
-									aria-label={b.label}
-									aria-pressed="false"
-									class="flex h-7 w-8 cursor-pointer items-center justify-center rounded text-muted hover:text-text-secondary aria-pressed:bg-bg aria-pressed:text-text aria-pressed:shadow-sm"
-								>
-									<svg
-										width="16"
-										height="16"
-										viewBox="0 0 24 24"
-										fill="none"
-										stroke="currentColor"
-										stroke-width="2"
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										aria-hidden="true"
-										set:html={ICONS[b.theme]}
-									/>
-								</button>
-							))
-						}
-					</div>
 				</div>
 			</div>
 		</footer>
 
 		<script>
-			// Theme switcher: html.light / html.dark plus a `theme` cookie; "system" removes both.
-			const themeBtns = document.querySelectorAll<HTMLButtonElement>("[data-theme-btn]");
+			// Theme: html.light / html.dark plus a `theme` cookie; "system" removes both. Every [data-theme-toggle]
+			// (header and drawer) cycles light -> dark -> system; ThemeToggle.astro shows the icon from the html class.
+			const THEMES = ["light", "dark", "system"] as const;
+			type Theme = (typeof THEMES)[number];
 			const root = document.documentElement;
+			const toggles = document.querySelectorAll<HTMLButtonElement>("[data-theme-toggle]");
+			const nextTheme = (theme: Theme) => THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
 
 			function setCookie(name: string, value: string, maxAge: number = 31536000) {
 				const secure = location.protocol === "https:" ? "; Secure" : "";
@@ -217,26 +292,67 @@ const ICONS: Record<string, string> = {
 						: `${name}=${value}; path=/; max-age=${maxAge}; SameSite=Lax${secure}`;
 			}
 
-			function setTheme(theme: string) {
+			function setTheme(theme: Theme) {
 				root.classList.remove("light", "dark");
 				if (theme === "system") setCookie("theme", "");
 				else {
 					setCookie("theme", theme);
 					root.classList.add(theme);
 				}
-				themeBtns.forEach((btn) => btn.setAttribute("aria-pressed", String(btn.dataset.themeBtn === theme)));
+				toggles.forEach((btn) => {
+					btn.dataset.current = theme;
+					btn.setAttribute("aria-label", `Theme: ${theme}. Switch to ${nextTheme(theme)}`);
+				});
 			}
 
 			// Same whitelist as the head script: any other cookie value counts as "system" (and is cleared).
 			const stored = document.cookie.split("; ").find((item) => item.startsWith("theme="))?.slice(6);
 			setTheme(stored === "light" || stored === "dark" ? stored : "system");
-			themeBtns.forEach((btn) => btn.addEventListener("click", () => setTheme(btn.dataset.themeBtn || "system")));
+			toggles.forEach((btn) =>
+				btn.addEventListener("click", () => setTheme(nextTheme(THEMES.find((t) => t === btn.dataset.current) ?? "system"))),
+			);
 
-			// ⌘K / Ctrl+K focuses search
+			// Drawer below 1024 px (spec 2026-10-17 docs UX §3.3): a modal <dialog>, so the browser traps focus, makes the
+			// page inert and closes it on Esc.
+			const drawer = document.getElementById("site-drawer") as HTMLDialogElement | null;
+			const drawerOpen = document.querySelector<HTMLButtonElement>("[data-drawer-open]");
+			function openDrawer() {
+				if (!drawer || drawer.open) return;
+				drawer.showModal();
+				drawerOpen?.setAttribute("aria-expanded", "true");
+			}
+			drawerOpen?.addEventListener("click", openDrawer);
+			drawer?.addEventListener("close", () => {
+				drawerOpen?.setAttribute("aria-expanded", "false");
+				drawerOpen?.focus();
+			});
+			drawer?.querySelector("[data-drawer-close]")?.addEventListener("click", () => drawer?.close());
+			// A click on the backdrop reaches the dialog element itself, outside its box
+			drawer?.addEventListener("click", (e) => {
+				const box = drawer.getBoundingClientRect();
+				const outside = e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom;
+				if (e.target === drawer && outside) drawer.close();
+			});
+			// Widening the window past the breakpoint hides the menu button; the drawer closes with it
+			matchMedia("(min-width: 1024px)").addEventListener("change", (e) => {
+				if (e.matches && drawer?.open) drawer.close();
+			});
+
+			// An open dropdown (LanguageMenu's <details data-dropdown>) closes on a click outside it
+			document.addEventListener("click", (e) => {
+				document.querySelectorAll<HTMLDetailsElement>("details[data-dropdown][open]").forEach((d) => {
+					if (!d.contains(e.target as Node)) d.open = false;
+				});
+			});
+
+			// ⌘K / Ctrl+K focuses the visible search box; below 1024 px it opens the drawer first
 			document.addEventListener("keydown", (e) => {
 				if ((e.metaKey || e.ctrlKey) && e.key === "k") {
 					e.preventDefault();
-					document.querySelector<HTMLInputElement>(".site-search-input")?.focus();
+					const visible = [...document.querySelectorAll<HTMLInputElement>(".site-search-input")].find((el) => el.offsetParent !== null);
+					if (visible) return visible.focus();
+					openDrawer();
+					drawer?.querySelector<HTMLInputElement>(".site-search-input")?.focus();
 				}
 			});
 		</script>
@@ -352,11 +468,49 @@ const ICONS: Record<string, string> = {
 				font-weight: 600;
 				color: var(--color-text);
 			}
-			@media (max-width: 640px) {
-				.site-search,
-				:global(.site-search-input) {
-					width: 100%;
+			/* The drawer's search box spans the drawer. LiveSearch's root carries LiveSearch's scope attribute, not this
+			   file's, so a scoped selector would not reach it: :global. */
+			:global(.drawer-search),
+			:global(.drawer-search .site-search-input) {
+				width: 100%;
+			}
+
+			/*
+			 * The drawer is a modal <dialog>: the browser puts it in the top layer, so it needs no position or z-index
+			 * of its own (check-public-css rejects position:fixed), and its viewport sizes stay here, out of utility classes.
+			 */
+			.site-drawer {
+				width: min(20rem, 85vw);
+				max-width: none;
+				height: 100dvh;
+				max-height: none;
+				margin: 0;
+				padding: 0;
+				border: 0;
+				border-inline-end: 1px solid var(--color-border);
+				background: var(--color-bg);
+				color: var(--color-text);
+				overflow-y: auto;
+			}
+			.site-drawer::backdrop {
+				background: rgb(0 0 0 / 0.45);
+			}
+			.site-drawer[open] {
+				animation: drawer-in 180ms ease-out;
+			}
+			@keyframes drawer-in {
+				from {
+					transform: translateX(-100%);
 				}
+			}
+			@media (prefers-reduced-motion: reduce) {
+				.site-drawer[open] {
+					animation: none;
+				}
+			}
+			/* The page behind an open drawer does not scroll */
+			:global(html:has(.site-drawer[open])) {
+				overflow: hidden;
 			}
 		</style>
 		<EmDashBodyEnd page={pageCtx} />

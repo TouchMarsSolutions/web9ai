@@ -87,7 +87,8 @@ describe("menu links in Base.astro", () => {
 		expect(base).toMatch(/^import \{[^}]*\blinkRel\b[^}]*\} from "\.\.\/\.\.\/packages\/web9-site\/lib\/nav\.mjs";$/m);
 		expect(base).not.toMatch(/\bconst linkRel\b/);
 		const targets = base.match(/target=\{item\.target\}/g) ?? [];
-		expect(targets.length).toBe(2);
+		// header site links, header external links, drawer, footer
+		expect(targets.length).toBe(4);
 		expect(base.match(/target=\{item\.target\} rel=\{linkRel\(item\.target\)\}/g) ?? []).toHaveLength(targets.length);
 	});
 });
@@ -109,7 +110,7 @@ describe("nested headings in prose", () => {
 });
 
 describe("set:html in src/ and the block renderers", () => {
-	it("appears only at these sites: static theme icons, the search snippet core has escaped, and sanitized Markdown or HTML", () => {
+	it("appears only at these sites: the search snippet core has escaped, and sanitized Markdown or HTML", () => {
 		expect(sinks).toEqual([
 			["packages/web9-blocks/astro/Callout.astro", "renderInlineMarkdown(title)"],
 			["packages/web9-blocks/astro/Callout.astro", "renderMarkdown(node?.body)"],
@@ -118,7 +119,6 @@ describe("set:html in src/ and the block renderers", () => {
 			["packages/web9-blocks/astro/HtmlBlock.astro", "html"],
 			["packages/web9-blocks/astro/Tabs.astro", "renderMarkdown(tab.body)"],
 			["packages/web9-blocks/astro/ToolGrid.astro", 'renderInlineMarkdown(tool.tagline.replace(/\\n/g, "<br>"))'],
-			["src/layouts/Base.astro", "ICONS[b.theme]"],
 			["src/pages/search.astro", "result.snippet"],
 		]);
 	});

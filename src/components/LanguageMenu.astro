@@ -1,0 +1,71 @@
+---
+// Language switcher (spec 2026-10-17 docs UX §3.1): a <details> dropdown in the header, a plain list in the drawer.
+// Works without JS; Base.astro's script closes an open dropdown on a click outside it. The dropdown sits inside the
+// sticky header's stacking context, so it needs no z-index.
+interface Props {
+	languages: { code: string; label: string; href: string }[];
+	locale: string;
+	variant?: "dropdown" | "list";
+}
+const { languages, locale, variant = "dropdown" } = Astro.props;
+const current = languages.find((l) => l.code === locale) ?? languages[0];
+---
+
+{
+	variant === "list" ? (
+		<ul class="m-0 flex list-none gap-4 p-0 text-sm" aria-label="Language">
+			{languages.map((l) => (
+				<li>
+					<a
+						class="text-text-secondary hover:text-text aria-[current=true]:font-semibold aria-[current=true]:text-text"
+						href={l.href}
+						hreflang={l.code}
+						lang={l.code}
+						aria-current={l.code === locale ? "true" : undefined}
+					>
+						{l.label}
+					</a>
+				</li>
+			))}
+		</ul>
+	) : (
+		<details class="lang-menu relative text-sm" data-dropdown>
+			<summary class="flex cursor-pointer list-none items-center gap-1.5 text-text hover:text-brand" aria-label={`Language: ${current?.label ?? ""}`}>
+				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+					<circle cx="12" cy="12" r="10"></circle>
+					<path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+				</svg>
+				{current?.label}
+				<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+					<path d="m6 9 6 6 6-6"></path>
+				</svg>
+			</summary>
+			<ul class="lang-menu-list m-0 min-w-32 list-none rounded-md border border-border bg-bg p-1 shadow-lg">
+				{languages.map((l) => (
+					<li>
+						<a
+							class="block rounded px-3 py-1.5 text-text hover:bg-surface aria-[current=true]:text-brand"
+							href={l.href}
+							hreflang={l.code}
+							lang={l.code}
+							aria-current={l.code === locale ? "true" : undefined}
+						>
+							{l.label}
+						</a>
+					</li>
+				))}
+			</ul>
+		</details>
+	)
+}
+
+<style>
+	.lang-menu summary::-webkit-details-marker {
+		display: none;
+	}
+	.lang-menu-list {
+		position: absolute;
+		right: 0;
+		top: calc(100% + 0.5rem);
+	}
+</style>
