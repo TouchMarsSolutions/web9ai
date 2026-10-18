@@ -215,6 +215,8 @@ const notTranslated: Record<string, string> = {
 			else target.scrollIntoView({ behavior: "instant", block: "start" });
 		};
 		const follow = (hash: string) => {
+			// a new hash replaces the pending target, so one without a heading (Back to an entry with none) clears it
+			target = null;
 			let id = "";
 			try {
 				id = decodeURIComponent(hash.slice(1));
@@ -246,9 +248,9 @@ const notTranslated: Record<string, string> = {
 			follow(link.hash);
 		});
 		window.addEventListener("hashchange", () => follow(location.hash));
-		// a reload or Back/Forward restores the reading position, so only a fresh navigation (or no entry) follows its hash
+		// a reload or Back/Forward restores the reading position, so only those two skip the hash (prerender follows it)
 		const nav = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
-		if (location.hash && (!nav || nav.type === "navigate")) follow(location.hash);
+		if (location.hash && nav?.type !== "reload" && nav?.type !== "back_forward") follow(location.hash);
 	}
 </script>
 
