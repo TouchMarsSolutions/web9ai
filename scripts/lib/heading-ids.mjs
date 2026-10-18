@@ -204,8 +204,12 @@ export function checkHeadings(html) {
 /** The problems of one page's heading ids; empty when the page is fine. */
 export const headingProblems = (html) => checkHeadings(html).problems;
 
-/** The en `/docs/<slug>` paths a sitemap lists (`<loc>` URLs; the /zh-CN ones and other pages left out), once each, sorted. */
-export function sitemapEnDocs(xml) {
+/**
+ * The `/docs/<slug>` and `/zh-CN/docs/<slug>` paths a sitemap lists (`<loc>` URLs; other pages left out), once each,
+ * sorted. The sitemap lists a zh-CN doc only where it has its own entry (a translation, or a doc only in zh-CN), not
+ * the fallback pages that show the en text.
+ */
+export function sitemapDocs(xml) {
 	const paths = new Set();
 	for (let at = xml.indexOf("<loc>"); at >= 0; at = xml.indexOf("<loc>", at + 5)) {
 		const end = xml.indexOf("</loc>", at + 5);
@@ -216,25 +220,26 @@ export function sitemapEnDocs(xml) {
 		} catch {
 			continue;
 		}
-		if (/^\/docs\/[^/]+$/.test(path)) paths.add(path);
+		if (/^(\/zh-CN)?\/docs\/[^/]+$/.test(path)) paths.add(path);
 	}
 	return [...paths].sort();
 }
 
 /**
  * What a crawl that "found no problems" must still show, so a guard that went vacuous cannot pass: the sitemap was read and
- * lists en docs, the crawl found every one of them (`crawledEn` and `sitemapEn` are `/docs/<slug>` paths; `sitemapEn` is
- * null when the sitemap could not be read), and some headings and some TOC links were checked.
+ * lists en docs, the crawl checked every doc it lists, en and zh-CN (`crawled` and `sitemap` are `/docs/<slug>` and
+ * `/zh-CN/docs/<slug>` paths; `sitemap` is null when the sitemap could not be read), and some headings and some TOC
+ * links were checked.
  */
-export function coverageProblems({ crawledEn, sitemapEn, headings, tocLinks }) {
+export function coverageProblems({ crawled, sitemap, headings, tocLinks }) {
 	const problems = [];
 	const plain = (path) => normalize(path) ?? path;
-	if (sitemapEn === null) problems.push("/sitemap-docs.xml could not be read");
-	else if (sitemapEn.length === 0) problems.push("/sitemap-docs.xml lists 0 en docs");
+	if (sitemap === null) problems.push("/sitemap-docs.xml could not be read");
+	else if (!sitemap.some((path) => path.startsWith("/docs/"))) problems.push("/sitemap-docs.xml lists 0 en docs");
 	else {
-		const crawled = new Set(crawledEn.map(plain));
-		const missing = sitemapEn.filter((path) => !crawled.has(plain(path)));
-		if (missing.length) problems.push(`the crawl found ${sitemapEn.length - missing.length} of the ${sitemapEn.length} en docs the sitemap lists; missing: ${missing.join(", ")}`);
+		const checked = new Set(crawled.map(plain));
+		const missing = sitemap.filter((path) => !checked.has(plain(path)));
+		if (missing.length) problems.push(`the crawl checked ${sitemap.length - missing.length} of the ${sitemap.length} docs the sitemap lists; missing: ${missing.join(", ")}`);
 	}
 	if (headings === 0) problems.push("no headings were checked");
 	if (tocLinks === 0) problems.push("no TOC links were checked");

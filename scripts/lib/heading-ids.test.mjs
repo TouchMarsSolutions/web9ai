@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkHeadings, coverageProblems, docsArticle, headerDocHrefs, headingProblems, navDocHrefs, sitemapEnDocs } from "./heading-ids.mjs";
+import { checkHeadings, coverageProblems, docsArticle, headerDocHrefs, headingProblems, navDocHrefs, sitemapDocs } from "./heading-ids.mjs";
 
 // A docs page cut down to what the check reads: a TOC, the article, and one chrome id outside it.
 const hash = (id, text = "x") => `<a class="hash-link" href="#${id}" aria-label="Direct link to ${text}">#</a>`;
@@ -160,58 +160,66 @@ describe("headerDocHrefs", () => {
 	});
 });
 
-describe("sitemapEnDocs", () => {
-	const loc = (u) => `<url><loc>${u}</loc><xhtml:link rel="alternate" hreflang="zh-CN" href="https://x.dev/zh-CN/docs/a" /></url>`;
-	it("lists the en /docs/<slug> paths of the sitemap, once each, sorted", () => {
+describe("sitemapDocs", () => {
+	const loc = (u) => `<url><loc>${u}</loc><xhtml:link rel="alternate" hreflang="zh-CN" href="https://x.dev/zh-CN/docs/z" /></url>`;
+	it("lists the en and zh-CN doc paths of the sitemap, once each, sorted", () => {
 		const xml = `<?xml version="1.0"?><urlset>${[
 			loc("https://www.web9.ai/docs/b"),
 			loc("https://www.web9.ai/zh-CN/docs/b"),
+			loc("https://www.web9.ai/zh-CN/docs/only-zh"),
 			loc("https://www.web9.ai/docs/a"),
 			loc("https://www.web9.ai/docs/a"),
 			loc("https://www.web9.ai/posts/p"),
 			loc("https://www.web9.ai/docs/a/deeper"),
+			loc("https://www.web9.ai/zh-CN/docs/"),
+			loc("https://www.web9.ai/fr/docs/a"),
 			loc("https://www.web9.ai/docs/"),
 			loc("not a url"),
 			`<url><loc>\n  https://www.web9.ai/docs/c_d  \n</loc></url>`,
 		].join("")}</urlset>`;
-		expect(sitemapEnDocs(xml)).toEqual(["/docs/a", "/docs/b", "/docs/c_d"]);
+		expect(sitemapDocs(xml)).toEqual(["/docs/a", "/docs/b", "/docs/c_d", "/zh-CN/docs/b", "/zh-CN/docs/only-zh"]);
 	});
 	it("is empty for a sitemap without locs, or one that is not XML", () => {
-		expect(sitemapEnDocs("<urlset></urlset>")).toEqual([]);
-		expect(sitemapEnDocs("<html>502</html>")).toEqual([]);
-		expect(sitemapEnDocs("<loc>")).toEqual([]);
+		expect(sitemapDocs("<urlset></urlset>")).toEqual([]);
+		expect(sitemapDocs("<html>502</html>")).toEqual([]);
+		expect(sitemapDocs("<loc>")).toEqual([]);
 	});
 });
 
 describe("coverageProblems", () => {
-	const healthy = { crawledEn: ["/docs/a", "/docs/b"], sitemapEn: ["/docs/a", "/docs/b"], headings: 5, tocLinks: 8 };
+	const healthy = { crawled: ["/docs/a", "/docs/b", "/zh-CN/docs/a", "/zh-CN/docs/b"], sitemap: ["/docs/a", "/docs/b", "/zh-CN/docs/a"], headings: 5, tocLinks: 8 };
 	it("is empty when the crawl covers the sitemap and checked headings and TOC links", () => {
 		expect(coverageProblems(healthy)).toEqual([]);
-		// a crawl may find more than the sitemap lists (a draft the sidebar links to)
-		expect(coverageProblems({ ...healthy, crawledEn: ["/docs/a", "/docs/b", "/docs/extra"] })).toEqual([]);
+		// a crawl may find more than the sitemap lists (a fallback page, a draft the sidebar links to)
+		expect(coverageProblems({ ...healthy, crawled: [...healthy.crawled, "/docs/extra"] })).toEqual([]);
 	});
 	it("reports a sitemap that could not be read", () => {
-		expect(coverageProblems({ ...healthy, sitemapEn: null })).toEqual(["/sitemap-docs.xml could not be read"]);
+		expect(coverageProblems({ ...healthy, sitemap: null })).toEqual(["/sitemap-docs.xml could not be read"]);
 	});
-	it("reports a sitemap that lists no en docs", () => {
-		expect(coverageProblems({ ...healthy, sitemapEn: [] })).toEqual(["/sitemap-docs.xml lists 0 en docs"]);
+	it("reports a sitemap that lists no en docs, even with zh-CN ones", () => {
+		expect(coverageProblems({ ...healthy, sitemap: [] })).toEqual(["/sitemap-docs.xml lists 0 en docs"]);
+		expect(coverageProblems({ ...healthy, sitemap: ["/zh-CN/docs/a"] })).toEqual(["/sitemap-docs.xml lists 0 en docs"]);
 	});
-	it("names the en docs the crawl missed", () => {
-		expect(coverageProblems({ ...healthy, crawledEn: ["/docs/a"], sitemapEn: ["/docs/a", "/docs/b", "/docs/c"] })).toEqual([
-			"the crawl found 1 of the 3 en docs the sitemap lists; missing: /docs/b, /docs/c",
+	it("names the docs the crawl missed, en and zh-CN", () => {
+		expect(coverageProblems({ ...healthy, crawled: ["/docs/a"], sitemap: ["/docs/a", "/docs/b", "/docs/c"] })).toEqual([
+			"the crawl checked 1 of the 3 docs the sitemap lists; missing: /docs/b, /docs/c",
+		]);
+		// a doc only in zh-CN, which no en sidebar lists
+		expect(coverageProblems({ ...healthy, sitemap: [...healthy.sitemap, "/zh-CN/docs/only-zh"] })).toEqual([
+			"the crawl checked 3 of the 4 docs the sitemap lists; missing: /zh-CN/docs/only-zh",
 		]);
 	});
 	it("compares percent-encoded and raw slugs as the same page", () => {
-		const raw = "/docs/文生文";
-		expect(coverageProblems({ ...healthy, crawledEn: [raw], sitemapEn: [encodeURI(raw)] })).toEqual([]);
+		const raw = "/zh-CN/docs/文生文";
+		expect(coverageProblems({ ...healthy, crawled: ["/docs/a", raw], sitemap: ["/docs/a", encodeURI(raw)] })).toEqual([]);
 	});
 	it("reports zero headings and zero TOC links checked", () => {
 		expect(coverageProblems({ ...healthy, headings: 0 })).toEqual(["no headings were checked"]);
 		expect(coverageProblems({ ...healthy, tocLinks: 0 })).toEqual(["no TOC links were checked"]);
 	});
 	it("reports every problem once, in a stable order", () => {
-		expect(coverageProblems({ crawledEn: [], sitemapEn: ["/docs/a"], headings: 0, tocLinks: 0 })).toEqual([
-			"the crawl found 0 of the 1 en docs the sitemap lists; missing: /docs/a",
+		expect(coverageProblems({ crawled: [], sitemap: ["/docs/a"], headings: 0, tocLinks: 0 })).toEqual([
+			"the crawl checked 0 of the 1 docs the sitemap lists; missing: /docs/a",
 			"no headings were checked",
 			"no TOC links were checked",
 		]);
