@@ -117,4 +117,13 @@ describe("an empty section or category is the default one", () => {
 		expect(docCategory({ category: "" })).toBe("general");
 		expect(docCategory({ category: "cloud" })).toBe("cloud");
 	});
+	it("treats blank and non-string values as unset, and trims the rest", () => {
+		for (const value of [" ", "\t\n", 1, 0, true, {}, ["cloud"], null]) {
+			expect(docSection({ section: value }), JSON.stringify(value)).toBe("ai");
+			expect(docCategory({ category: value }), JSON.stringify(value)).toBe("general");
+		}
+		expect(docCategory({ category: " cloud " })).toBe("cloud");
+		const groups = groupDocs([doc("a", "ai", " ", 1), doc("b", " dev ", "cloud", 2), doc("c", "dev", "cloud", 3)], "en");
+		expect(groups.map((g) => [g.key, g.items.length])).toEqual([["ai/general", 1], ["dev/cloud", 2]]);
+	});
 });

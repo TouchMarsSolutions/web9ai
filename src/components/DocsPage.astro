@@ -49,8 +49,8 @@ const toc = tocEntries(anchors);
 // still goes to PortableText as it is, since a copy would lose the edit metadata (not enumerable).
 const editing = Boolean(getEditMeta(doc.data.body));
 const showToc = toc.length >= 2 && !editing;
-const tocLabel = locale === "zh-CN" ? "本页目录" : "On this page";
 const labels = uiLabels(locale);
+const tocLabel = labels.onThisPage;
 
 // A fallback page shows the en text, so search engines are pointed at the en URL.
 const canonicalLocale = fallbackLocale ?? locale;

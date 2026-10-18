@@ -27,12 +27,13 @@ function storedLabel(section, category, locale) {
 }
 
 /**
- * A doc's section and category as the sidebar, the breadcrumbs and the header read them. Unset and empty are the
- * defaults: the editor can store an empty string, which would otherwise be a group of its own, labelled with the
- * section's name, and a second crumb repeating it.
+ * A doc's section and category as the sidebar, the breadcrumbs and the header read them, trimmed. Unset, blank and
+ * non-string values are the defaults: the editor can store an empty string, which would otherwise be a group of its
+ * own, labelled with the section's name, and a second crumb repeating it.
  */
-export const docSection = (data) => data?.section || "ai";
-export const docCategory = (data) => data?.category || "general";
+const stored = (value, fallback) => (typeof value === "string" && value.trim() ? value.trim() : fallback);
+export const docSection = (data) => stored(data?.section, "ai");
+export const docCategory = (data) => stored(data?.category, "general");
 
 /** [{ key, label, items }]: entries sorted by sort_order, grouped in order of first appearance. */
 export function groupDocs(entries, locale) {

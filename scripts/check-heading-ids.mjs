@@ -18,7 +18,8 @@
 // data-w9-chrome (ToolGrid's title) is exempt; a heading in a Markdown field has no id and is reported.
 // Prints one line per page with problems, the sitemap cross-check, then
 //   pages=<n> headings=<n> toc-links=<n> problems=<n>
-// and exits 1 on any problem, any failed or timed-out fetch, or fewer than 2 pages found (the crawl itself broke).
+// and exits 1 on any problem, any failed or timed-out fetch, a home page whose header links no doc, or fewer than 2
+// pages found (the crawl itself broke).
 import { checkHeadings, coverageProblems, headerDocHrefs, navDocHrefs, sitemapDocs } from "./lib/heading-ids.mjs";
 
 const base = (process.argv[2] ?? "http://localhost:4321").replace(/\/+$/, "");
@@ -40,7 +41,13 @@ async function get(path) {
 const docs = new Set();
 for (const homePath of ["/", "/zh-CN/"]) {
 	const home = await get(homePath);
-	for (const start of home ? headerDocHrefs(home) : []) {
+	const starts = home ? headerDocHrefs(home) : [];
+	// a home page whose header links no doc (a broken menu in that locale) would leave its sidebars uncrawled
+	if (home && !starts.length) {
+		console.log(`${homePath}: the header links no /docs page`);
+		failures++;
+	}
+	for (const start of starts) {
 		docs.add(start);
 		const html = await get(start);
 		if (html) for (const href of navDocHrefs(html)) docs.add(href);
