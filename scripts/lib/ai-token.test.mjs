@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -24,6 +24,7 @@ const valid = (minutes) => {
 beforeEach(() => {
 	dir = mkdtempSync(join(tmpdir(), "ai-token-"));
 	put("ai-refresh-token", REFRESH);
+	put("ai-token-site", URL_);
 });
 
 describe("aiAccessToken", () => {
@@ -64,13 +65,23 @@ describe("aiAccessToken", () => {
 		}
 		expect(fetch).not.toHaveBeenCalled();
 		for (const url of ["http://localhost:4321", "http://127.0.0.1:4321", "http://[::1]:4321"]) {
+			put("ai-token-site", new URL(url).origin);
 			expect(await aiAccessToken(url, { dir, fetch, now }), url).toBe("ec_oat_a");
 		}
 	});
 
-	it("records the issuing site on the first refresh and sends no token to any other", async () => {
-		const fetch = vi.fn(async () => granted("ec_oat_new"));
-		await aiAccessToken(`${URL_}/`, { dir, fetch, now });
+	it("sends nothing until refreshAccess has recorded the issuing site, then nothing to any other site", async () => {
+		rmSync(join(dir, "ai-token-site"));
+		const fetch = vi.fn(async () => json(400, { error: { code: "INVALID_GRANT", message: "Invalid refresh token" } }));
+		for (const url of [URL_, "https://site.tset"]) {
+			await expect(aiAccessToken(url, { dir, fetch, now })).rejects.toThrow(/ai-token-site: after a device flow, run .*ai-token\.mjs refresh/);
+			await expect(withAiToken(url, vi.fn(), { dir, fetch, now })).rejects.toThrow(/ai-token-site/);
+		}
+		expect(fetch).not.toHaveBeenCalled();
+		await expect(refreshAccess(URL_, { dir, fetch, now })).rejects.toThrow(/INVALID_GRANT/);
+		expect(existsSync(join(dir, "ai-token-site"))).toBe(false); // a failed refresh records nothing
+		fetch.mockImplementation(async () => granted("ec_oat_new"));
+		await refreshAccess(`${URL_}/`, { dir, fetch, now });
 		expect(file("ai-token-site")).toBe(URL_);
 		expect(mode("ai-token-site")).toBe(0o600);
 		fetch.mockClear();
@@ -110,11 +121,22 @@ describe("refreshAccess", () => {
 		}
 	});
 
-	it("stores a rotated refresh token", async () => {
-		const fetch = vi.fn(async () => granted("ec_oat_new", 3600, "ec_ort_rotated"));
-		await refreshAccess(URL_, { dir, fetch, now });
+	it("stores a rotated refresh token, and leaves the file (and the date status shows) alone otherwise", async () => {
+		const past = Date.now() / 1000 - 86_400;
+		utimesSync(join(dir, "ai-refresh-token"), past, past);
+		const before = statSync(join(dir, "ai-refresh-token")).mtimeMs;
+		await refreshAccess(URL_, { dir, fetch: vi.fn(async () => granted("ec_oat_new")), now });
+		expect(statSync(join(dir, "ai-refresh-token")).mtimeMs).toBe(before);
+		await refreshAccess(URL_, { dir, fetch: vi.fn(async () => granted("ec_oat_new", 3600, "ec_ort_rotated")), now });
 		expect(file("ai-refresh-token")).toBe("ec_ort_rotated");
 		expect(mode("ai-refresh-token")).toBe(0o600);
+	});
+
+	it("reports a timeout while the body is read as such, not as an answer without a token", async () => {
+		const res = new Response("{}");
+		res.json = () => Promise.reject(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+		const err = await refreshAccess(URL_, { dir, fetch: vi.fn(async () => res), now }).catch((e) => e);
+		expect(err.name).toBe("TimeoutError");
 	});
 
 	it("explains an expired or revoked refresh token and leaves the files alone", async () => {
@@ -124,7 +146,6 @@ describe("refreshAccess", () => {
 		expect(err.message).toMatch(/INVALID_GRANT \(Refresh token expired\).*device code/);
 		expect(err.message).not.toContain(REFRESH);
 		expect(file("ai-access-token")).toBe("ec_oat_old");
-		expect(existsSync(join(dir, "ai-token-site"))).toBe(false);
 		expect(existsSync(join(dir, "ai-access-token.lock"))).toBe(false);
 	});
 
@@ -152,6 +173,10 @@ describe("refreshAccess", () => {
 		const fetch = vi.fn();
 		const missing = mkdtempSync(join(tmpdir(), "ai-token-"));
 		await expect(refreshAccess(URL_, { dir: missing, fetch, now })).rejects.toThrow(/no AI refresh token.*device code/);
+		// no .local at all: the same messages, not an ENOENT on the lock file
+		const absent = join(missing, "absent");
+		await expect(refreshAccess(URL_, { dir: absent, fetch, now })).rejects.toThrow(/no AI refresh token.*device code/);
+		await expect(aiAccessToken(URL_, { dir: absent, fetch, now })).rejects.toThrow(/ai-token-site: after a device flow/);
 		put("ai-refresh-token", "");
 		await expect(refreshAccess(URL_, { dir, fetch, now })).rejects.toThrow(/no AI refresh token/);
 		put("ai-refresh-token", "ec_ort_a\nec_ort_b");
@@ -211,17 +236,34 @@ describe("withAiToken", () => {
 		expect(send).toHaveBeenCalledTimes(2);
 	});
 
+	it("refreshes once when many concurrent callers all get a 401 for a token revoked elsewhere", async () => {
+		let valid_ = "ec_oat_revoked_elsewhere";
+		let issued = 0;
+		const fetch = vi.fn(async () => {
+			await new Promise((r) => setTimeout(r, 10)); // fixed: every caller is in flight before any refresh lands
+			valid_ = `ec_oat_${++issued}`;
+			return granted(valid_);
+		});
+		const send = async (token) => {
+			await new Promise((r) => setTimeout(r, 10)); // fixed: every caller is in flight before any refresh lands
+			return new Response("", { status: token === valid_ ? 200 : 401 });
+		};
+		const results = await Promise.all(Array.from({ length: 6 }, () => withAiToken(URL_, send, { dir, fetch, now })));
+		expect(results.map((r) => r.status)).toEqual(Array(6).fill(200));
+		expect(fetch).toHaveBeenCalledOnce();
+	});
+
 	it("refreshes once for many concurrent callers, against a server that revokes on refresh", async () => {
 		valid(4); // inside the 5-minute window: every caller wants a refresh
 		let valid_ = "ec_oat_a";
 		let issued = 0;
 		const fetch = vi.fn(async () => {
-			await new Promise((r) => setTimeout(r, Math.random() * 20));
+			await new Promise((r) => setTimeout(r, 10)); // fixed: every caller is in flight before any refresh lands
 			valid_ = `ec_oat_${++issued}`; // a refresh revokes every earlier access token
 			return granted(valid_);
 		});
 		const send = async (token) => {
-			await new Promise((r) => setTimeout(r, Math.random() * 20));
+			await new Promise((r) => setTimeout(r, 10)); // fixed: every caller is in flight before any refresh lands
 			return new Response("", { status: token === valid_ ? 200 : 401 });
 		};
 		const results = await Promise.all(Array.from({ length: 6 }, () => withAiToken(URL_, send, { dir, fetch, now })));

@@ -108,6 +108,7 @@ describe("rpc as the AI Editor (ai option)", () => {
 			["ai-refresh-token", "ec_ort_r"],
 			["ai-access-token", "ec_oat_old"],
 			["ai-access-token.expires-at", new Date(NOW + 30 * 60_000).toISOString()],
+			["ai-token-site", "https://site.test"],
 		]) {
 			writeFileSync(join(dir, name), `${text}\n`, { mode: 0o600 });
 		}
@@ -136,11 +137,14 @@ describe("rpc as the AI Editor (ai option)", () => {
 		expect(refresh).toHaveBeenCalledOnce();
 	});
 
-	it("without the ai option, an explicit token is sent as is", async () => {
+	it("without the ai option, an explicit token is sent as is; with it, a token is an error", async () => {
 		const mcp = vi.fn(async () => answer());
 		vi.stubGlobal("fetch", mcp);
 		await rpc("tools/list", {}, { url: "https://site.test", token: "x" });
 		expect(mcp.mock.calls[0][1].headers.Authorization).toBe("Bearer x");
+		const { ai } = setup();
+		await expect(rpc("tools/list", {}, { url: "https://site.test", token: "x", ai })).rejects.toThrow("pass token or ai, not both");
+		expect(mcp).toHaveBeenCalledOnce();
 	});
 });
 

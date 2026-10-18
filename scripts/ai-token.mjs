@@ -29,7 +29,8 @@ function status() {
 	const fingerprint = token && createHash("sha256").update(token).digest("hex").slice(0, 8);
 	const access = token ? `${fingerprint}, ${mode(file("ai-access-token"))}, ${when}` : "missing or malformed, the next use renews it";
 	console.log(`access token:  ${access}`);
-	// the device flow writes the refresh token once, and it lasts 90 days from then
+	// the device flow writes the refresh token, and it lasts 90 days from then (were emdash to rotate it, each rotation
+	// would rewrite the file; a copy or an edit resets the date too)
 	const saved = file("ai-refresh-token");
 	console.log(`refresh token: ${saved ? `${mode(saved)}, saved ${day(saved.mtimeMs)}, lasts until about ${day(saved.mtimeMs + 90 * 86_400_000)}` : "missing"}`);
 }

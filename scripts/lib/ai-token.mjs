@@ -2,9 +2,10 @@
 // and a refresh token that lasts 90 days, in .local/ai-access-token and .local/ai-refresh-token (mode 600, never
 // committed). A refresh issues a new access token and revokes every earlier one at once, so refreshes are serialized
 // with a lock file and each caller re-reads the files under it: one refresh per expiry, however many processes run.
-// The access token's expiry is not in the token, so each refresh writes it to .local/ai-access-token.expires-at, and
-// the first one records the issuing site in .local/ai-token-site; no token is sent to another site. Nothing here
-// prints or throws a token.
+// The access token's expiry is not in the token, so each refresh writes it to .local/ai-access-token.expires-at. The
+// issuing site is recorded in .local/ai-token-site by `scripts/ai-token.mjs refresh`, run once after a device flow; no
+// token is sent to any other site, and until that file exists only that command sends one. Nothing here prints or
+// throws a token.
 import { randomBytes } from "node:crypto";
 import { closeSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -18,10 +19,11 @@ const SITE = "ai-token-site";
 const LOCK = "ai-access-token.lock";
 /** Renew this long before the expiry, so a token never runs out in the middle of a run. */
 const MARGIN_MS = 5 * 60_000;
-/** A refresh gives up after 15 s, so a lock older than a minute was left by a process that died. */
+/** A refresh gives up after 15 s, so a lock older than 30 s was left by a process that died (say, Ctrl-C). */
 const REFRESH_TIMEOUT_MS = 15_000;
-const LOCK_STALE_MS = 60_000;
-const LOCK_WAIT_MS = 30_000;
+const LOCK_STALE_MS = 30_000;
+/** Longer than LOCK_STALE_MS, so a waiter outlives a dead holder's lock and takes it over. */
+const LOCK_WAIT_MS = 45_000;
 /** Printable ASCII only: anything else would make fetch throw an error that quotes the whole header. */
 const TOKEN = /^[\x21-\x7e]+$/;
 const LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
@@ -48,16 +50,30 @@ function writePrivate(dir, name, text) {
 	}
 }
 
-/** The site's origin, once it is https (or this machine) and the one that issued the tokens. */
-function checkSite(dir, url) {
+function readRefresh(dir) {
+	const token = read(dir, REFRESH);
+	if (!token) throw new Error(`no AI refresh token in ${join(dir, REFRESH)}: ${NEW_DEVICE_CODE}`);
+	if (!TOKEN.test(token)) throw new Error(`${join(dir, REFRESH)} is not a token: ${NEW_DEVICE_CODE}`);
+	return token;
+}
+
+/**
+ * The site's origin, once it is https (or this machine), the one recorded as the issuer (only `pin` may go on without
+ * a record, and the refresh then records it), and the refresh token is there; checked before the lock is taken.
+ */
+function checkSite(dir, url, { pin = false } = {}) {
 	const { protocol, hostname, origin } = new URL(url);
 	if (protocol !== "https:" && !LOCAL_HOSTS.includes(hostname)) {
 		throw new Error(`the AI token is sent only over https (or to localhost), not to ${protocol}//${hostname}`);
 	}
 	const issuer = read(dir, SITE);
+	if (!issuer && !pin) {
+		throw new Error(`no ${join(dir, SITE)}: after a device flow, run EMDASH_URL=<site> node scripts/ai-token.mjs refresh once`);
+	}
 	if (issuer && issuer !== origin) {
 		throw new Error(`the AI token was issued by ${issuer}, not ${origin} (after a device flow on another site, delete ${join(dir, SITE)})`);
 	}
+	readRefresh(dir);
 	return origin;
 }
 
@@ -75,8 +91,9 @@ async function withLock(dir, fn) {
 		try {
 			age = Date.now() - statSync(lock).mtimeMs;
 		} catch {} // released meanwhile: try again
+		// two waiters can take over the same dead lock and both refresh; the 401 retry then settles on the newer token
 		if (age > LOCK_STALE_MS) rmSync(lock, { force: true });
-		else if (Date.now() - start > LOCK_WAIT_MS) throw new Error(`AI token: ${lock} is still held after 30 s`);
+		else if (Date.now() - start > LOCK_WAIT_MS) throw new Error(`AI token: ${lock} is still held after ${LOCK_WAIT_MS / 1000} s`);
 		await new Promise((r) => setTimeout(r, 50 + Math.random() * 50));
 	}
 	try {
@@ -100,9 +117,7 @@ const fresh = (dir, now) => {
 
 // The caller holds the lock.
 async function refresh(origin, { dir = AI_TOKEN_DIR, fetch = globalThis.fetch, now = Date.now } = {}) {
-	const refreshToken = read(dir, REFRESH);
-	if (!refreshToken) throw new Error(`no AI refresh token in ${join(dir, REFRESH)}: ${NEW_DEVICE_CODE}`);
-	if (!TOKEN.test(refreshToken)) throw new Error(`${join(dir, REFRESH)} is not a token: ${NEW_DEVICE_CODE}`);
+	const refreshToken = readRefresh(dir);
 	const res = await fetch(new URL("/_emdash/api/oauth/token/refresh", origin), {
 		method: "POST",
 		// the header passes emdash's CSRF check on public routes whatever Origin the runtime sends
@@ -112,7 +127,11 @@ async function refresh(origin, { dir = AI_TOKEN_DIR, fetch = globalThis.fetch, n
 		redirect: "error",
 		signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS),
 	});
-	const body = await res.json().catch(() => null);
+	// a body that is not JSON reads as none; a timeout while reading it still throws
+	const body = await res.json().catch((e) => {
+		if (e instanceof SyntaxError) return null;
+		throw e;
+	});
 	if (!res.ok) {
 		const { code, message } = body?.error ?? {};
 		const detail = code ? `${code}${message ? ` (${String(message).replaceAll(refreshToken, "…")})` : ""}` : `HTTP ${res.status}`;
@@ -132,10 +151,13 @@ async function refresh(origin, { dir = AI_TOKEN_DIR, fetch = globalThis.fetch, n
 	return token;
 }
 
-/** Exchanges the refresh token for a new access token, stores it with its expiry, and returns it. */
+/**
+ * Exchanges the refresh token for a new access token, stores it with its expiry, and returns it. This is
+ * `scripts/ai-token.mjs refresh`, the one call that may record the issuing site.
+ */
 export async function refreshAccess(url, opts = {}) {
 	const dir = opts.dir ?? AI_TOKEN_DIR;
-	const origin = checkSite(dir, url);
+	const origin = checkSite(dir, url, { pin: true });
 	return withLock(dir, () => refresh(origin, opts));
 }
 

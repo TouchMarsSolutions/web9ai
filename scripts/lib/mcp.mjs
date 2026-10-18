@@ -75,6 +75,7 @@ export async function rpc(method, params = {}, { url = process.env.EMDASH_URL ??
 			},
 			body: payload,
 		});
+	if (ai && token !== undefined) throw new Error("rpc: pass token or ai, not both");
 	const res = ai ? await withAiToken(url, send, ai) : await send(token ?? defaultToken());
 	const body = await res.text();
 	if (!res.ok) throw new Error(`MCP HTTP ${res.status}: ${body.slice(0, 200)}`);
