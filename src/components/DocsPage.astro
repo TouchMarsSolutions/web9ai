@@ -1,8 +1,13 @@
 ---
 import { getEmDashCollection, getTranslations } from "emdash";
 import { PortableText } from "emdash/ui";
-import { groupDocs } from "../../packages/web9-site/lib/docs-nav.mjs";
+import { headingAnchors, idsByKey, legacyIdsFor, tocEntries } from "../../packages/web9-site/lib/anchors.mjs";
+import { breadcrumbs, docsSidebar, groupDocs } from "../../packages/web9-site/lib/docs-nav.mjs";
+import { LANGUAGES, localizeHref } from "../../packages/web9-site/lib/nav.mjs";
 import Base from "../layouts/Base.astro";
+import DocsSidebar from "./DocsSidebar.astro";
+import Heading from "./Heading.astro";
+import Toc from "./Toc.astro";
 
 interface Props {
 	doc: any;
@@ -16,12 +21,29 @@ const prefix = locale === "en" ? "" : `/${locale}`;
 // doc is still reachable under this locale's prefix through the fallback route), plus docs that exist
 // only in this locale; grouped section -> category, ordered by sort_order, with the old sidebar's labels.
 const byGroup = new Map();
+// slug -> section of every doc loaded here (en and this locale), for the header's active menu item (nav.mjs)
+const sectionOf: Record<string, string> = {};
 for (const l of new Set(["en", locale])) {
 	const { entries: list } = await getEmDashCollection("docs", { locale: l, limit: 500 });
-	// translationGroup is on every entry at runtime but not in the generated Doc type
-	for (const e of list) byGroup.set((e.data as { translationGroup?: string | null }).translationGroup ?? e.data.id, e);
+	for (const e of list) {
+		// translationGroup is on every entry at runtime but not in the generated Doc type
+		byGroup.set((e.data as { translationGroup?: string | null }).translationGroup ?? e.data.id, e);
+		if (e.data.slug) sectionOf[e.data.slug] = e.data.section ?? "ai";
+	}
 }
-const groups: { key: string; label: string; items: any[] }[] = groupDocs([...byGroup.values()], locale);
+const section: string = doc.data.section ?? "ai";
+// Only the current section, as on the old site (spec 2026-10-17 docs UX §3.2)
+const sidebar = docsSidebar(groupDocs([...byGroup.values()], locale), section, doc.data.slug);
+const crumbs: string[] = breadcrumbs(doc.data, locale);
+
+// Heading ids: the old site's custom ids, else Docusaurus's slugs (anchors.mjs). Heading.astro reads them by block
+// _key from Astro.locals, because PortableText gives block renderers nothing but the node. A fallback page shows
+// the en body, so it takes the en table.
+const anchors = headingAnchors(doc.data.body, legacyIdsFor(fallbackLocale ?? locale, doc.data.slug));
+Astro.locals.headingIds = idsByKey(anchors);
+const toc = tocEntries(anchors);
+const tocLabel = locale === "zh-CN" ? "本页目录" : "On this page";
+
 // A fallback page shows the en text, so search engines are pointed at the en URL.
 const canonicalLocale = fallbackLocale ?? locale;
 const canonical = new URL(`${canonicalLocale === "en" ? "" : `/${canonicalLocale}`}/docs/${doc.data.slug}`, Astro.site).href;
@@ -29,11 +51,8 @@ const canonical = new URL(`${canonicalLocale === "en" ? "" : `/${canonicalLocale
 const translations = (await getTranslations("docs", doc.data.id)).translations?.filter(
 	(t) => t.status === "published",
 ) ?? [];
-// Always offer every locale; one without a translation opens the fallback page for this doc.
-const languages = [
-	{ code: "en", label: "English" },
-	{ code: "zh-CN", label: "中文" },
-].map(({ code, label }) => ({
+// The header's language menu offers every locale; one without a translation opens the fallback page for this doc.
+const languages = LANGUAGES.map(({ code, label }) => ({
 	code,
 	label,
 	href: `${code === "en" ? "" : `/${code}`}/docs/${translations.find((t) => t.locale === code)?.slug ?? doc.data.slug}`,
@@ -44,50 +63,129 @@ const notTranslated: Record<string, string> = {
 };
 ---
 
-<Base title={doc.data.title} description={doc.data.description} canonical={canonical} content={{ collection: "docs", id: doc.data.id, slug: doc.data.slug }}>
-	<div class="mx-auto my-8 grid max-w-[1200px] grid-cols-1 gap-10 px-4 md:grid-cols-[240px_minmax(0,1fr)]">
-		<nav class="text-[0.92rem] md:sticky md:top-4 md:self-start" aria-label="Docs">
+<Base
+	title={doc.data.title}
+	description={doc.data.description}
+	canonical={canonical}
+	content={{ collection: "docs", id: doc.data.id, slug: doc.data.slug }}
+	docNav={{ section, sectionOf }}
+	languages={languages}
+>
+	<DocsSidebar slot="drawer" sidebar={sidebar} prefix={prefix} currentSlug={doc.data.slug} />
+	<div
+		class:list={[
+			"mx-auto grid max-w-[1400px] grid-cols-1 gap-10 px-4 sm:px-6 lg:grid-cols-[240px_minmax(0,1fr)]",
+			toc.length >= 2 && "xl:grid-cols-[240px_minmax(0,1fr)_220px]",
+		]}
+	>
+		<aside class="docs-sidebar hidden lg:block">
+			<DocsSidebar sidebar={sidebar} prefix={prefix} currentSlug={doc.data.slug} />
+		</aside>
+		<div class="min-w-0 py-6">
+			<nav aria-label="Breadcrumbs" class="mb-5 text-sm">
+				<ol class="m-0 flex list-none flex-wrap items-center gap-1.5 p-0 text-text-secondary">
+					<li class="flex">
+						<a href={localizeHref("/", locale)} aria-label="Home" class="flex text-text-secondary hover:text-brand">
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+								<path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+								<path d="M9 22V12h6v10"></path>
+							</svg>
+						</a>
+					</li>
+					{
+						crumbs.map((label, i) => (
+							<li class="flex items-center gap-1.5">
+								<span aria-hidden="true" class="text-muted">
+									›
+								</span>
+								{i === crumbs.length - 1 ? (
+									<span aria-current="page" class="rounded-full bg-surface px-2.5 py-0.5 text-text">
+										{label}
+									</span>
+								) : (
+									<span>{label}</span>
+								)}
+							</li>
+						))
+					}
+				</ol>
+			</nav>
 			{
-				groups.map(({ label, items }) => (
-					<div>
-						<p class="mt-4 mb-1.5 text-xs tracking-wider text-text-secondary uppercase">{label}</p>
-						<ul class="m-0 list-none p-0">
-							{items.map((e) => (
-								<li>
-									<a
-										class="block py-1 text-text-secondary hover:text-text aria-[current=page]:font-semibold aria-[current=page]:text-text"
-										href={`${prefix}/docs/${e.data.slug}`}
-										aria-current={e.data.slug === doc.data.slug ? "page" : undefined}
-									>
-										{e.data.title}
-									</a>
-								</li>
-							))}
-						</ul>
-					</div>
-				))
-			}
-		</nav>
-		<article class="prose max-w-none min-w-0">
-			{
-				fallbackLocale && (
-					<p class="rounded-md bg-[color-mix(in_srgb,#d9a400_15%,transparent)] px-3 py-2">
-						{notTranslated[locale] ?? notTranslated.en}
-					</p>
+				toc.length >= 2 && (
+					<details class="mb-6 rounded-md border border-border xl:hidden">
+						<summary class="cursor-pointer px-3 py-2 text-sm font-medium text-text">{tocLabel}</summary>
+						<Toc entries={toc} class="px-3 pb-3" />
+					</details>
 				)
 			}
-			<p class="flex gap-3 text-sm">
-				{languages.map((l) => (
-					<a class="aria-[current=true]:font-bold" href={l.href} hreflang={l.code} aria-current={l.code === locale ? "true" : undefined}>
-						{l.label}
-					</a>
-				))}
-			</p>
-			<h1 {...doc.edit.title}>{doc.data.title}</h1>
-			{doc.data.description && <p class="lead">{doc.data.description}</p>}
-			<div {...doc.edit.body}>
-				<PortableText value={doc.data.body} />
-			</div>
-		</article>
+			<article class="docs-article prose max-w-none">
+				{
+					fallbackLocale && (
+						<p class="rounded-md bg-[color-mix(in_srgb,#d9a400_15%,transparent)] px-3 py-2">
+							{notTranslated[locale] ?? notTranslated.en}
+						</p>
+					)
+				}
+				<h1 {...doc.edit.title}>{doc.data.title}</h1>
+				<div {...doc.edit.body}>
+					<PortableText value={doc.data.body} components={{ block: Heading }} />
+				</div>
+			</article>
+		</div>
+		{
+			toc.length >= 2 && (
+				<aside class="docs-toc hidden xl:block" aria-label={tocLabel}>
+					<p class="mt-0 mb-2 text-xs font-semibold tracking-wider text-text-secondary uppercase">{tocLabel}</p>
+					<Toc entries={toc} />
+				</aside>
+			)
+		}
 	</div>
 </Base>
+
+<script>
+	// "On this page" (spec 2026-10-17 docs UX §3.2): the current section is the last heading above a line 6rem below the
+	// top of the window; every TOC (right column and inline) marks its link with aria-current. The observer only says
+	// when to look again.
+	const tocLinks = [...document.querySelectorAll<HTMLAnchorElement>("[data-toc] a[href^='#']")];
+	const idOf = (a: HTMLAnchorElement) => decodeURIComponent(a.hash.slice(1));
+	const tocHeadings = [...new Set(tocLinks.map(idOf))]
+		.map((id) => document.getElementById(id))
+		.filter((h): h is HTMLElement => h !== null);
+	if (tocHeadings.length) {
+		const update = () => {
+			let current = tocHeadings[0];
+			for (const h of tocHeadings) if (h.getBoundingClientRect().top < 96) current = h;
+			for (const a of tocLinks) {
+				if (idOf(a) === current.id) a.setAttribute("aria-current", "true");
+				else a.removeAttribute("aria-current");
+			}
+		};
+		const observer = new IntersectionObserver(update, { rootMargin: "0px 0px -60% 0px" });
+		for (const h of tocHeadings) observer.observe(h);
+		update();
+	}
+</script>
+
+<style>
+	/* The sticky columns sit below the 4rem sticky header (Base.astro .site-header). Their viewport heights stay here,
+	   out of utility classes (check-public-css). This also stops the sidebar showing through the translucent header. */
+	.docs-sidebar,
+	.docs-toc {
+		position: sticky;
+		top: 4rem;
+		align-self: start;
+		overflow-y: auto;
+		padding-block: 1.5rem;
+	}
+	.docs-sidebar {
+		max-height: calc(100dvh - 4rem);
+	}
+	.docs-toc {
+		max-height: calc(100dvh - 5rem);
+	}
+	/* A heading reached through its #anchor clears the sticky header */
+	.docs-article :global(:is(h2, h3, h4, h5, h6)[id]) {
+		scroll-margin-top: 5rem;
+	}
+</style>

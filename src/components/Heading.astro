@@ -1,0 +1,58 @@
+---
+// The `block` renderer for doc bodies (spec 2026-10-17 docs UX §3.2). Every block, heading or not, is rendered by
+// core's Block, which spreads extra props onto the element: that is how h2-h6 get their id, next to core's text-align
+// class. A heading also gets a "#" link after its text. The ids come from DocsPage through Astro.locals.headingIds,
+// by block _key (anchors.mjs); a block without _key gets the plain slug of its text, as headingAnchors gives it.
+// In edit mode PortableText renders the inline editor instead, so headings there have no ids.
+// `{...{ ...props, id }}`: a spread is not checked for excess props, and Block's Props type has no `id`.
+import { emdashComponents } from "emdash/ui";
+import { slug } from "github-slugger";
+import { blockText, isHeading } from "../../packages/web9-site/lib/anchors.mjs";
+
+// emdash/ui exports Block as a component and, by the same name, as astro-portabletext's type, so the typechecker takes
+// `import { Block }` for the type only; emdashComponents.block is the same component.
+const Block = emdashComponents.block;
+// PortableText hands a block renderer these three props; Block needs `node` to be typed
+interface Props {
+	node: any;
+	index: number;
+	isInline: boolean;
+}
+const props = Astro.props;
+const { node } = props;
+const text = isHeading(node) ? blockText(node) : "";
+// _key is content: look it up as an own property only (a key such as "constructor" must not reach Object.prototype)
+const key = typeof node?._key === "string" && node._key ? node._key : null;
+const ids = Astro.locals.headingIds ?? {};
+const id = !text.trim() ? undefined : key ? (Object.hasOwn(ids, key) ? ids[key] : undefined) : slug(text);
+---
+
+{
+	id ? (
+		<Block {...{ ...props, id }}>
+			<slot />
+			<a class="hash-link" href={`#${id}`} aria-label={`Direct link to ${text}`}>
+				#
+			</a>
+		</Block>
+	) : (
+		<Block {...props}>
+			<slot />
+		</Block>
+	)
+}
+
+<style>
+	.hash-link {
+		margin-inline-start: 0.35em;
+		color: var(--color-brand);
+		font-weight: 400;
+		text-decoration: none;
+		opacity: 0;
+		transition: opacity 120ms ease;
+	}
+	:global(:is(h2, h3, h4, h5, h6):hover) > .hash-link,
+	.hash-link:focus-visible {
+		opacity: 1;
+	}
+</style>
