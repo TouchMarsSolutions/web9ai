@@ -187,6 +187,50 @@ const notTranslated: Record<string, string> = {
 </script>
 
 <script>
+	// Anchor jumps (a TOC link, a heading's "#" link, a deep link) land on the heading even while the page grows. Doc
+	// images are <img loading="lazy"> without width or height (the old site's ideal-image output had both, so it never
+	// shifted), so images above the target load during the jump and push it down: the scroll ended far short, and the TOC
+	// marked the previous section. While a target is pending, it is aligned again whenever the article's size changes;
+	// that stops when the user takes over (wheel, touch, keys, a press) or after 5 s. Giving the images dimensions would
+	// remove the need for this (a follow-up, not this branch). scrollIntoView honours the headings' scroll-margin-top
+	// (5rem), so the TOC's 96 px line still marks the target. In edit mode there are no heading ids, so nothing is found.
+	const article = document.querySelector(".docs-article");
+	if (article) {
+		let target: Element | null = null;
+		let until = 0;
+		const align = () => {
+			if (!target) return;
+			if (performance.now() > until) target = null;
+			else target.scrollIntoView({ behavior: "instant", block: "start" });
+		};
+		const follow = (hash: string) => {
+			let id = "";
+			try {
+				id = decodeURIComponent(hash.slice(1));
+			} catch {
+				return;
+			}
+			// inside the article only: an id elsewhere on the page (the site chrome's) is not a heading's
+			const el = id ? article.querySelector(`#${CSS.escape(id)}`) : null;
+			if (!el) return;
+			target = el;
+			until = performance.now() + 5000;
+		};
+		new ResizeObserver(() => requestAnimationFrame(align)).observe(article);
+		// capture, so a press clears the target before the link's own click sets it again
+		for (const type of ["wheel", "touchstart", "keydown", "pointerdown"]) {
+			window.addEventListener(type, () => (target = null), { passive: true, capture: true });
+		}
+		document.addEventListener("click", (e) => {
+			const link = (e.target as HTMLElement | null)?.closest<HTMLAnchorElement>('a[href^="#"]');
+			if (link) follow(link.hash);
+		});
+		window.addEventListener("hashchange", () => follow(location.hash));
+		if (location.hash) follow(location.hash);
+	}
+</script>
+
+<script>
 	// Syntax highlighting (spec 2026-10-17 docs UX §3.4): only when the body has a code block in a language Prism bundles.
 	// Its own script, so nothing in the TOC code above can skip it; the article carries data-highlight except in edit
 	// mode, where the live editor's code blocks are not ours to rewrite. A failed chunk leaves the code plain.
