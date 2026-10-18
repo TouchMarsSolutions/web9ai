@@ -115,8 +115,9 @@
   - 1024 px 和 390 px：☰ 打开抽屉，Esc 和点遮罩都能关，Tab 不跑出抽屉，关闭后焦点回到 ☰；正文紧接在 header 后面；
   - 深色和浅色主题下代码高亮可读，主题按钮按三态循环，刷新后保持；
   - 控制台没有报错。
-- 上线后：`check-page.mjs` 对几页查标记（`id="what-is-not"`、`aria-label="Breadcrumbs"`、`On this page`、图片尺寸 `width="1600" height="1161"`；`/docs/guide` 上再查 `id="txt2txt"`（标题整句是行内代码，经过 marks 树），`/docs/ai-tools-adhoc` 上查 `id="knowledge-base"`（en 下的旧自定义 id，标题是中文）），`verify` 仍是 54/54、86/86。
-- zh-CN 页面的 chrome（2026-10-18 补）：aria-label 跟页面语言走（`packages/web9-site/lib/ui-labels.mjs`），zh-CN 用旧站 Docusaurus zh-Hans 的说法（主导航、页面路径、主页面、文档侧边栏、「…的直接链接」），回退页也一样（chrome 是 zh-CN 的）。en 标签不变，上面的标记照旧。`check-page.mjs` 查 `/zh-CN/docs/learn_ai_coding` 的 `aria-label="页面路径"`、`aria-label="目标不是什么？的直接链接"`，并用 `--absent` 查不出现 `aria-label="Breadcrumbs"`、`aria-label="Direct link to` 和 `aria-label="Docs"`。`--absent` 要带上 `aria-label="` 前缀：生产构建把主题按钮的脚本连同整张 label 表（en 也在内）内联进每一页，裸的 `Direct link to` 会在脚本里命中（dev server 不内联，本地看不出来；2026-10-18 上线复查时发现）。sidebar 的爬取改认 `data-docs-sidebar`（它的 label 随语言变）。
+- 上线后：`check-page.mjs` 对几页查标记（`id="what-is-not"`、`aria-label="Breadcrumbs"`、`aria-label="On this page"`、图片尺寸 `width="1600" height="1161"`；`/docs/guide` 上再查 `id="txt2txt"`（标题整句是行内代码，经过 marks 树），`/docs/ai-tools-adhoc` 上查 `id="knowledge-base"`（en 下的旧自定义 id，标题是中文）），`verify` 仍是 54/54、86/86。
+- zh-CN 页面的 chrome（2026-10-18 补）：aria-label 跟页面语言走（`packages/web9-site/lib/ui-labels.mjs`），zh-CN 用旧站 Docusaurus zh-Hans 的说法（主导航、页面路径、主页面、文档侧边栏、「…的直接链接」），回退页也一样（chrome 是 zh-CN 的）。en 标签不变，上面的标记照旧。sidebar 的爬取改认 `data-docs-sidebar`（它的 label 随语言变）。`check-page.mjs` 查 `/zh-CN/docs/learn_ai_coding` 的 `aria-label="页面路径"`、`aria-label="目标不是什么？的直接链接"`、`aria-label="本页目录"`，并用 `--absent` 查不出现 `aria-label="Breadcrumbs"`、`aria-label="Direct link to`（引号故意不闭合，标题文字不定）和 `aria-label="Docs"`。
+  - 凡是 label 表里的字符串，查有（present）还是查无（`--absent`），标记都要带上 `aria-label="` 前缀：Base.astro 的脚本（主题按钮和抽屉）import 了 `themeLabel`，生产构建把它连同整张 label 表（en 和 zh-CN 都在内，约 3 KB）作为 `<script type="module">` 内联进每一页（Astro 把小于 4096 字节、没有再 import 别的模块的脚本内联），所以裸的 `Direct link to` 在 zh-CN 页上也会命中，裸的 `On this page`、`本页目录` 在任何一页上都会命中、检查形同虚设。dev server 不内联，本地看不出来；2026-10-18 上线复查时发现。
 
 ## 6. 不在范围内
 
