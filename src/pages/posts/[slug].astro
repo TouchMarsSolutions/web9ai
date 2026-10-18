@@ -346,6 +346,14 @@ const publishDate =
 
 		buildToc();
 	</script>
+
+	<script>
+		// Syntax highlighting, only when the post has a language-tagged code block (spec 2026-10-17 docs UX §3.4)
+		const postContent = document.querySelector<HTMLElement>(".article-content");
+		if (postContent?.querySelector('pre code[class*="language-"]')) {
+			import("@web9/blocks/prism-client").then(({ highlightUnder }) => highlightUnder(postContent));
+		}
+	</script>
 </Base>
 
 <style>
@@ -548,7 +556,6 @@ const publishDate =
 	.article-content :global(pre) {
 		margin: 2em 0;
 		padding: var(--spacing-5);
-		background: var(--color-surface);
 		border: 1px solid var(--color-border);
 		border-radius: var(--radius-lg);
 		overflow-x: auto;

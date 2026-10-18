@@ -26,4 +26,22 @@
 	.callout > div > :last-child { @apply mb-0; }
 	.callout .callout__title { @apply mt-0 mb-1.5 font-bold; }
 	pre.mermaid { @apply bg-transparent text-center; }
+
+	/*
+	 * Code (spec 2026-10-17 docs UX §3.4). emdash's core code block is always dark (#1e1e1e in its Code.astro), so
+	 * Markdown code in callout, tabs and details is dark too, and one Prism palette (VS Code Dark+) serves both.
+	 * Prism adds the .token spans in the browser (prism-client.mjs); stored content never carries them.
+	 */
+	.prose pre:not(.mermaid) { background: #1e1e1e; color: #e0e0e0; }
+	pre .token:is(.comment, .prolog, .doctype, .cdata) { color: #6a9955; }
+	pre .token:is(.punctuation, .operator, .entity) { color: #d4d4d4; }
+	pre .token:is(.keyword, .boolean, .important, .atrule, .tag, .selector) { color: #569cd6; }
+	pre .token:is(.string, .char, .attr-value, .regex, .url) { color: #ce9178; }
+	pre .token:is(.number, .inserted) { color: #b5cea8; }
+	pre .token.function { color: #dcdcaa; }
+	pre .token:is(.class-name, .builtin) { color: #4ec9b0; }
+	pre .token:is(.property, .attr-name, .variable, .constant, .symbol, .parameter) { color: #9cdcfe; }
+	pre .token.deleted { color: #f48771; }
+	pre .token:is(.bold, .title) { font-weight: 600; }
+	pre .token.italic { font-style: italic; }
 }

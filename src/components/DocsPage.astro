@@ -168,6 +168,11 @@ const notTranslated: Record<string, string> = {
 		for (const h of tocHeadings) observer.observe(h);
 		update();
 	}
+
+	// Syntax highlighting, only when the body has a language-tagged code block (spec 2026-10-17 docs UX §3.4)
+	if (article?.querySelector('pre code[class*="language-"]')) {
+		import("@web9/blocks/prism-client").then(({ highlightUnder }) => highlightUnder(article));
+	}
 </script>
 
 <style>

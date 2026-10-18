@@ -11,6 +11,7 @@
     "./markdown": "./lib/markdown.mjs",
     "./html": "./lib/html.mjs",
     "./to-markdown": "./lib/to-markdown.mjs",
+    "./prism-client": "./astro/prism-client.mjs",
     "./styles.css": "./astro/blocks.css"
   },
   "peerDependencies": {
