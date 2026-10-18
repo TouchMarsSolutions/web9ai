@@ -5,7 +5,7 @@
 import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import { join } from "node:path";
-import { AI_TOKEN_DIR, readAccess, refreshAccess } from "./lib/ai-token.mjs";
+import { AI_TOKEN_DIR, readAccess, readSite, refreshAccess } from "./lib/ai-token.mjs";
 
 const [command] = process.argv.slice(2);
 const file = (name) => {
@@ -33,6 +33,8 @@ function status() {
 	// would rewrite the file; a copy or an edit resets the date too)
 	const saved = file("ai-refresh-token");
 	console.log(`refresh token: ${saved ? `${mode(saved)}, saved ${day(saved.mtimeMs)}, lasts until about ${day(saved.mtimeMs + 90 * 86_400_000)}` : "missing"}`);
+	const site = readSite();
+	console.log(`site:          ${site ?? "not recorded: run EMDASH_URL=<site> node scripts/ai-token.mjs refresh once"}`);
 }
 
 if (command === "status") status();

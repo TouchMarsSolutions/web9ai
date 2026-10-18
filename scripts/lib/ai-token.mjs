@@ -58,8 +58,8 @@ function readRefresh(dir) {
 }
 
 /**
- * The site's origin, once it is https (or this machine), the one recorded as the issuer (only `pin` may go on without
- * a record, and the refresh then records it), and the refresh token is there; checked before the lock is taken.
+ * The site's origin, once it is https (or this machine) and the one recorded as the issuer (only `pin` may go on
+ * without a record, and the refresh then records it).
  */
 function checkSite(dir, url, { pin = false } = {}) {
 	const { protocol, hostname, origin } = new URL(url);
@@ -73,11 +73,12 @@ function checkSite(dir, url, { pin = false } = {}) {
 	if (issuer && issuer !== origin) {
 		throw new Error(`the AI token was issued by ${issuer}, not ${origin} (after a device flow on another site, delete ${join(dir, SITE)})`);
 	}
-	readRefresh(dir);
 	return origin;
 }
 
+/** Runs `fn` (a refresh) under the lock; the refresh token is checked first, so a missing .local gets its message. */
 async function withLock(dir, fn) {
+	readRefresh(dir);
 	const lock = join(dir, LOCK);
 	const start = Date.now();
 	for (;;) {
@@ -102,6 +103,9 @@ async function withLock(dir, fn) {
 		rmSync(lock, { force: true });
 	}
 }
+
+/** The origin recorded as the tokens' issuer, or null. */
+export const readSite = (dir = AI_TOKEN_DIR) => read(dir, SITE);
 
 /** The stored access token (null when missing or malformed) and its expiry (ms since the epoch; null when unknown). */
 export function readAccess(dir = AI_TOKEN_DIR) {

@@ -35,6 +35,16 @@ describe("aiAccessToken", () => {
 		expect(fetch).not.toHaveBeenCalled();
 	});
 
+	it("uses a valid access token without the refresh token, and asks for a device code only when it must refresh", async () => {
+		valid(30);
+		rmSync(join(dir, "ai-refresh-token"));
+		const fetch = vi.fn();
+		expect(await aiAccessToken(URL_, { dir, fetch, now })).toBe("ec_oat_a");
+		valid(4);
+		await expect(aiAccessToken(URL_, { dir, fetch, now })).rejects.toThrow(/no AI refresh token.*device code/);
+		expect(fetch).not.toHaveBeenCalled();
+	});
+
 	it("refreshes at exactly 5 minutes left, and when the expiry is unknown or past", async () => {
 		for (const expires of [new Date(NOW + 5 * 60_000).toISOString(), null, "not a date", new Date(NOW - 1000).toISOString()]) {
 			put("ai-access-token", "ec_oat_a");

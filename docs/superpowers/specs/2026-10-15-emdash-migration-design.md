@@ -123,7 +123,7 @@
   4. 核对：
      - 用这个 token 调 MCP `content_list` 应该成功；
      - `schema_list_collections`、`settings_update`、`site_export_start`，以及 REST `GET /_emdash/api/admin/api-tokens`、`GET /_emdash/api/redirects` 都应该被拒。
-  5. 续期：access token 1 小时后过期，运行环境调 `POST /_emdash/api/oauth/token/refresh`，body 为 `{"grant_type":"refresh_token","refresh_token":"…"}`，拿到新的 access token（旧的立即失效）。refresh token 不轮换，返回的还是同一个，续期也不延长它的 90 天；到期后要重新走一遍 device flow（第 2、3 步）。续期时 core 按这个用户当前的角色重新收窄 scope；用户被停用或删除后续期失败。
+  5. 续期：access token 1 小时后过期，运行环境调 `POST /_emdash/api/oauth/token/refresh`，body 为 `{"grant_type":"refresh_token","refresh_token":"…"}`，拿到新的 access token（旧的立即失效）。refresh token 不轮换，返回的还是同一个，续期也不延长它的 90 天；到期后要重新走一遍 device flow（第 2、3 步）。续期时 core 按这个用户当前的角色重新收窄 scope；用户被停用或删除后续期失败。本仓库的做法（2026-10-18 补）：两个 token 存进 `.local/ai-access-token`、`.local/ai-refresh-token`（mode 600），然后跑一次 `EMDASH_URL=<site> node scripts/ai-token.mjs refresh`，记下签发站点（`.local/ai-token-site`；记下之前不发任何 token，之后也不发给别的站点）。之后用 `EMDASH_AUTH=ai node scripts/mcp.mjs …` 调 MCP，续期由 `scripts/lib/ai-token.mjs` 自动完成，一次只续一个。
   6. refresh token 只放在 AI 运行环境的 secret 里。停用时调 `/_emdash/api/oauth/token/revoke`，或者在后台禁用这个用户。
   7. 永远不给 AI `transfer:*`、`admin` 或 import 权限；AI 发起的 transfer 请求一律不批准。R2 bucket 不开公开访问（不加 r2.dev 域名，也不绑自定义域名）。
   - **已发放（2026-10-17）**：账号 `ai-agent@web9.ai`（Editor），第 4、5 步的核对都通过，refresh token 放在本机 `.local/`，结果见计划 3 Task 6。
