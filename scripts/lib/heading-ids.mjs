@@ -128,6 +128,7 @@ export const headerDocHrefs = (html) => docHrefsWithin(html, (t) => t.name === "
  * What the heading-id check finds in one page: { problems, headings, tocLinks }. headings counts the h2-h6 of the docs
  * article, tocLinks the `#` links inside every [data-toc] list. Problems, in this order: no docs article; duplicate ids
  * (all elements); per heading, no id or no matching hash link; per TOC link, no h2/h3 of the article with that id.
+ * Headings marked data-w9-chrome are skipped (see below).
  */
 export function checkHeadings(html) {
 	const tokens = tokenize(html);
@@ -160,13 +161,12 @@ export function checkHeadings(html) {
 	let current = null;
 	let pos = tokens[articleAt].end;
 	let inHash = false;
-	// ToolGrid.astro renders its title as an <h4> without id straight before its grid (data-w9-tools): block chrome, not
-	// a Portable Text heading, so it has no id by design (as on the old site, where it was JSX). A heading that has an
-	// id, or sits anywhere else, is still checked.
-	const finish = (after) => {
-		const next = after === undefined ? undefined : tokens[after];
-		const gridTitle = current && !current.id && current.tag === "h4" && next && !next.close && next.attrs.has("data-w9-tools");
-		if (current && !gridTitle) headings.push(current);
+	// A heading the renderer marks data-w9-chrome (ToolGrid.astro's title) is block chrome, not a Portable Text heading:
+	// no id by design, as on the old site, where it was JSX. Content cannot carry the marker (the sanitizers strip data-*)
+	// and Heading.astro never emits it, so a broken heading renderer cannot exempt itself. A heading inside a Markdown
+	// field (Callout, Tabs, Details) has no marker and is reported: it has no id and no TOC entry.
+	const finish = () => {
+		if (current && !current.chrome) headings.push(current);
 		current = null;
 		inHash = false;
 	};
@@ -176,8 +176,8 @@ export function checkHeadings(html) {
 		pos = t.end;
 		if (isHeadingTag(t.name) && !t.close) {
 			finish();
-			current = { tag: t.name, id: decodeEntities(t.attrs.get("id") ?? ""), text: "", hashes: [] };
-		} else if (current && t.name === current.tag && t.close) finish(k + 1);
+			current = { tag: t.name, id: decodeEntities(t.attrs.get("id") ?? ""), chrome: t.attrs.has("data-w9-chrome"), text: "", hashes: [] };
+		} else if (current && t.name === current.tag && t.close) finish();
 		else if (current && t.name === "a") {
 			if (!t.close && hasClass(t, "hash-link")) {
 				current.hashes.push(t.attrs.get("href") ?? "");
@@ -203,3 +203,40 @@ export function checkHeadings(html) {
 
 /** The problems of one page's heading ids; empty when the page is fine. */
 export const headingProblems = (html) => checkHeadings(html).problems;
+
+/** The en `/docs/<slug>` paths a sitemap lists (`<loc>` URLs; the /zh-CN ones and other pages left out), once each, sorted. */
+export function sitemapEnDocs(xml) {
+	const paths = new Set();
+	for (let at = xml.indexOf("<loc>"); at >= 0; at = xml.indexOf("<loc>", at + 5)) {
+		const end = xml.indexOf("</loc>", at + 5);
+		if (end < 0) break;
+		let path;
+		try {
+			path = decodeURIComponent(new URL(decodeEntities(xml.slice(at + 5, end).trim())).pathname);
+		} catch {
+			continue;
+		}
+		if (/^\/docs\/[^/]+$/.test(path)) paths.add(path);
+	}
+	return [...paths].sort();
+}
+
+/**
+ * What a crawl that "found no problems" must still show, so a guard that went vacuous cannot pass: the sitemap was read and
+ * lists en docs, the crawl found every one of them (`crawledEn` and `sitemapEn` are `/docs/<slug>` paths; `sitemapEn` is
+ * null when the sitemap could not be read), and some headings and some TOC links were checked.
+ */
+export function coverageProblems({ crawledEn, sitemapEn, headings, tocLinks }) {
+	const problems = [];
+	const plain = (path) => normalize(path) ?? path;
+	if (sitemapEn === null) problems.push("/sitemap-docs.xml could not be read");
+	else if (sitemapEn.length === 0) problems.push("/sitemap-docs.xml lists 0 en docs");
+	else {
+		const crawled = new Set(crawledEn.map(plain));
+		const missing = sitemapEn.filter((path) => !crawled.has(plain(path)));
+		if (missing.length) problems.push(`the crawl found ${sitemapEn.length - missing.length} of the ${sitemapEn.length} en docs the sitemap lists; missing: ${missing.join(", ")}`);
+	}
+	if (headings === 0) problems.push("no headings were checked");
+	if (tocLinks === 0) problems.push("no TOC links were checked");
+	return problems;
+}

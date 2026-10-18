@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkHeadings, docsArticle, headerDocHrefs, headingProblems, navDocHrefs } from "./heading-ids.mjs";
+import { checkHeadings, coverageProblems, docsArticle, headerDocHrefs, headingProblems, navDocHrefs, sitemapEnDocs } from "./heading-ids.mjs";
 
 // A docs page cut down to what the check reads: a TOC, the article, and one chrome id outside it.
 const hash = (id, text = "x") => `<a class="hash-link" href="#${id}" aria-label="Direct link to ${text}">#</a>`;
@@ -50,12 +50,20 @@ describe("headingProblems", () => {
 		expect(headingProblems(page({ body: `<h2>Plain</h2>` }))).toEqual(['h2 "Plain" has no id']);
 		expect(headingProblems(page({ body: `<h4 id="">Empty${hash("")}</h4>` }))).toEqual(['h4 "Empty" has no id']);
 	});
-	it("skips a ToolGrid block's own title (an h4 right before its data-w9-tools grid): it is not a Portable Text heading", () => {
-		const grid = `<h4 class="mt-4 mb-2">AI Agents</h4><div class="not-prose" data-w9-tools><a href="https://x.dev">t</a></div>`;
+	it("skips a heading the renderer marks data-w9-chrome (ToolGrid's title): block chrome, not a Portable Text heading", () => {
+		const grid = `<h4 class="mt-4 mb-2" data-w9-chrome>AI Agents</h4><div class="not-prose" data-w9-tools><a href="https://x.dev">t</a></div>`;
 		expect(checkHeadings(page({ body: `<h2 id="a">A${hash("a")}</h2>${grid}` }))).toEqual({ problems: [], headings: 1, tocLinks: 0 });
-		// a heading with an id before a grid is a real heading and is still checked; so is the same h4 anywhere else
-		expect(headingProblems(page({ body: `<h3 id="a">A</h3>${grid.slice(grid.indexOf("<div"))}` }))).toEqual(['h3 id="a" has no hash link to #a']);
-		expect(headingProblems(page({ body: `<h4 class="mt-4 mb-2">AI Agents</h4><div class="not-prose"></div>` }))).toEqual(['h4 "AI Agents" has no id']);
+		// the marker exempts whatever carries it, wherever it sits and whatever the level
+		expect(headingProblems(page({ body: `<h3 data-w9-chrome class="x">Chrome</h3>` }))).toEqual([]);
+	});
+	it("reports the same h4 without the marker, even right before a data-w9-tools grid", () => {
+		const unmarked = `<h4 class="mt-4 mb-2">AI Agents</h4><div class="not-prose" data-w9-tools></div>`;
+		expect(headingProblems(page({ body: unmarked }))).toEqual(['h4 "AI Agents" has no id']);
+		expect(headingProblems(page({ body: `<h3 id="a">A</h3>${unmarked.slice(unmarked.indexOf("<div"))}` }))).toEqual(['h3 id="a" has no hash link to #a']);
+	});
+	it("reports a heading inside a Markdown-field block (no id, no marker): a real parity gap, none exist today", () => {
+		const callout = `<aside class="callout callout--info"><div><h3>Inner</h3><p>text</p></div></aside>`;
+		expect(headingProblems(page({ body: callout }))).toEqual(['h3 "Inner" has no id']);
 	});
 	it("reports a heading with an id but no hash link", () => {
 		expect(headingProblems(page({ body: `<h3 id="a">A</h3>` }))).toEqual(['h3 id="a" has no hash link to #a']);
@@ -149,5 +157,63 @@ describe("headerDocHrefs", () => {
 	it("lists the site-relative doc links of the header, once each, and skips every other link", () => {
 		const html = `<header><a href="/docs/intro">i</a><a href="/posts">p</a><a href="https://x.dev/docs/z">x</a><a href="/docs/intro">again</a><a href="/zh-CN/docs/intro">z</a></header><footer><a href="/docs/foot">f</a></footer>`;
 		expect(headerDocHrefs(html)).toEqual(["/docs/intro", "/zh-CN/docs/intro"]);
+	});
+});
+
+describe("sitemapEnDocs", () => {
+	const loc = (u) => `<url><loc>${u}</loc><xhtml:link rel="alternate" hreflang="zh-CN" href="https://x.dev/zh-CN/docs/a" /></url>`;
+	it("lists the en /docs/<slug> paths of the sitemap, once each, sorted", () => {
+		const xml = `<?xml version="1.0"?><urlset>${[
+			loc("https://www.web9.ai/docs/b"),
+			loc("https://www.web9.ai/zh-CN/docs/b"),
+			loc("https://www.web9.ai/docs/a"),
+			loc("https://www.web9.ai/docs/a"),
+			loc("https://www.web9.ai/posts/p"),
+			loc("https://www.web9.ai/docs/a/deeper"),
+			loc("https://www.web9.ai/docs/"),
+			loc("not a url"),
+			`<url><loc>\n  https://www.web9.ai/docs/c_d  \n</loc></url>`,
+		].join("")}</urlset>`;
+		expect(sitemapEnDocs(xml)).toEqual(["/docs/a", "/docs/b", "/docs/c_d"]);
+	});
+	it("is empty for a sitemap without locs, or one that is not XML", () => {
+		expect(sitemapEnDocs("<urlset></urlset>")).toEqual([]);
+		expect(sitemapEnDocs("<html>502</html>")).toEqual([]);
+		expect(sitemapEnDocs("<loc>")).toEqual([]);
+	});
+});
+
+describe("coverageProblems", () => {
+	const healthy = { crawledEn: ["/docs/a", "/docs/b"], sitemapEn: ["/docs/a", "/docs/b"], headings: 5, tocLinks: 8 };
+	it("is empty when the crawl covers the sitemap and checked headings and TOC links", () => {
+		expect(coverageProblems(healthy)).toEqual([]);
+		// a crawl may find more than the sitemap lists (a draft the sidebar links to)
+		expect(coverageProblems({ ...healthy, crawledEn: ["/docs/a", "/docs/b", "/docs/extra"] })).toEqual([]);
+	});
+	it("reports a sitemap that could not be read", () => {
+		expect(coverageProblems({ ...healthy, sitemapEn: null })).toEqual(["/sitemap-docs.xml could not be read"]);
+	});
+	it("reports a sitemap that lists no en docs", () => {
+		expect(coverageProblems({ ...healthy, sitemapEn: [] })).toEqual(["/sitemap-docs.xml lists 0 en docs"]);
+	});
+	it("names the en docs the crawl missed", () => {
+		expect(coverageProblems({ ...healthy, crawledEn: ["/docs/a"], sitemapEn: ["/docs/a", "/docs/b", "/docs/c"] })).toEqual([
+			"the crawl found 1 of the 3 en docs the sitemap lists; missing: /docs/b, /docs/c",
+		]);
+	});
+	it("compares percent-encoded and raw slugs as the same page", () => {
+		const raw = "/docs/文生文";
+		expect(coverageProblems({ ...healthy, crawledEn: [raw], sitemapEn: [encodeURI(raw)] })).toEqual([]);
+	});
+	it("reports zero headings and zero TOC links checked", () => {
+		expect(coverageProblems({ ...healthy, headings: 0 })).toEqual(["no headings were checked"]);
+		expect(coverageProblems({ ...healthy, tocLinks: 0 })).toEqual(["no TOC links were checked"]);
+	});
+	it("reports every problem once, in a stable order", () => {
+		expect(coverageProblems({ crawledEn: [], sitemapEn: ["/docs/a"], headings: 0, tocLinks: 0 })).toEqual([
+			"the crawl found 0 of the 1 en docs the sitemap lists; missing: /docs/a",
+			"no headings were checked",
+			"no TOC links were checked",
+		]);
 	});
 });

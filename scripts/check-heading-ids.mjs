@@ -10,18 +10,22 @@
 //
 // The pages come from the site itself. The sidebar shows one section, so it starts from the doc links of the header
 // menu on the home page (one doc per section), unions the sidebar links of each, and checks every en doc and its
-// /zh-CN twin. Prints one line per page with problems, then
+// /zh-CN twin. That crawl depends on the chrome it walks, so it is cross-checked against /sitemap-docs.xml, which does
+// not: the crawl must find every en doc the sitemap lists, and must have checked some headings and some TOC links, or
+// the check fails (a crawl that silently finds nothing would otherwise pass). A heading the renderer marks
+// data-w9-chrome (ToolGrid's title) is exempt; a heading in a Markdown field has no id and is reported.
+// Prints one line per page with problems, the sitemap cross-check, then
 //   pages=<n> headings=<n> toc-links=<n> problems=<n>
-// and exits 1 on any problem, any failed fetch, or fewer than 2 pages found (the crawl itself broke).
-import { checkHeadings, headerDocHrefs, navDocHrefs } from "./lib/heading-ids.mjs";
+// and exits 1 on any problem, any failed or timed-out fetch, or fewer than 2 pages found (the crawl itself broke).
+import { checkHeadings, coverageProblems, headerDocHrefs, navDocHrefs, sitemapEnDocs } from "./lib/heading-ids.mjs";
 
 const base = (process.argv[2] ?? "http://localhost:4321").replace(/\/+$/, "");
 let failures = 0;
 
-/** The page's HTML, or null (and a printed line) when it cannot be fetched. */
+/** The page's HTML, or null (and a printed line) when it cannot be fetched in 30 s. */
 async function get(path) {
 	try {
-		const res = await fetch(base + path);
+		const res = await fetch(base + path, { signal: AbortSignal.timeout(30_000) });
 		if (res.ok) return await res.text();
 		console.log(`${path}: HTTP ${res.status}`);
 	} catch (err) {
@@ -53,6 +57,13 @@ for (const path of pages) {
 	problems += found.problems.length;
 	if (found.problems.length) console.log(`${path}:\n${found.problems.map((p) => `  ${p}`).join("\n")}`);
 }
+
+const sitemap = await get("/sitemap-docs.xml");
+const sitemapEn = sitemap === null ? null : sitemapEnDocs(sitemap);
+const coverage = coverageProblems({ crawledEn: [...docs], sitemapEn, headings, tocLinks });
+problems += coverage.length;
+console.log(`sitemap-docs.xml: ${sitemapEn ? `${sitemapEn.length} en docs` : "unreadable"}; crawl: ${docs.size} en docs`);
+for (const p of coverage) console.log(`  coverage: ${p}`);
 console.log(`pages=${pages.length} headings=${headings} toc-links=${tocLinks} problems=${problems}`);
 if (pages.length < 2) console.log("the crawl found fewer than 2 pages: is the site running and the menu pointing at /docs/…?");
 process.exit(problems || failures || pages.length < 2 ? 1 : 0);
