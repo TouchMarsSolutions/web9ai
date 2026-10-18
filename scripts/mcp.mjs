@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Usage: node scripts/mcp.mjs <tool> ['<json>' | @file.json]   prints the tool result as JSON
 //        node scripts/mcp.mjs --list                          lists tool names
+// Env: EMDASH_URL, EMDASH_TOKEN, or EMDASH_AUTH=ai for the AI Editor account (lib/mcp.mjs)
 import { readFileSync } from "node:fs";
 import { callTool, rpc } from "./lib/mcp.mjs";
 

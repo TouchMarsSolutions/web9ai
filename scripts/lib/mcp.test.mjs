@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { checkMarkers } from "./markers.mjs";
-import { listOf, parseRpcBody, rpc, unwrapToolResult } from "./mcp.mjs";
+import { authMode, defaultToken, listOf, parseRpcBody, rpc, unwrapToolResult } from "./mcp.mjs";
 
 describe("parseRpcBody", () => {
 	it("parses plain JSON", () => {
@@ -53,6 +53,39 @@ describe("rpc", () => {
 	it("throws with the HTTP status on a non-OK response", async () => {
 		vi.stubGlobal("fetch", async () => new Response('{"error":"nope"}', { status: 401 }));
 		await expect(rpc("tools/list", {}, { token: "x" })).rejects.toThrow("MCP HTTP 401");
+	});
+});
+
+describe("authMode", () => {
+	afterEach(() => {
+		vi.unstubAllEnvs();
+	});
+	const env = (vars) => {
+		for (const [k, v] of Object.entries({ EMDASH_AUTH: undefined, EMDASH_TOKEN: undefined, EMDASH_URL: undefined, ...vars })) {
+			vi.stubEnv(k, v);
+		}
+	};
+	it('is "token" when EMDASH_AUTH is unset or empty', () => {
+		env({});
+		expect(authMode()).toBe("token");
+		env({ EMDASH_AUTH: "" });
+		expect(authMode()).toBe("token");
+	});
+	it('is "ai" with EMDASH_AUTH=ai and an EMDASH_URL', () => {
+		env({ EMDASH_AUTH: "ai", EMDASH_URL: "https://site.test" });
+		expect(authMode()).toBe("ai");
+	});
+	it("rejects an unknown mode, a second token, and a missing site", () => {
+		env({ EMDASH_AUTH: "admin" });
+		expect(() => authMode()).toThrow('EMDASH_AUTH must be "ai" or unset');
+		env({ EMDASH_AUTH: "ai", EMDASH_URL: "https://site.test", EMDASH_TOKEN: "x" });
+		expect(() => authMode()).toThrow(/both set/);
+		env({ EMDASH_AUTH: "ai" });
+		expect(() => authMode()).toThrow(/needs EMDASH_URL/);
+	});
+	it("keeps the AI token out of the scripts that use defaultToken (REST, admin work)", () => {
+		env({ EMDASH_AUTH: "ai", EMDASH_URL: "https://site.test" });
+		expect(() => defaultToken()).toThrow(/covers MCP calls only/);
 	});
 });
 
