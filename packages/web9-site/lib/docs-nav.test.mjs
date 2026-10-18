@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { readLegacyTree } from "../../../scripts/lib/legacy-tree.mjs";
-import { CATEGORY_LABELS, SECTION_LABELS, groupDocs, groupLabel } from "./docs-nav.mjs";
+import { CATEGORY_LABELS, SECTION_LABELS, breadcrumbs, docsSidebar, groupDocs, groupLabel } from "./docs-nav.mjs";
 
 const doc = (slug, section, category, sort_order) => ({ data: { slug, section, category, sort_order } });
 
@@ -51,5 +51,47 @@ describe.skipIf(!existsSync("legacy/docs"))("labels match the legacy inventory",
 			expect(CATEGORY_LABELS[dir]["zh-CN"]).toBe(zhLabel);
 		}
 		expect(Object.keys(SECTION_LABELS).sort()).toEqual([...new Set(tree.docs.map((d) => d.section))].sort());
+	});
+});
+
+describe("docsSidebar", () => {
+	const entries = [
+		doc("intro", "ai", "general", 1000),
+		doc("guide", "ai", "usecase", 2001),
+		doc("tools", "ai", "usecase", 2002),
+		doc("replicate", "ai", "cloud", 3001),
+		doc("overview", "dev", "general", 1001000),
+		doc("learn", "dev", "general", 1002000),
+	];
+	it("returns only the current section: root docs first, then the categories, only the current one open", () => {
+		const s = docsSidebar(groupDocs(entries, "en"), "ai", "tools");
+		expect(s.rootItems.map((e) => e.data.slug)).toEqual(["intro"]);
+		expect(s.categories.map(({ key, label, open, items }) => [key, label, open, items.map((e) => e.data.slug)])).toEqual([
+			["ai/usecase", "Use Case", true, ["guide", "tools"]],
+			["ai/cloud", "Cloud", false, ["replicate"]],
+		]);
+	});
+	it("opens no category on a root doc and labels categories per locale", () => {
+		const s = docsSidebar(groupDocs(entries, "zh-CN"), "ai", "intro");
+		expect(s.categories.map((c) => [c.label, c.open])).toEqual([
+			["神兵利器", false],
+			["Cloud", false],
+		]);
+	});
+	it("gives a section without categories as root docs only", () => {
+		const s = docsSidebar(groupDocs(entries, "en"), "dev", "learn");
+		expect(s.rootItems.map((e) => e.data.slug)).toEqual(["overview", "learn"]);
+		expect(s.categories).toEqual([]);
+	});
+});
+
+describe("breadcrumbs", () => {
+	it("is the section, the category (none for general), then the title", () => {
+		expect(breadcrumbs({ section: "ai", category: "usecase", title: "Guide" }, "en")).toEqual(["AI", "Use Case", "Guide"]);
+		expect(breadcrumbs({ section: "dev", category: "general", title: "Overview" }, "en")).toEqual(["Dev", "Overview"]);
+		expect(breadcrumbs({ title: "Defaults" }, "en")).toEqual(["AI", "Defaults"]);
+	});
+	it("uses the zh-CN category labels", () => {
+		expect(breadcrumbs({ section: "ai", category: "usecase", title: "指南" }, "zh-CN")).toEqual(["AI", "神兵利器", "指南"]);
 	});
 });

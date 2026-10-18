@@ -1,8 +1,13 @@
 ---
-import { getEmDashCollection, getTranslations } from "emdash";
+import { getEditMeta, getEmDashCollection, getTranslations } from "emdash";
 import { PortableText } from "emdash/ui";
-import { groupDocs } from "../../packages/web9-site/lib/docs-nav.mjs";
+import { headingAnchors, idsByKey, legacyIdsFor, tocEntries } from "../../packages/web9-site/lib/anchors.mjs";
+import { breadcrumbs, docsSidebar, groupDocs } from "../../packages/web9-site/lib/docs-nav.mjs";
+import { LANGUAGES, localizeHref } from "../../packages/web9-site/lib/nav.mjs";
 import Base from "../layouts/Base.astro";
+import DocsSidebar from "./DocsSidebar.astro";
+import Heading from "./Heading.astro";
+import Toc from "./Toc.astro";
 
 interface Props {
 	doc: any;
@@ -16,12 +21,34 @@ const prefix = locale === "en" ? "" : `/${locale}`;
 // doc is still reachable under this locale's prefix through the fallback route), plus docs that exist
 // only in this locale; grouped section -> category, ordered by sort_order, with the old sidebar's labels.
 const byGroup = new Map();
+// slug -> section of every doc loaded here (en and this locale), for the header's active menu item (nav.mjs)
+const sectionOf: Record<string, string> = {};
 for (const l of new Set(["en", locale])) {
 	const { entries: list } = await getEmDashCollection("docs", { locale: l, limit: 500 });
-	// translationGroup is on every entry at runtime but not in the generated Doc type
-	for (const e of list) byGroup.set((e.data as { translationGroup?: string | null }).translationGroup ?? e.data.id, e);
+	for (const e of list) {
+		// translationGroup is on every entry at runtime but not in the generated Doc type
+		byGroup.set((e.data as { translationGroup?: string | null }).translationGroup ?? e.data.id, e);
+		if (e.data.slug) sectionOf[e.data.slug] = e.data.section ?? "ai";
+	}
 }
-const groups: { key: string; label: string; items: any[] }[] = groupDocs([...byGroup.values()], locale);
+const section: string = doc.data.section ?? "ai";
+// Only the current section, as on the old site (spec 2026-10-17 docs UX §3.2)
+const sidebar = docsSidebar(groupDocs([...byGroup.values()], locale), section, doc.data.slug);
+const crumbs: string[] = breadcrumbs(doc.data, locale);
+
+// Heading ids: the old site's custom ids, else Docusaurus's slugs (anchors.mjs). Heading.astro reads them by block
+// _key from Astro.locals, because PortableText gives block renderers nothing but the node. A fallback page shows
+// the en body, so it takes the en table.
+const anchors = headingAnchors(doc.data.body, legacyIdsFor(fallbackLocale ?? locale, doc.data.slug));
+Astro.locals.headingIds = idsByKey(anchors);
+const toc = tocEntries(anchors);
+// In edit mode PortableText renders the inline editor instead of the static body (spec §3.2: no ids there). So no TOC
+// points into it, and Prism must not rewrite the code blocks of the live editor. getEditMeta only reads the body: it
+// still goes to PortableText as it is, since a copy would lose the edit metadata (not enumerable).
+const editing = Boolean(getEditMeta(doc.data.body));
+const showToc = toc.length >= 2 && !editing;
+const tocLabel = locale === "zh-CN" ? "本页目录" : "On this page";
+
 // A fallback page shows the en text, so search engines are pointed at the en URL.
 const canonicalLocale = fallbackLocale ?? locale;
 const canonical = new URL(`${canonicalLocale === "en" ? "" : `/${canonicalLocale}`}/docs/${doc.data.slug}`, Astro.site).href;
@@ -29,11 +56,8 @@ const canonical = new URL(`${canonicalLocale === "en" ? "" : `/${canonicalLocale
 const translations = (await getTranslations("docs", doc.data.id)).translations?.filter(
 	(t) => t.status === "published",
 ) ?? [];
-// Always offer every locale; one without a translation opens the fallback page for this doc.
-const languages = [
-	{ code: "en", label: "English" },
-	{ code: "zh-CN", label: "中文" },
-].map(({ code, label }) => ({
+// The header's language menu offers every locale; one without a translation opens the fallback page for this doc.
+const languages = LANGUAGES.map(({ code, label }) => ({
 	code,
 	label,
 	href: `${code === "en" ? "" : `/${code}`}/docs/${translations.find((t) => t.locale === code)?.slug ?? doc.data.slug}`,
@@ -44,50 +68,227 @@ const notTranslated: Record<string, string> = {
 };
 ---
 
-<Base title={doc.data.title} description={doc.data.description} canonical={canonical} content={{ collection: "docs", id: doc.data.id, slug: doc.data.slug }}>
-	<div class="mx-auto my-8 grid max-w-[1200px] grid-cols-1 gap-10 px-4 md:grid-cols-[240px_minmax(0,1fr)]">
-		<nav class="text-[0.92rem] md:sticky md:top-4 md:self-start" aria-label="Docs">
+<Base
+	title={doc.data.title}
+	description={doc.data.description}
+	canonical={canonical}
+	content={{ collection: "docs", id: doc.data.id, slug: doc.data.slug }}
+	docNav={{ section, sectionOf }}
+	languages={languages}
+>
+	<DocsSidebar slot="drawer" sidebar={sidebar} prefix={prefix} currentSlug={doc.data.slug} />
+	<div
+		class:list={[
+			"mx-auto grid max-w-[1400px] grid-cols-1 gap-10 px-4 sm:px-6 lg:grid-cols-[240px_minmax(0,1fr)]",
+			showToc && "xl:grid-cols-[240px_minmax(0,1fr)_220px]",
+		]}
+	>
+		<aside class="docs-sidebar hidden lg:block">
+			<DocsSidebar sidebar={sidebar} prefix={prefix} currentSlug={doc.data.slug} />
+		</aside>
+		<div class="min-w-0 py-6">
+			<nav aria-label="Breadcrumbs" class="mb-5 text-sm">
+				<ol class="m-0 flex list-none flex-wrap items-center gap-1.5 p-0 text-text-secondary">
+					<li class="flex">
+						<a href={localizeHref("/", locale)} aria-label="Home" class="flex text-text-secondary hover:text-brand">
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+								<path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+								<path d="M9 22V12h6v10"></path>
+							</svg>
+						</a>
+					</li>
+					{
+						crumbs.map((label, i) => (
+							<li class="flex items-center gap-1.5">
+								<span aria-hidden="true" class="text-muted">
+									›
+								</span>
+								{i === crumbs.length - 1 ? (
+									<span aria-current="page" class="rounded-full bg-surface px-2.5 py-0.5 text-text">
+										{label}
+									</span>
+								) : (
+									<span>{label}</span>
+								)}
+							</li>
+						))
+					}
+				</ol>
+			</nav>
 			{
-				groups.map(({ label, items }) => (
-					<div>
-						<p class="mt-4 mb-1.5 text-xs tracking-wider text-text-secondary uppercase">{label}</p>
-						<ul class="m-0 list-none p-0">
-							{items.map((e) => (
-								<li>
-									<a
-										class="block py-1 text-text-secondary hover:text-text aria-[current=page]:font-semibold aria-[current=page]:text-text"
-										href={`${prefix}/docs/${e.data.slug}`}
-										aria-current={e.data.slug === doc.data.slug ? "page" : undefined}
-									>
-										{e.data.title}
-									</a>
-								</li>
-							))}
-						</ul>
-					</div>
-				))
-			}
-		</nav>
-		<article class="prose max-w-none min-w-0">
-			{
-				fallbackLocale && (
-					<p class="rounded-md bg-[color-mix(in_srgb,#d9a400_15%,transparent)] px-3 py-2">
-						{notTranslated[locale] ?? notTranslated.en}
-					</p>
+				showToc && (
+					<details class="mb-6 rounded-md border border-border xl:hidden">
+						<summary class="cursor-pointer px-3 py-2 text-sm font-medium text-text">{tocLabel}</summary>
+						<Toc entries={toc} class="px-3 pb-3" />
+					</details>
 				)
 			}
-			<p class="flex gap-3 text-sm">
-				{languages.map((l) => (
-					<a class="aria-[current=true]:font-bold" href={l.href} hreflang={l.code} aria-current={l.code === locale ? "true" : undefined}>
-						{l.label}
-					</a>
-				))}
-			</p>
-			<h1 {...doc.edit.title}>{doc.data.title}</h1>
-			{doc.data.description && <p class="lead">{doc.data.description}</p>}
-			<div {...doc.edit.body}>
-				<PortableText value={doc.data.body} />
-			</div>
-		</article>
+			<article class="docs-article prose max-w-none" data-highlight={editing ? undefined : "true"}>
+				{
+					fallbackLocale && (
+						<p class="rounded-md bg-[color-mix(in_srgb,#d9a400_15%,transparent)] px-3 py-2">
+							{notTranslated[locale] ?? notTranslated.en}
+						</p>
+					)
+				}
+				<h1 {...doc.edit.title}>{doc.data.title}</h1>
+				<div {...doc.edit.body}>
+					<PortableText value={doc.data.body} components={{ block: Heading }} />
+				</div>
+			</article>
+		</div>
+		{
+			showToc && (
+				<aside class="docs-toc hidden xl:block" aria-label={tocLabel}>
+					<p class="mt-0 mb-2 text-xs font-semibold tracking-wider text-text-secondary uppercase">{tocLabel}</p>
+					<Toc entries={toc} />
+				</aside>
+			)
+		}
 	</div>
 </Base>
+
+<script>
+	// "On this page" (spec 2026-10-17 docs UX §3.2): the current section is the last heading above a line 6rem below the
+	// top of the window (an anchor jump lands a heading 5rem down, so it counts at once); every TOC (right column and
+	// inline) marks its link with aria-current. That line moves with every scroll frame, so the rule is re-evaluated on
+	// scroll and resize, once per animation frame: an IntersectionObserver only fires when a heading crosses its root
+	// margin, which is too late for a rule about a line elsewhere (the previous section stayed lit after the next
+	// heading reached the top). At the bottom of the page the rule changes: a short last section can never scroll up to
+	// that line, so with the page scrolled to its end the current section is the last heading in view. aria-current is
+	// written only when the section changes, not on every frame.
+	const tocLinks = [...document.querySelectorAll<HTMLAnchorElement>("[data-toc] a[href^='#']")];
+	const idOf = (a: HTMLAnchorElement) => decodeURIComponent(a.hash.slice(1));
+	// Look the headings up inside the article only: an id elsewhere on the page (the site chrome's) is not a heading's.
+	const article = document.querySelector(".docs-article");
+	const tocHeadings = [...new Set(tocLinks.map(idOf))]
+		.map((id) => article?.querySelector<HTMLElement>(`:is(h2, h3)#${CSS.escape(id)}`) ?? null)
+		.filter((h): h is HTMLElement => h !== null);
+	if (tocHeadings.length) {
+		let currentId = "";
+		const update = () => {
+			// scrollY > 0: a page that does not scroll at all keeps the top rule (its first section)
+			const atBottom = window.scrollY > 0 && window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 2;
+			let current = tocHeadings[0];
+			for (const h of tocHeadings) if (h.getBoundingClientRect().top < (atBottom ? window.innerHeight : 96)) current = h;
+			if (current.id === currentId) return;
+			currentId = current.id;
+			for (const a of tocLinks) {
+				if (idOf(a) === currentId) a.setAttribute("aria-current", "true");
+				else a.removeAttribute("aria-current");
+			}
+		};
+		let queued = false;
+		const schedule = () => {
+			if (queued) return;
+			queued = true;
+			requestAnimationFrame(() => {
+				queued = false;
+				update();
+			});
+		};
+		window.addEventListener("scroll", schedule, { passive: true });
+		window.addEventListener("resize", schedule, { passive: true });
+		update();
+	}
+</script>
+
+<script>
+	// Anchor jumps (a TOC link, a heading's "#" link, a deep link) land on the heading even while the page grows. Doc
+	// images are <img loading="lazy"> without width or height (the old site's ideal-image output had both, so it never
+	// shifted), so images above the target load during the jump and push it down: the scroll ended far short, and the TOC
+	// marked the previous section. While a target is pending, it is aligned again whenever the article's size changes;
+	// that stops when the user takes over (wheel, touch, keys, a press) or after 5 s. Only a jump that moves this page
+	// starts a target, so three things never do: a click with a modifier key or a non-primary button, or on a link with
+	// a target other than _self (a new tab or window); a link that resolves to another document; a page loaded by a
+	// reload or Back/Forward (the browser restores the reading position there; a bfcache restore runs no script at all).
+	// Back/Forward between two entries of this page does start one (through hashchange), so a resize within 5 s can move
+	// the page from the restored position to that heading; this is accepted. Giving the images dimensions would remove
+	// both that and the need for this script (a follow-up, not this branch). scrollIntoView honours
+	// the headings' scroll-margin-top (5rem), so the TOC's 96 px line still marks the target. In edit mode there are no
+	// heading ids, so nothing is found.
+	const article = document.querySelector(".docs-article");
+	if (article) {
+		let target: Element | null = null;
+		let until = 0;
+		const align = () => {
+			if (!target) return;
+			if (performance.now() > until) target = null;
+			else target.scrollIntoView({ behavior: "instant", block: "start" });
+		};
+		const follow = (hash: string) => {
+			// a new hash replaces the pending target, so one without a heading (Back to an entry with none) clears it
+			target = null;
+			let id = "";
+			try {
+				id = decodeURIComponent(hash.slice(1));
+			} catch {
+				return;
+			}
+			// inside the article only: an id elsewhere on the page (the site chrome's) is not a heading's
+			const el = id ? article.querySelector(`#${CSS.escape(id)}`) : null;
+			if (!el) return;
+			target = el;
+			until = performance.now() + 5000;
+		};
+		new ResizeObserver(() => requestAnimationFrame(align)).observe(article);
+		// capture, so a press clears the target before the link's own click sets it again
+		for (const type of ["wheel", "touchstart", "keydown", "pointerdown"]) {
+			window.addEventListener(type, () => (target = null), { passive: true, capture: true });
+		}
+		document.addEventListener("click", (e) => {
+			// a modifier or another button opens a new tab or window (or downloads): this page stays where it is
+			if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+			// a click dispatched on document or window has no closest()
+			const el = e.target;
+			if (!(el instanceof Element)) return;
+			const link = el.closest<HTMLAnchorElement>('a[href^="#"]');
+			if (!link) return;
+			if (link.target && link.target !== "_self") return;
+			// only a hash on this document; a link that resolves to another one does not move this page
+			if (link.pathname !== location.pathname || link.search !== location.search) return;
+			follow(link.hash);
+		});
+		window.addEventListener("hashchange", () => follow(location.hash));
+		// a reload or Back/Forward restores the reading position, so only those two skip the hash (prerender follows it)
+		const nav = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+		if (location.hash && nav?.type !== "reload" && nav?.type !== "back_forward") follow(location.hash);
+	}
+</script>
+
+<script>
+	// Syntax highlighting (spec 2026-10-17 docs UX §3.4): only when the body has a code block in a language Prism bundles.
+	// Its own script, so nothing in the TOC code above can skip it; the article carries data-highlight except in edit
+	// mode, where the live editor's code blocks are not ours to rewrite. A failed chunk leaves the code plain.
+	import { hasHighlightable } from "@web9/blocks/prism-languages";
+
+	const article = document.querySelector<HTMLElement>(".docs-article[data-highlight]");
+	if (article && hasHighlightable(article)) {
+		import("@web9/blocks/prism-client")
+			.then(({ highlightUnder }) => highlightUnder(article))
+			.catch(() => {});
+	}
+</script>
+
+<style>
+	/* The sticky columns sit below the 4rem sticky header (Base.astro .site-header). Their viewport heights stay here,
+	   out of utility classes (check-public-css). This also stops the sidebar showing through the translucent header. */
+	.docs-sidebar,
+	.docs-toc {
+		position: sticky;
+		top: 4rem;
+		align-self: start;
+		overflow-y: auto;
+		padding-block: 1.5rem;
+	}
+	.docs-sidebar {
+		max-height: calc(100dvh - 4rem);
+	}
+	.docs-toc {
+		max-height: calc(100dvh - 5rem);
+	}
+	/* A heading reached through its #anchor clears the sticky header */
+	.docs-article :global(:is(h2, h3, h4, h5, h6)[id]) {
+		scroll-margin-top: 5rem;
+	}
+</style>
