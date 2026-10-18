@@ -154,7 +154,9 @@ const notTranslated: Record<string, string> = {
 	// inline) marks its link with aria-current. That line moves with every scroll frame, so the rule is re-evaluated on
 	// scroll and resize, once per animation frame: an IntersectionObserver only fires when a heading crosses its root
 	// margin, which is too late for a rule about a line elsewhere (the previous section stayed lit after the next
-	// heading reached the top).
+	// heading reached the top). At the bottom of the page the rule changes: a short last section can never scroll up to
+	// that line, so with the page scrolled to its end the current section is the last heading in view. aria-current is
+	// written only when the section changes, not on every frame.
 	const tocLinks = [...document.querySelectorAll<HTMLAnchorElement>("[data-toc] a[href^='#']")];
 	const idOf = (a: HTMLAnchorElement) => decodeURIComponent(a.hash.slice(1));
 	// Look the headings up inside the article only: an id elsewhere on the page (the site chrome's) is not a heading's.
@@ -163,11 +165,16 @@ const notTranslated: Record<string, string> = {
 		.map((id) => article?.querySelector<HTMLElement>(`:is(h2, h3)#${CSS.escape(id)}`) ?? null)
 		.filter((h): h is HTMLElement => h !== null);
 	if (tocHeadings.length) {
+		let currentId = "";
 		const update = () => {
+			// scrollY > 0: a page that does not scroll at all keeps the top rule (its first section)
+			const atBottom = window.scrollY > 0 && window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 2;
 			let current = tocHeadings[0];
-			for (const h of tocHeadings) if (h.getBoundingClientRect().top < 96) current = h;
+			for (const h of tocHeadings) if (h.getBoundingClientRect().top < (atBottom ? window.innerHeight : 96)) current = h;
+			if (current.id === currentId) return;
+			currentId = current.id;
 			for (const a of tocLinks) {
-				if (idOf(a) === current.id) a.setAttribute("aria-current", "true");
+				if (idOf(a) === currentId) a.setAttribute("aria-current", "true");
 				else a.removeAttribute("aria-current");
 			}
 		};
