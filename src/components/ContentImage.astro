@@ -1,0 +1,57 @@
+---
+// The `type.image` renderer for content bodies (docs, posts, pages). An image under /img or /cover gets its width and
+// height from image-sizes.json, so its box is there before it loads and the text below it does not move (the old
+// site's ideal-image output had both). Everything else goes to core's Image (content-image.mjs says which). The markup
+// and the styles below are core's (emdash Image.astro), whose styles are scoped to core's component.
+// emdash/ui exports core's Portable Text image as PTImage (its `Image` is EmDashImage, for media fields)
+import { PTImage } from "emdash/ui";
+import { staticImage } from "../../packages/web9-site/lib/content-image.mjs";
+import sizes from "../../packages/web9-site/lib/image-sizes.json" with { type: "json" };
+
+interface Props {
+	node: any;
+	index?: number;
+	isInline?: boolean;
+}
+const props = Astro.props;
+const image = staticImage(props.node, sizes);
+---
+
+{
+	image ? (
+		<figure class="emdash-image">
+			<img
+				src={image.src}
+				alt={image.alt}
+				title={image.title}
+				width={image.width}
+				height={image.height}
+				loading="lazy"
+				decoding="async"
+				data-fill={image.fill ? "" : undefined}
+			/>
+			{image.caption && <figcaption>{image.caption}</figcaption>}
+		</figure>
+	) : (
+		<PTImage {...props} />
+	)
+}
+
+<style>
+	.emdash-image {
+		margin: 1.5rem 0;
+	}
+	.emdash-image img {
+		max-width: 100%;
+		height: auto;
+	}
+	.emdash-image img[data-fill] {
+		width: 100%;
+	}
+	.emdash-image figcaption {
+		font-size: 0.875rem;
+		color: var(--emdash-caption-color, var(--color-muted, #666));
+		margin-top: 0.5rem;
+		text-align: center;
+	}
+</style>

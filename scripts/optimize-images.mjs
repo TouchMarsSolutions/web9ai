@@ -8,10 +8,13 @@
 // second run writes nothing: a JPEG it wrote saves well under 10% when re-encoded again (measured: 0.8%). A file still
 // over MAX_IMAGE_WIDTH or MAX_IMAGE_BYTES afterwards is reported with "over" and the exit code is 1:
 // raster-images.test.mjs fails until it is fixed by hand (a smaller crop, or a photo moved to JPEG under a new URL).
+// Then it rewrites packages/web9-site/lib/image-sizes.json (scripts/lib/image-sizes.mjs), the sizes the content image
+// renderer gives every image under public/img and public/cover, SVGs included (not with --dry-run).
 import { readFile, writeFile } from "node:fs/promises";
 import { extname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
+import { IMAGE_SIZES_FILE, writeImageSizes } from "./lib/image-sizes.mjs";
 import { listRasterImages, MAX_IMAGE_BYTES, MAX_IMAGE_WIDTH, OPTIMIZE_OVER_BYTES, RASTER_DIRS, rasterSize } from "./lib/raster-images.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -62,6 +65,10 @@ for (const dir of RASTER_DIRS) {
 	}
 }
 console.log(`${dryRun ? "would rewrite" : "rewrote"} ${rewritten} files: ${Math.round(before / 1024)} KB -> ${Math.round(after / 1024)} KB`);
+if (!dryRun) {
+	const { entries, changed } = await writeImageSizes(root);
+	console.log(`${changed ? "wrote" : "unchanged"} ${IMAGE_SIZES_FILE}: ${entries} images`);
+}
 if (over) {
 	console.log(`${over} files still over ${MAX_IMAGE_WIDTH} px or ${MAX_IMAGE_BYTES / 1024} KB: shrink them by hand`);
 	process.exitCode = 1;

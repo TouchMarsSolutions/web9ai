@@ -5,6 +5,7 @@ import { headingAnchors, idsByKey, legacyIdsFor, tocEntries } from "../../packag
 import { breadcrumbs, docsSidebar, groupDocs } from "../../packages/web9-site/lib/docs-nav.mjs";
 import { LANGUAGES, localizeHref } from "../../packages/web9-site/lib/nav.mjs";
 import Base from "../layouts/Base.astro";
+import ContentImage from "./ContentImage.astro";
 import DocsSidebar from "./DocsSidebar.astro";
 import Heading from "./Heading.astro";
 import Toc from "./Toc.astro";
@@ -133,7 +134,7 @@ const notTranslated: Record<string, string> = {
 				}
 				<h1 {...doc.edit.title}>{doc.data.title}</h1>
 				<div {...doc.edit.body}>
-					<PortableText value={doc.data.body} components={{ block: Heading }} />
+					<PortableText value={doc.data.body} components={{ block: Heading, type: { image: ContentImage } }} />
 				</div>
 			</article>
 		</div>

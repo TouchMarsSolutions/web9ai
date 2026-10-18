@@ -7,6 +7,7 @@ import {
 } from "emdash";
 import { PortableText } from "emdash/ui";
 import Base from "../../layouts/Base.astro";
+import ContentImage from "../../components/ContentImage.astro";
 import { resolveBlogSiteIdentity } from "../../utils/site-identity";
 
 const SITE_ORIGIN = (Astro.site ?? new URL("https://www.web9.ai")).origin;
@@ -45,7 +46,7 @@ const seo = getSeoMeta(page, {
 		</header>
 
 		<div class="page-content" {...page.edit.content}>
-			<PortableText value={page.data.content} />
+			<PortableText value={page.data.content} components={{ type: { image: ContentImage } }} />
 		</div>
 	</article>
 </Base>
