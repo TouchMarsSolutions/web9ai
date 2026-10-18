@@ -172,7 +172,7 @@ const isLoggedIn = !!Astro.locals.user;
 			</nav>
 		</header>
 		<dialog id="site-drawer" class="site-drawer" aria-label="Menu">
-			<div class="flex h-16 items-center justify-between border-b border-border-subtle px-4">
+			<div class="flex h-16 shrink-0 items-center justify-between border-b border-border-subtle px-4">
 				<a href={homeHref} class="flex items-center gap-2 font-semibold tracking-tight text-text">
 					{
 						siteLogo ? (
@@ -197,7 +197,7 @@ const isLoggedIn = !!Astro.locals.user;
 					</svg>
 				</button>
 			</div>
-			<div class="space-y-5 px-4 py-4">
+			<div class="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
 				<LiveSearch
 					placeholder="Search..."
 					class="site-search drawer-search"
@@ -324,24 +324,44 @@ const isLoggedIn = !!Astro.locals.user;
 			drawerOpen?.addEventListener("click", openDrawer);
 			drawer?.addEventListener("close", () => {
 				drawerOpen?.setAttribute("aria-expanded", "false");
-				drawerOpen?.focus();
+				// Focus goes back to the menu button only while it shows: past the breakpoint it is display:none
+				if (drawerOpen && drawerOpen.offsetParent !== null) drawerOpen.focus();
 			});
 			drawer?.querySelector("[data-drawer-close]")?.addEventListener("click", () => drawer?.close());
-			// A click on the backdrop reaches the dialog element itself, outside its box
-			drawer?.addEventListener("click", (e) => {
+			// A press on the backdrop reaches the dialog element itself, outside its box. Only a press that starts on the
+			// backdrop and a click that ends there close the drawer, so a text-selection drag from inside the drawer to
+			// outside it does not.
+			function onBackdrop(e: MouseEvent) {
+				if (!drawer || e.target !== drawer) return false;
 				const box = drawer.getBoundingClientRect();
-				const outside = e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom;
-				if (e.target === drawer && outside) drawer.close();
+				return e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom;
+			}
+			let pressedBackdrop = false;
+			drawer?.addEventListener("pointerdown", (e) => {
+				pressedBackdrop = onBackdrop(e);
 			});
-			// Widening the window past the breakpoint hides the menu button; the drawer closes with it
-			matchMedia("(min-width: 1024px)").addEventListener("change", (e) => {
+			drawer?.addEventListener("click", (e) => {
+				if (pressedBackdrop && onBackdrop(e)) drawer.close();
+				pressedBackdrop = false;
+			});
+			// Widening the window to Tailwind's lg (64rem, the unit the ☰ button's lg:hidden uses) hides the menu button;
+			// the drawer closes with it
+			matchMedia("(min-width: 64rem)").addEventListener("change", (e) => {
 				if (e.matches && drawer?.open) drawer.close();
 			});
 
-			// An open dropdown (LanguageMenu's <details data-dropdown>) closes on a click outside it
+			// An open dropdown (LanguageMenu's <details data-dropdown>) closes on a click outside it, and on Esc, which
+			// puts focus back on its <summary>
 			document.addEventListener("click", (e) => {
 				document.querySelectorAll<HTMLDetailsElement>("details[data-dropdown][open]").forEach((d) => {
 					if (!d.contains(e.target as Node)) d.open = false;
+				});
+			});
+			document.addEventListener("keydown", (e) => {
+				if (e.key !== "Escape") return;
+				document.querySelectorAll<HTMLDetailsElement>("details[data-dropdown][open]").forEach((d) => {
+					d.open = false;
+					d.querySelector("summary")?.focus();
 				});
 			});
 
@@ -372,11 +392,6 @@ const isLoggedIn = !!Astro.locals.user;
 			}
 			.site-main {
 				min-height: calc(100vh - 64px - 300px);
-			}
-			@media (max-width: 640px) {
-				.site-header {
-					position: relative;
-				}
 			}
 
 			/* LiveSearch renders its own markup; these class names are passed to it as props. */
@@ -478,6 +493,9 @@ const isLoggedIn = !!Astro.locals.user;
 			/*
 			 * The drawer is a modal <dialog>: the browser puts it in the top layer, so it needs no position or z-index
 			 * of its own (check-public-css rejects position:fixed), and its viewport sizes stay here, out of utility classes.
+			 * Its head row is a flex child that does not scroll; the content under it is the scroller (overflow-y-auto).
+			 * Keeping the row out of the scrolled box means the positioned bits inside the content (LiveSearch's relative
+			 * root, the sidebar's sticky items) can never paint over it, which a sticky row would need a z-index to stop.
 			 */
 			.site-drawer {
 				width: min(20rem, 85vw);
@@ -490,12 +508,14 @@ const isLoggedIn = !!Astro.locals.user;
 				border-inline-end: 1px solid var(--color-border);
 				background: var(--color-bg);
 				color: var(--color-text);
-				overflow-y: auto;
+				overflow: hidden;
 			}
 			.site-drawer::backdrop {
 				background: rgb(0 0 0 / 0.45);
 			}
 			.site-drawer[open] {
+				display: flex;
+				flex-direction: column;
 				animation: drawer-in 180ms ease-out;
 			}
 			@keyframes drawer-in {
