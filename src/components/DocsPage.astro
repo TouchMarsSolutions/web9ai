@@ -149,8 +149,11 @@ const notTranslated: Record<string, string> = {
 	// when to look again.
 	const tocLinks = [...document.querySelectorAll<HTMLAnchorElement>("[data-toc] a[href^='#']")];
 	const idOf = (a: HTMLAnchorElement) => decodeURIComponent(a.hash.slice(1));
+	// Look the headings up inside the article only: a heading's text is content, so its id can equal one of the page's
+	// own ids (a heading "Site drawer" gets id="site-drawer", the drawer dialog's id).
+	const article = document.querySelector(".docs-article");
 	const tocHeadings = [...new Set(tocLinks.map(idOf))]
-		.map((id) => document.getElementById(id))
+		.map((id) => article?.querySelector<HTMLElement>(`:is(h2, h3)#${CSS.escape(id)}`) ?? null)
 		.filter((h): h is HTMLElement => h !== null);
 	if (tocHeadings.length) {
 		const update = () => {

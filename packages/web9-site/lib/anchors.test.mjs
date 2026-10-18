@@ -11,6 +11,48 @@ describe("blockText", () => {
 		expect(blockText({})).toBe("");
 		expect(blockText(null)).toBe("");
 	});
+
+	// astro-portabletext replaces a block's children with buildMarksTree's tree before it calls the block renderer
+	// (Heading.astro reads that node): a marked span becomes { _type: "@span", children: [{ _type: "@text", text }] },
+	// with no `text` of its own, and plain text becomes "@text" nodes.
+	const text = (t) => ({ _type: "@text", text: t });
+	const marked = (markType, ...children) => ({ _type: "@span", markType, children });
+
+	it("gives the same text for the rendered tree as for the raw spans", () => {
+		const cases = {
+			"only child is a marked span": [
+				{ children: [span("Pricing", ["link1"])] },
+				{ children: [marked("link", text("Pricing"))] },
+			],
+			"plain, marked, plain": [
+				{ children: [span("文生文("), span("Txt2Txt", ["code"]), span(")")] },
+				{ children: [text("文生文("), marked("code", text("Txt2Txt")), text(")")] },
+			],
+			"a span inside a span": [
+				{ children: [span("a "), span("b", ["strong", "em"]), span(" c", ["strong"]), span(" d")] },
+				{ children: [text("a "), marked("strong", marked("em", text("b")), text(" c")), text(" d")] },
+			],
+			"a line break": [
+				{ children: [span("a\nb", ["code"])] },
+				{ children: [marked("code", text("a"), text("\n"), text("b"))] },
+			],
+		};
+		const texts = {
+			"only child is a marked span": "Pricing",
+			"plain, marked, plain": "文生文(Txt2Txt)",
+			"a span inside a span": "a b c d",
+			"a line break": "a\nb",
+		};
+		for (const [name, [raw, tree]] of Object.entries(cases)) {
+			expect(blockText(raw), `raw: ${name}`).toBe(texts[name]);
+			expect(blockText(tree), `tree: ${name}`).toBe(texts[name]);
+		}
+	});
+
+	it("ignores what has neither text nor a children array, at any depth", () => {
+		expect(blockText({ children: [{ _type: "@span", children: "x" }, { _type: "@span", children: [null, { _type: "image" }, text("y")] }] })).toBe("y");
+		expect(blockText({ children: [{ _type: "@span" }, text("z")] })).toBe("z");
+	});
 });
 
 describe("isHeading", () => {
@@ -66,6 +108,15 @@ describe("headingAnchors", () => {
 		const body = [h("h2", "  ", "a"), h("h1", "Title", "b"), h("normal", "Text", "c"), { _type: "code", _key: "d", code: "x" }, null, "x"];
 		expect(headingAnchors(body)).toEqual([{ key: "a", level: 2, text: "  ", id: "" }]);
 		expect(headingAnchors(undefined)).toEqual([]);
+	});
+});
+
+describe("headingAnchors on a block as the renderer sees it", () => {
+	it("gives a heading made of a marked span its id, so the TOC link and the element agree", () => {
+		const raw = [{ _type: "block", _key: "p", style: "h2", children: [span("Pricing", ["link1"])] }];
+		const rendered = [{ _type: "block", _key: "p", style: "h2", children: [{ _type: "@span", markType: "link", children: [{ _type: "@text", text: "Pricing" }] }] }];
+		expect(headingAnchors(raw)).toEqual([{ key: "p", level: 2, text: "Pricing", id: "pricing" }]);
+		expect(headingAnchors(rendered)).toEqual(headingAnchors(raw));
 	});
 });
 

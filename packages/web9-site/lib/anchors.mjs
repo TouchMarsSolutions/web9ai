@@ -4,10 +4,15 @@
 import GithubSlugger, { slug } from "github-slugger";
 import LEGACY from "./legacy-anchors.json" with { type: "json" };
 
-/** The text of a Portable Text block: its children's text joined (an inline-code or linked span keeps its text). */
+/**
+ * The text of a Portable Text block: its children's text joined (an inline-code or linked span keeps its text). Raw
+ * spans carry `text`; but astro-portabletext swaps a block's children for buildMarksTree's tree before it calls the
+ * block renderer, and there a marked span is { _type: "@span", children: [{ _type: "@text", text }] } with no `text`
+ * of its own. So a child without `text` gives the text of its own children, and both shapes give the same string.
+ */
 export function blockText(block) {
 	if (!Array.isArray(block?.children)) return "";
-	return block.children.map((c) => (typeof c?.text === "string" ? c.text : "")).join("");
+	return block.children.map((c) => (typeof c?.text === "string" ? c.text : blockText(c))).join("");
 }
 
 /** A top-level text block styled h2-h6. The doc title is the page's h1, so h1 blocks get no anchor. */
