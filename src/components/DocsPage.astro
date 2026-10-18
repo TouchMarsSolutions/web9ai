@@ -202,7 +202,9 @@ const notTranslated: Record<string, string> = {
 	// starts a target, so three things never do: a click with a modifier key or a non-primary button, or on a link with
 	// a target other than _self (a new tab or window); a link that resolves to another document; a page loaded by a
 	// reload or Back/Forward (the browser restores the reading position there; a bfcache restore runs no script at all).
-	// Giving the images dimensions would remove the need for this (a follow-up, not this branch). scrollIntoView honours
+	// Back/Forward between two entries of this page does start one (through hashchange), so a resize within 5 s can move
+	// the page from the restored position to that heading; this is accepted. Giving the images dimensions would remove
+	// both that and the need for this script (a follow-up, not this branch). scrollIntoView honours
 	// the headings' scroll-margin-top (5rem), so the TOC's 96 px line still marks the target. In edit mode there are no
 	// heading ids, so nothing is found.
 	const article = document.querySelector(".docs-article");
