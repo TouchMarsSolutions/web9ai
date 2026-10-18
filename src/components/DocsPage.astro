@@ -2,7 +2,7 @@
 import { getEditMeta, getEmDashCollection, getTranslations } from "emdash";
 import { PortableText } from "emdash/ui";
 import { headingAnchors, idsByKey, legacyIdsFor, tocEntries } from "../../packages/web9-site/lib/anchors.mjs";
-import { breadcrumbs, docsSidebar, groupDocs } from "../../packages/web9-site/lib/docs-nav.mjs";
+import { breadcrumbs, docSection, docsSidebar, groupDocs } from "../../packages/web9-site/lib/docs-nav.mjs";
 import { LANGUAGES, localizeHref } from "../../packages/web9-site/lib/nav.mjs";
 import Base from "../layouts/Base.astro";
 import ContentImage from "./ContentImage.astro";
@@ -29,10 +29,10 @@ for (const l of new Set(["en", locale])) {
 	for (const e of list) {
 		// translationGroup is on every entry at runtime but not in the generated Doc type
 		byGroup.set((e.data as { translationGroup?: string | null }).translationGroup ?? e.data.id, e);
-		if (e.data.slug) sectionOf[e.data.slug] = e.data.section ?? "ai";
+		if (e.data.slug) sectionOf[e.data.slug] = docSection(e.data);
 	}
 }
-const section: string = doc.data.section ?? "ai";
+const section: string = docSection(doc.data);
 // Only the current section, as on the old site (spec 2026-10-17 docs UX §3.2)
 const sidebar = docsSidebar(groupDocs([...byGroup.values()], locale), section, doc.data.slug);
 const crumbs: string[] = breadcrumbs(doc.data, locale);

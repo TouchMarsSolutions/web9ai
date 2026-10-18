@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { readLegacyTree } from "../../../scripts/lib/legacy-tree.mjs";
-import { CATEGORY_LABELS, SECTION_LABELS, breadcrumbs, docsSidebar, groupDocs, groupLabel } from "./docs-nav.mjs";
+import { CATEGORY_LABELS, SECTION_LABELS, breadcrumbs, docCategory, docSection, docsSidebar, groupDocs, groupLabel } from "./docs-nav.mjs";
 
 const doc = (slug, section, category, sort_order) => ({ data: { slug, section, category, sort_order } });
 
@@ -93,5 +93,28 @@ describe("breadcrumbs", () => {
 	});
 	it("uses the zh-CN category labels", () => {
 		expect(breadcrumbs({ section: "ai", category: "usecase", title: "指南" }, "zh-CN")).toEqual(["AI", "神兵利器", "指南"]);
+	});
+});
+
+describe("an empty section or category is the default one", () => {
+	it("puts a doc with category \"\" among the section's root docs, not in a group of its own", () => {
+		const entries = [doc("intro", "ai", "general", 1000), doc("blank", "ai", "", 1001), doc("unset", "ai", null, 1002), doc("guide", "ai", "usecase", 2001)];
+		const groups = groupDocs(entries, "en");
+		expect(groups.map((g) => g.key)).toEqual(["ai/general", "ai/usecase"]);
+		const s = docsSidebar(groups, "ai", "blank");
+		expect(s.rootItems.map((e) => e.data.slug)).toEqual(["intro", "blank", "unset"]);
+		expect(s.categories.map((c) => c.key)).toEqual(["ai/usecase"]);
+	});
+	it("puts a doc with section \"\" in the ai section", () => {
+		const groups = groupDocs([doc("a", "", "cloud", 1), doc("b", "ai", "cloud", 2)], "en");
+		expect(groups.map((g) => [g.key, g.items.length])).toEqual([["ai/cloud", 2]]);
+	});
+	it("gives no extra crumb for an empty category, and the ai section for an empty section", () => {
+		expect(breadcrumbs({ section: "dev", category: "", title: "Blank" }, "en")).toEqual(["Dev", "Blank"]);
+		expect(breadcrumbs({ section: "", category: "", title: "Blank" }, "zh-CN")).toEqual(["AI", "Blank"]);
+		expect(docSection({ section: "" })).toBe("ai");
+		expect(docSection(undefined)).toBe("ai");
+		expect(docCategory({ category: "" })).toBe("general");
+		expect(docCategory({ category: "cloud" })).toBe("cloud");
 	});
 });
