@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { convertMdx } from "../../../scripts/lib/mdx-to-pt.mjs";
+import SIZES from "../../web9-blocks/lib/image-sizes.json" with { type: "json" };
 import { staticImage } from "./content-image.mjs";
-import SIZES from "./image-sizes.json" with { type: "json" };
 
 const sizes = { "/img/a.png": { width: 1600, height: 900 }, "/img/p.svg": { width: 800, height: 1100, fill: true }, "/img/em.svg": null };
 const block = (asset, rest = {}) => ({ _type: "image", _key: "k1", asset: { _ref: "", ...asset }, alt: "A", ...rest });
@@ -47,8 +49,30 @@ describe("staticImage", () => {
 			expect(staticImage(block({ url: "/img/a.png" }), { "/img/a.png": size }), JSON.stringify(size)).toBeNull();
 		}
 	});
-	it("knows the doc images the migration stored", () => {
-		expect(staticImage(block({ url: "/img/dev/23/en/23_01_var_py.png" }), SIZES)).toMatchObject({ width: 1600, height: 1161 });
-		expect(staticImage(block({ url: "/img/event/20250314_poster6.svg" }), SIZES)).toMatchObject({ width: 800, height: 1100, fill: true });
+	it("takes the image block the migration writes (mdx-to-pt), so a new field there cannot send every image to core unseen", () => {
+		const { data } = convertMdx("---\ntitle: T\n---\n\n![varInPy](/img/dev/23/en/23_01_var_py.png)\n", { slug: "t" });
+		const images = data.body.filter((b) => b._type === "image");
+		expect(images).toHaveLength(1);
+		const size = SIZES["/img/dev/23/en/23_01_var_py.png"];
+		expect(size).toEqual({ width: expect.any(Number), height: expect.any(Number) });
+		expect(staticImage(images[0], SIZES)).toEqual({ src: "/img/dev/23/en/23_01_var_py.png", alt: "varInPy", ...size, fill: false, title: undefined, caption: undefined });
+	});
+});
+
+// vitest has no Astro plugin, so the wiring is pinned by source, as render-sinks.test.mjs pins its sites
+describe("ContentImage is the image renderer of every content body", () => {
+	const raw = (p) => readFileSync(new URL(`../../../${p}`, import.meta.url), "utf8");
+	it.each([
+		["src/components/DocsPage.astro", '"./ContentImage.astro"', "<PortableText value={doc.data.body} components={{ block: Heading, type: { image: ContentImage } }} />"],
+		["src/pages/posts/[slug].astro", '"../../components/ContentImage.astro"', "<PortableText value={post.data.content} components={{ type: { image: ContentImage } }} />"],
+		["src/pages/pages/[slug].astro", '"../../components/ContentImage.astro"', "<PortableText value={page.data.content} components={{ type: { image: ContentImage } }} />"],
+	])("%s", (file, from, use) => {
+		const source = raw(file);
+		expect(source).toContain(`import ContentImage from ${from};`);
+		expect(source).toContain(use);
+		expect(source.match(/<PortableText\b/g)).toHaveLength(1);
+	});
+	it("takes its sizes from the table the generator writes", () => {
+		expect(raw("src/components/ContentImage.astro")).toContain('import sizes from "../../packages/web9-blocks/lib/image-sizes.json" with { type: "json" };');
 	});
 });

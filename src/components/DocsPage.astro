@@ -201,10 +201,11 @@ const notTranslated: Record<string, string> = {
 
 <script>
 	// Anchor jumps (a TOC link, a heading's "#" link, a deep link) land on the heading even while the page grows. Images
-	// under /img and /cover have their width and height (ContentImage.astro), but the article still grows after the jump:
-	// Mermaid draws its diagrams in the browser, and the SVG is taller than the source text it replaces (learn_ai_coding's
-	// first diagram: 144 -> 304 px), and an image core renders (an external URL) has no size until it loads. Without this
-	// the scroll ended short, and the TOC marked the previous section. While a target is pending, it is aligned again
+	// under /img and /cover have their width and height (image-sizes.json: ContentImage.astro for image blocks,
+	// markdown.mjs in Markdown fields), but the article still grows after the jump: Mermaid draws its diagrams in the
+	// browser, and the SVG is taller than the source text it replaces (learn_ai_coding's first diagram: 144 -> 304 px),
+	// and an image without a known size (an external URL; in a Markdown field, an SVG drawn as wide as the line) has
+	// no box until it loads. Without this the scroll ended short, and the TOC marked the previous section. While a target is pending, it is aligned again
 	// whenever the article's size changes; that stops when the user takes over (wheel, touch, keys, a press) or after
 	// 5 s. Only a jump that moves this page starts a target, so three things never do: a click with a modifier key or a non-primary button, or on a link with
 	// a target other than _self (a new tab or window); a link that resolves to another document; a page loaded by a

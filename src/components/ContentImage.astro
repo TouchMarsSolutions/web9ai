@@ -6,7 +6,7 @@
 // emdash/ui exports core's Portable Text image as PTImage (its `Image` is EmDashImage, for media fields)
 import { PTImage } from "emdash/ui";
 import { staticImage } from "../../packages/web9-site/lib/content-image.mjs";
-import sizes from "../../packages/web9-site/lib/image-sizes.json" with { type: "json" };
+import sizes from "../../packages/web9-blocks/lib/image-sizes.json" with { type: "json" };
 
 interface Props {
 	node: any;
@@ -33,7 +33,7 @@ const image = staticImage(props.node, sizes);
 			{image.caption && <figcaption>{image.caption}</figcaption>}
 		</figure>
 	) : (
-		<PTImage {...props} />
+		<PTImage node={props.node} />
 	)
 }
 

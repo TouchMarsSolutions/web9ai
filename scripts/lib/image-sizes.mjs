@@ -1,36 +1,40 @@
-// Intrinsic sizes of the images served from public/img and public/cover, keyed by URL, for the content image renderer
-// (src/components/ContentImage.astro): an <img> with width and height keeps its box while it loads, so the page does
-// not shift under the reader. Workers have no file system, so the sizes are a committed file,
-// packages/web9-site/lib/image-sizes.json, written by scripts/optimize-images.mjs and scripts/image-sizes.mjs;
+// Intrinsic sizes of the images served from public/img and public/cover, keyed by URL, for the content image renderers
+// (src/components/ContentImage.astro for Portable Text images, packages/web9-blocks/lib/markdown.mjs for images in
+// Markdown fields): an <img> with width and height keeps its box while it loads, so the page does not shift under the
+// reader. A key is the file's path as is; no file name needs percent-encoding (image-sizes.test.mjs checks), so it is
+// also the URL content stores. Workers have no file system, so the sizes are a committed file,
+// packages/web9-blocks/lib/image-sizes.json, written by scripts/optimize-images.mjs and scripts/image-sizes.mjs;
 // image-sizes.test.mjs fails while it differs from what imageSizes() reads from public/.
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { extname, join, relative, sep } from "node:path";
 import sharp from "sharp";
 import { RASTER_DIRS } from "./raster-images.mjs";
 
-export const IMAGE_SIZES_FILE = "packages/web9-site/lib/image-sizes.json";
+export const IMAGE_SIZES_FILE = "packages/web9-blocks/lib/image-sizes.json";
 const EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".svg"]);
 
 // A length the browser takes as CSS px: a plain number or one in px (em and % depend on where the SVG is drawn)
 const pxLength = (value) => {
-	const m = /^\s*(\d+(?:\.\d+)?|\.\d+)(?:px)?\s*$/.exec(value ?? "");
+	const m = /^\s*(\d+(?:\.\d+)?|\.\d+)(?:px)?\s*$/i.exec(value ?? "");
 	return m ? Number(m[1]) : null;
 };
 
 /**
  * The size an <img> gives an SVG, from its root element: `{ width, height }` when both attributes are px lengths;
  * `{ width, height, fill: true }` from the viewBox when the root has neither attribute (the browser then fills the
- * line with the viewBox's ratio, so the renderer sets width: 100%); otherwise null (em, %, one attribute only, or no
- * usable viewBox: the browser's size depends on more than the file). Numbers are rounded, as width and height on an
- * <img> are integers.
+ * line with the viewBox's ratio, so the renderer sets width: 100%); otherwise null (em, %, one attribute only, a width
+ * or height in the root's style, which the browser also honours, or no usable viewBox: the size depends on more than
+ * these rules read). Numbers are rounded, as width and height on an <img> are integers. Comments are skipped, so an
+ * `<svg` inside one is not taken for the root.
  */
 export function svgSize(text) {
-	const root = /<svg\b[^>]*>/i.exec(text)?.[0];
+	const root = /<svg\b[^>]*>/i.exec(text.replace(/<!--[\s\S]*?-->/g, ""))?.[0];
 	if (!root) return null;
 	const attr = (name) => {
 		const m = new RegExp(`\\s${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`).exec(root);
 		return m ? (m[1] ?? m[2]) : undefined;
 	};
+	if (/(?:^|;)\s*(?:width|height)\s*:/i.test(attr("style") ?? "")) return null;
 	const width = attr("width");
 	const height = attr("height");
 	if (width !== undefined || height !== undefined) {

@@ -216,3 +216,19 @@ describe("renderMarkdown and renderInlineMarkdown on a value that is not a strin
 		}
 	});
 });
+
+describe("renderMarkdown image sizes", () => {
+	it("gives an image under /img its width and height from image-sizes.json", () => {
+		expect(renderMarkdown("![ChatGPT](/img/chatgpt-models.png)")).toBe('<p><img src="/img/chatgpt-models.png" alt="ChatGPT" width="582" height="696" /></p>\n');
+		expect(renderMarkdown('<img src="/img/chatgpt-models.png" onerror="x">')).toBe('<img src="/img/chatgpt-models.png" width="582" height="696" />');
+	});
+	it("keeps a width or height the content gives itself", () => {
+		expect(renderMarkdown('<img src="/img/chatgpt-models.png" width="300">')).toBe('<img src="/img/chatgpt-models.png" width="300" />');
+		expect(renderMarkdown('<img src="/img/chatgpt-models.png" height="40">')).toBe('<img src="/img/chatgpt-models.png" height="40" />');
+	});
+	it("adds nothing for a URL without a fixed size: elsewhere, unlisted, a fill SVG, a prototype name", () => {
+		for (const src of ["https://x.y/a.png", "/img/nope.png", "/img/event/20250314_poster6.svg", "/img/chatgpt-models.png?v=2", "constructor", "__proto__"]) {
+			expect(renderMarkdown(`![a](${src})`), src).not.toMatch(/width=|height=/);
+		}
+	});
+});

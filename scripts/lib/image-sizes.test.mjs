@@ -25,6 +25,17 @@ describe("svgSize", () => {
 		expect(svgSize('<svg viewBox="0 0 10">')).toBeNull();
 		expect(svgSize("<html></html>")).toBeNull();
 	});
+	it("gives up on a root whose style sets a width or a height (the browser draws it at that size)", () => {
+		expect(svgSize('<svg viewBox="0 0 24 24" style="width:36px;height:36px">')).toBeNull();
+		expect(svgSize('<svg width="24" height="24" style="fill: red; Height: 2em">')).toBeNull();
+		expect(svgSize('<svg viewBox="0 0 24 24" style="fill:red;stroke-width:2">')).toEqual({ width: 24, height: 24, fill: true });
+	});
+	it("skips comments when looking for the root", () => {
+		expect(svgSize('<!-- <svg width="1" height="1"> --><svg viewBox="0 0 800 400">')).toEqual({ width: 800, height: 400, fill: true });
+	});
+	it("takes px in any case", () => {
+		expect(svgSize('<svg width="800PX" height="600Px">')).toEqual({ width: 800, height: 600 });
+	});
 	it("reads the root's own attributes, not stroke-width or a child's", () => {
 		expect(svgSize('<svg stroke-width="3" line-height="9" viewBox="0 0 10 20"><rect width="5" height="5"/></svg>')).toEqual({ width: 10, height: 20, fill: true });
 	});
@@ -43,6 +54,9 @@ describe("rasterDisplaySize", () => {
 describe("image-sizes.json", () => {
 	it("is what optimize-images.mjs writes from public/img and public/cover (else run `node scripts/image-sizes.mjs`)", async () => {
 		expect(readFileSync(`${root}/${IMAGE_SIZES_FILE}`, "utf8")).toBe(formatImageSizes(await imageSizes(root)));
+	});
+	it("is keyed by paths that need no percent-encoding, so a key is the URL content stores", () => {
+		for (const url of Object.keys(JSON.parse(readFileSync(`${root}/${IMAGE_SIZES_FILE}`, "utf8")))) expect(encodeURI(url), url).toBe(url);
 	});
 	it("gives every PNG and JPEG a size", async () => {
 		const sizes = await imageSizes(root);

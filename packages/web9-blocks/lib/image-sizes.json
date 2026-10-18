@@ -13,7 +13,7 @@
 	"/img/cloud/04-monster_api_pricing.png": {"width":1600,"height":760},
 	"/img/cloud/07-paperspace.png": {"width":1524,"height":1564},
 	"/img/cloud/08-latitude.svg": {"width":349,"height":64},
-	"/img/cloud/14-runpod.svg": {"width":24,"height":24,"fill":true},
+	"/img/cloud/14-runpod.svg": null,
 	"/img/cloud/huggingface.svg": {"width":95,"height":88},
 	"/img/cloud/replicate.svg": {"width":1000,"height":1000,"fill":true},
 	"/img/cloud/replicate_explore.png": {"width":1600,"height":1402},
