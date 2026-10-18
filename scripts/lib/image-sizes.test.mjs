@@ -56,7 +56,10 @@ describe("image-sizes.json", () => {
 		expect(readFileSync(`${root}/${IMAGE_SIZES_FILE}`, "utf8")).toBe(formatImageSizes(await imageSizes(root)));
 	});
 	it("is keyed by paths that need no percent-encoding, so a key is the URL content stores", () => {
-		for (const url of Object.keys(JSON.parse(readFileSync(`${root}/${IMAGE_SIZES_FILE}`, "utf8")))) expect(encodeURI(url), url).toBe(url);
+		for (const url of Object.keys(JSON.parse(readFileSync(`${root}/${IMAGE_SIZES_FILE}`, "utf8")))) {
+			// segment by segment: encodeURI keeps # and ?, which would end the path of the stored URL
+			expect(url.split("/").map(encodeURIComponent).join("/"), url).toBe(url);
+		}
 	});
 	it("gives every PNG and JPEG a size", async () => {
 		const sizes = await imageSizes(root);
