@@ -348,10 +348,15 @@ const publishDate =
 	</script>
 
 	<script>
-		// Syntax highlighting, only when the post has a language-tagged code block (spec 2026-10-17 docs UX §3.4)
+		import { hasHighlightable } from "@web9/blocks/prism-languages";
+
+		// Syntax highlighting, only when the post has a code block in a language Prism bundles (spec 2026-10-17 docs UX §3.4).
+		// A failed chunk leaves the code plain.
 		const postContent = document.querySelector<HTMLElement>(".article-content");
-		if (postContent?.querySelector('pre code[class*="language-"]')) {
-			import("@web9/blocks/prism-client").then(({ highlightUnder }) => highlightUnder(postContent));
+		if (postContent && hasHighlightable(postContent)) {
+			import("@web9/blocks/prism-client")
+				.then(({ highlightUnder }) => highlightUnder(postContent))
+				.catch(() => {});
 		}
 	</script>
 </Base>

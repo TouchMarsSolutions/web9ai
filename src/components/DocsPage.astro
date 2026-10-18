@@ -144,6 +144,8 @@ const notTranslated: Record<string, string> = {
 </Base>
 
 <script>
+	import { hasHighlightable } from "@web9/blocks/prism-languages";
+
 	// "On this page" (spec 2026-10-17 docs UX §3.2): the current section is the last heading above a line 6rem below the
 	// top of the window; every TOC (right column and inline) marks its link with aria-current. The observer only says
 	// when to look again.
@@ -169,9 +171,12 @@ const notTranslated: Record<string, string> = {
 		update();
 	}
 
-	// Syntax highlighting, only when the body has a language-tagged code block (spec 2026-10-17 docs UX §3.4)
-	if (article?.querySelector('pre code[class*="language-"]')) {
-		import("@web9/blocks/prism-client").then(({ highlightUnder }) => highlightUnder(article));
+	// Syntax highlighting, only when the body has a code block in a language Prism bundles (spec 2026-10-17 docs UX §3.4).
+	// A failed chunk leaves the code plain.
+	if (article && hasHighlightable(article)) {
+		import("@web9/blocks/prism-client")
+			.then(({ highlightUnder }) => highlightUnder(article))
+			.catch(() => {});
 	}
 </script>
 

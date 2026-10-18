@@ -78,8 +78,8 @@
 
 ### 3.4 代码高亮（客户端 Prism）
 
-- 依赖 `prismjs`（钉住版本）。只打包用到的语言：python、bash、yaml、typescript、javascript、json、kotlin、java、csharp、swift、markdown（旧站代码块用到的语言，加 javascript、json）。未知语言不处理。
-- 一个客户端模块 `packages/web9-blocks/astro/prism-client.mjs`（和 `mermaid-client.mjs` 并列）。DocsPage 和 posts 页的脚本只在页面里有 `pre code[class*="language-"]` 时才 `import()` 它，所以没有代码的页面不下载。设 `window.Prism = { manual: true }`，然后对正文容器调用 `highlightAllUnder`。
+- 依赖 `prismjs`（钉住版本）。只打包用到的语言：python、bash、yaml、typescript、javascript、json、kotlin、java、csharp、swift、markdown（旧站代码块用到的语言，加 javascript、json），外加它们依赖的 markup、clike 和旧 `prism.js` 自带的 css。从 `prismjs/components/prism-core.js` 起逐个加载，不引主入口 `prismjs`（它打包了 file-highlight 插件，`pre[data-src]` 会变成一个 XHR 取数点）；按依赖分组加载（markup、clike；yaml、css、javascript；markdown 和其余），markdown 在加载时读 `Prism.languages.yaml`，所以 yaml 在前。未知语言不处理。
+- 一个客户端模块 `packages/web9-blocks/astro/prism-client.mjs`（和 `mermaid-client.mjs` 并列）。DocsPage 和 posts 页的脚本只在 `hasHighlightable(正文容器)` 为真（有 `pre code`，其第一个 `language-*` class 是上面打包的语言或别名；列表和函数在小模块 `prism-languages.mjs`，页面脚本静态引入它，不带 Prism）时才 `import()` 它，所以没有代码、或只有未知语言（如旧站的 `chat-completions`）的页面不下载；加载失败时代码保持纯文本。设 `window.Prism = { manual: true }`，然后对正文容器调用 `highlightAllUnder`。
 - 范围：core `code` 块（`<pre><code class="language-x">`），以及 callout、tabs、details 正文 Markdown 里的代码块（`markdown.mjs` 保留 `language-*` class）。
 - 配色（2026-10-17 写计划时修订）：emdash 的 core `code` 块在两种主题下都是深色底（`Code.astro` 写死 `#1e1e1e` / `#e0e0e0`），而 callout、tabs、details 里 Markdown 的代码块用 `prose` 的 `--color-surface` 底，浅色主题下是浅色。一套配色不能在两种底色上都可读。决定：Markdown 的代码块也改成同样的深色底（`.prose pre:not(.mermaid)`，写在 `blocks.css`），整站只用一套深色 Prism 配色（VS Code Dark+ 的颜色），token 类（`pre .token.keyword` 等）写在 `packages/web9-blocks/astro/blocks.css`。这样占绝大多数的 core 代码块外观不变（视觉沿用新站），只有少量 Markdown 代码块在浅色主题下从浅底变成深底。配色不随主题变，所以不新增 `--color-*` token，`theme.test.mjs` 不受影响；仍然不用 `dark:` 也不用 `light-dark()`。
 - 安全：Prism 读 `textContent`，输出转义后的 token span；它加的 class 只存在于运行时的 DOM，不进存储的内容。内容 HTML 里的 class 仍由 sanitizer 白名单控制，内容不能自己写 `token` 类（白名单不放宽）。
