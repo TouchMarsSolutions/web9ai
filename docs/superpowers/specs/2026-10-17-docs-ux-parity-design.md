@@ -105,12 +105,13 @@
   - `headingAnchors`：slug 和 Docusaurus 一致（中文、标点、行内代码；期望值取自旧站页面）、同名去重、旧 id 表优先、没有 `_key` 的块；`tocEntries` 只取 h2、h3。2026-10-17 写计划时把全部 35 篇 doc 转换后的标题 id 和旧站页面逐个比对过，完全一致；
   - `legacy-anchors.json`：`legacy/` 在时重新生成并比对，并确认 `#what-is-not`、`#programming-code` 在表里。
 - `npm test`、`npm run build`（含 `check-public-css`）、`npm run typecheck` 通过。
+- 渲染后的标题 id（对着 dev server，部署前和升级 emdash 或 astro-portabletext 之后）：`node scripts/check-heading-ids.mjs [baseUrl]`——每个 docs 页（en 和 `/zh-CN`）的 h2–h6 都有 id 和指向它的 `#` 链接（ToolGrid 块自己的 h4 标题不是 Portable Text 标题，除外），没有重复 id，每个「本页目录」链接都落在文章里的 h2/h3 上，必须 `problems=0`；它只拿页面和自己比，不需要 `legacy/`。
 - 浏览器（CDP，本地 dev，合并前）：
   - 1440 px：`/docs/learn_ai_coding`、`/docs/ai-tools-adhoc`、`/zh-CN/docs/…` 一篇、`/posts` 一篇、首页：sidebar 只有当前 section，当前分类展开，header 高亮正确，面包屑、目录和滚动高亮正常，滚动后 header 不再盖住 sidebar；`/docs/learn_ai_coding#what-is-not` 直接定位；
   - 1024 px 和 390 px：☰ 打开抽屉，Esc 和点遮罩都能关，Tab 不跑出抽屉，关闭后焦点回到 ☰；正文紧接在 header 后面；
   - 深色和浅色主题下代码高亮可读，主题按钮按三态循环，刷新后保持；
   - 控制台没有报错。
-- 上线后：`check-page.mjs` 对几页查标记（`id="what-is-not"`、`aria-label="Breadcrumbs"`、`On this page`），`verify` 仍是 54/54、86/86。
+- 上线后：`check-page.mjs` 对几页查标记（`id="what-is-not"`、`aria-label="Breadcrumbs"`、`On this page`；`/docs/guide` 上再查 `id="txt2txt"`（标题整句是行内代码，经过 marks 树），`/docs/ai-tools-adhoc` 上查 `id="knowledge-base"`（en 下的旧自定义 id，标题是中文）），`verify` 仍是 54/54、86/86。
 
 ## 6. 不在范围内
 
