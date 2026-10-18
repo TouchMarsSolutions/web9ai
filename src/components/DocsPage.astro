@@ -150,8 +150,11 @@ const notTranslated: Record<string, string> = {
 
 <script>
 	// "On this page" (spec 2026-10-17 docs UX §3.2): the current section is the last heading above a line 6rem below the
-	// top of the window; every TOC (right column and inline) marks its link with aria-current. The observer only says
-	// when to look again.
+	// top of the window (an anchor jump lands a heading 5rem down, so it counts at once); every TOC (right column and
+	// inline) marks its link with aria-current. That line moves with every scroll frame, so the rule is re-evaluated on
+	// scroll and resize, once per animation frame: an IntersectionObserver only fires when a heading crosses its root
+	// margin, which is too late for a rule about a line elsewhere (the previous section stayed lit after the next
+	// heading reached the top).
 	const tocLinks = [...document.querySelectorAll<HTMLAnchorElement>("[data-toc] a[href^='#']")];
 	const idOf = (a: HTMLAnchorElement) => decodeURIComponent(a.hash.slice(1));
 	// Look the headings up inside the article only: an id elsewhere on the page (the site chrome's) is not a heading's.
@@ -168,8 +171,17 @@ const notTranslated: Record<string, string> = {
 				else a.removeAttribute("aria-current");
 			}
 		};
-		const observer = new IntersectionObserver(update, { rootMargin: "0px 0px -60% 0px" });
-		for (const h of tocHeadings) observer.observe(h);
+		let queued = false;
+		const schedule = () => {
+			if (queued) return;
+			queued = true;
+			requestAnimationFrame(() => {
+				queued = false;
+				update();
+			});
+		};
+		window.addEventListener("scroll", schedule, { passive: true });
+		window.addEventListener("resize", schedule, { passive: true });
 		update();
 	}
 </script>

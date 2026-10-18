@@ -61,7 +61,7 @@
   - **旧站自定义 id 表**：旧站 5 个文件里有 22 个 `{#id}`，站内有 8 处链接用了其中 3 个（`#what-is-not`、`#programming-code`、`#function`）。转换器把 `{#id}` 去掉了（`scripts/lib/mdx-to-pt.mjs:212`），所以从标题文字推不回来。做法：一个生成脚本用迁移同一套转换（`docPayloads(readLegacyTree())`，就是数据库里的 body）处理带 `{#id}` 的文件，按文字把每个源标题（去掉 `{#id}` 和行内的反引号、加粗、链接语法）对到级别相同、文字相同的那一个 heading 块，对不上或对上不止一个就报错（不按"第 k 个"对：H1 被转换器用作标题，`<details>` 里的标题变成块里的 Markdown），写成 `packages/web9-site/lib/legacy-anchors.json`（`{ "<locale>/<slug>": { "<标题文字>": "<id>" } }`），提交进仓库。测试在 `legacy/` 还在时重新生成并比对（和 `docs-nav.test.mjs` 同样的做法），`legacy/` 删掉后跳过。
 - **目录（On this page）**：
   - 数据来自 `headingAnchors` 里 h2、h3 的条目（Docusaurus 默认的范围），纯函数 `tocEntries`。少于 2 条就不显示。
-  - ≥ 1280 px：右侧一列（约 220 px），sticky，`max-height: calc(100dvh - 5rem)`，自己滚动。一个小脚本用 `IntersectionObserver` 给当前节的链接设 `aria-current="true"`，样式随之高亮。
+  - ≥ 1280 px：右侧一列（约 220 px），sticky，`max-height: calc(100dvh - 5rem)`，自己滚动。一个小脚本给当前节的链接设 `aria-current="true"`，样式随之高亮：当前节是窗口顶部下 6rem 那条线之上的最后一个标题，在 `scroll` 和 `resize` 时每个动画帧重算一次（`IntersectionObserver` 只在标题穿过观察边界时触发，这条规则的线在别处，它会晚触发，滚动时高亮落后）。
   - < 1280 px：正文顶部一个 `<details>`，`<summary>` 是 "On this page"（zh-CN："本页目录"），默认收起。
 - **去掉 description 引言**：正文上方不再显示 `doc.data.description`，它仍然在 `<meta name="description">` 里。语言链接移到 header 的下拉里，正文上方也不再显示。
 - 布局：容器 1400 px，`grid-cols-[240px_minmax(0,1fr)]`，≥ 1280 px 时加第三列 `220px`。正文列约 850 px，和现在（约 888 px）接近，图片宽度上限（spec §9"图片"，1600 px）不用改。
