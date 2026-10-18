@@ -141,3 +141,11 @@ describe("legacyIdsFor", () => {
 		expect(legacyIdsFor("en", "no-such-doc")).toEqual({});
 	});
 });
+
+describe("heading ids and the site chrome", () => {
+	it("never hold a colon, so no heading can take the drawer's id (site:drawer, Base.astro)", () => {
+		const ids = headingAnchors([h("h2", "site:drawer", "a"), h("h3", "Site: drawer", "b"), h("h2", "Site drawer", "c"), h("h2", "site:drawer", "d")]).map((a) => a.id);
+		expect(ids).toEqual(["sitedrawer", "site-drawer", "site-drawer-1", "sitedrawer-1"]);
+		expect(ids.some((id) => id.includes(":"))).toBe(false);
+	});
+});

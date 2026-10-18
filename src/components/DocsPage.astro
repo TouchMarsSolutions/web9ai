@@ -1,5 +1,5 @@
 ---
-import { getEmDashCollection, getTranslations } from "emdash";
+import { getEditMeta, getEmDashCollection, getTranslations } from "emdash";
 import { PortableText } from "emdash/ui";
 import { headingAnchors, idsByKey, legacyIdsFor, tocEntries } from "../../packages/web9-site/lib/anchors.mjs";
 import { breadcrumbs, docsSidebar, groupDocs } from "../../packages/web9-site/lib/docs-nav.mjs";
@@ -42,6 +42,11 @@ const crumbs: string[] = breadcrumbs(doc.data, locale);
 const anchors = headingAnchors(doc.data.body, legacyIdsFor(fallbackLocale ?? locale, doc.data.slug));
 Astro.locals.headingIds = idsByKey(anchors);
 const toc = tocEntries(anchors);
+// In edit mode PortableText renders the inline editor instead of the static body (spec §3.2: no ids there). So no TOC
+// points into it, and Prism must not rewrite the code blocks of the live editor. getEditMeta only reads the body: it
+// still goes to PortableText as it is, since a copy would lose the edit metadata (not enumerable).
+const editing = Boolean(getEditMeta(doc.data.body));
+const showToc = toc.length >= 2 && !editing;
 const tocLabel = locale === "zh-CN" ? "本页目录" : "On this page";
 
 // A fallback page shows the en text, so search engines are pointed at the en URL.
@@ -75,7 +80,7 @@ const notTranslated: Record<string, string> = {
 	<div
 		class:list={[
 			"mx-auto grid max-w-[1400px] grid-cols-1 gap-10 px-4 sm:px-6 lg:grid-cols-[240px_minmax(0,1fr)]",
-			toc.length >= 2 && "xl:grid-cols-[240px_minmax(0,1fr)_220px]",
+			showToc && "xl:grid-cols-[240px_minmax(0,1fr)_220px]",
 		]}
 	>
 		<aside class="docs-sidebar hidden lg:block">
@@ -111,14 +116,14 @@ const notTranslated: Record<string, string> = {
 				</ol>
 			</nav>
 			{
-				toc.length >= 2 && (
+				showToc && (
 					<details class="mb-6 rounded-md border border-border xl:hidden">
 						<summary class="cursor-pointer px-3 py-2 text-sm font-medium text-text">{tocLabel}</summary>
 						<Toc entries={toc} class="px-3 pb-3" />
 					</details>
 				)
 			}
-			<article class="docs-article prose max-w-none">
+			<article class="docs-article prose max-w-none" data-highlight={editing ? undefined : "true"}>
 				{
 					fallbackLocale && (
 						<p class="rounded-md bg-[color-mix(in_srgb,#d9a400_15%,transparent)] px-3 py-2">
@@ -133,7 +138,7 @@ const notTranslated: Record<string, string> = {
 			</article>
 		</div>
 		{
-			toc.length >= 2 && (
+			showToc && (
 				<aside class="docs-toc hidden xl:block" aria-label={tocLabel}>
 					<p class="mt-0 mb-2 text-xs font-semibold tracking-wider text-text-secondary uppercase">{tocLabel}</p>
 					<Toc entries={toc} />
@@ -144,15 +149,12 @@ const notTranslated: Record<string, string> = {
 </Base>
 
 <script>
-	import { hasHighlightable } from "@web9/blocks/prism-languages";
-
 	// "On this page" (spec 2026-10-17 docs UX §3.2): the current section is the last heading above a line 6rem below the
 	// top of the window; every TOC (right column and inline) marks its link with aria-current. The observer only says
 	// when to look again.
 	const tocLinks = [...document.querySelectorAll<HTMLAnchorElement>("[data-toc] a[href^='#']")];
 	const idOf = (a: HTMLAnchorElement) => decodeURIComponent(a.hash.slice(1));
-	// Look the headings up inside the article only: a heading's text is content, so its id can equal one of the page's
-	// own ids (a heading "Site drawer" gets id="site-drawer", the drawer dialog's id).
+	// Look the headings up inside the article only: an id elsewhere on the page (the site chrome's) is not a heading's.
 	const article = document.querySelector(".docs-article");
 	const tocHeadings = [...new Set(tocLinks.map(idOf))]
 		.map((id) => article?.querySelector<HTMLElement>(`:is(h2, h3)#${CSS.escape(id)}`) ?? null)
@@ -170,9 +172,15 @@ const notTranslated: Record<string, string> = {
 		for (const h of tocHeadings) observer.observe(h);
 		update();
 	}
+</script>
 
-	// Syntax highlighting, only when the body has a code block in a language Prism bundles (spec 2026-10-17 docs UX §3.4).
-	// A failed chunk leaves the code plain.
+<script>
+	// Syntax highlighting (spec 2026-10-17 docs UX §3.4): only when the body has a code block in a language Prism bundles.
+	// Its own script, so nothing in the TOC code above can skip it; the article carries data-highlight except in edit
+	// mode, where the live editor's code blocks are not ours to rewrite. A failed chunk leaves the code plain.
+	import { hasHighlightable } from "@web9/blocks/prism-languages";
+
+	const article = document.querySelector<HTMLElement>(".docs-article[data-highlight]");
 	if (article && hasHighlightable(article)) {
 		import("@web9/blocks/prism-client")
 			.then(({ highlightUnder }) => highlightUnder(article))

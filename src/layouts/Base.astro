@@ -113,7 +113,7 @@ const isLoggedIn = !!Astro.locals.user;
 					aria-label="Menu"
 					aria-haspopup="dialog"
 					aria-expanded="false"
-					aria-controls="site-drawer"
+					aria-controls="site:drawer"
 					data-drawer-open
 				>
 					<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
@@ -171,7 +171,7 @@ const isLoggedIn = !!Astro.locals.user;
 				</div>
 			</nav>
 		</header>
-		<dialog id="site-drawer" class="site-drawer" aria-label="Menu">
+		<dialog id="site:drawer" class="site-drawer" aria-label="Menu">
 			<div class="flex h-16 shrink-0 items-center justify-between border-b border-border-subtle px-4">
 				<a href={homeHref} class="flex items-center gap-2 font-semibold tracking-tight text-text">
 					{
@@ -313,8 +313,8 @@ const isLoggedIn = !!Astro.locals.user;
 			);
 
 			// Drawer below 1024 px (spec 2026-10-17 docs UX §3.3): a modal <dialog>, so the browser traps focus, makes the
-			// page inert and closes it on Esc.
-			const drawer = document.getElementById("site-drawer") as HTMLDialogElement | null;
+			// page inert and closes it on Esc. Its id has a colon, which github-slugger strips: no heading id can equal it.
+			const drawer = document.getElementById("site:drawer") as HTMLDialogElement | null;
 			const drawerOpen = document.querySelector<HTMLButtonElement>("[data-drawer-open]");
 			function openDrawer() {
 				if (!drawer || drawer.open) return;
