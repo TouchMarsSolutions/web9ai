@@ -2,9 +2,11 @@
 import { getEditMeta, getEmDashCollection, getTranslations } from "emdash";
 import { PortableText } from "emdash/ui";
 import { headingAnchors, idsByKey, legacyIdsFor, tocEntries } from "../../packages/web9-site/lib/anchors.mjs";
-import { breadcrumbs, docsSidebar, groupDocs } from "../../packages/web9-site/lib/docs-nav.mjs";
+import { breadcrumbs, docSection, docsSidebar, groupDocs } from "../../packages/web9-site/lib/docs-nav.mjs";
 import { LANGUAGES, localizeHref } from "../../packages/web9-site/lib/nav.mjs";
+import { uiLabels } from "../../packages/web9-site/lib/ui-labels.mjs";
 import Base from "../layouts/Base.astro";
+import ContentImage from "./ContentImage.astro";
 import DocsSidebar from "./DocsSidebar.astro";
 import Heading from "./Heading.astro";
 import Toc from "./Toc.astro";
@@ -28,10 +30,10 @@ for (const l of new Set(["en", locale])) {
 	for (const e of list) {
 		// translationGroup is on every entry at runtime but not in the generated Doc type
 		byGroup.set((e.data as { translationGroup?: string | null }).translationGroup ?? e.data.id, e);
-		if (e.data.slug) sectionOf[e.data.slug] = e.data.section ?? "ai";
+		if (e.data.slug) sectionOf[e.data.slug] = docSection(e.data);
 	}
 }
-const section: string = doc.data.section ?? "ai";
+const section: string = docSection(doc.data);
 // Only the current section, as on the old site (spec 2026-10-17 docs UX §3.2)
 const sidebar = docsSidebar(groupDocs([...byGroup.values()], locale), section, doc.data.slug);
 const crumbs: string[] = breadcrumbs(doc.data, locale);
@@ -47,7 +49,8 @@ const toc = tocEntries(anchors);
 // still goes to PortableText as it is, since a copy would lose the edit metadata (not enumerable).
 const editing = Boolean(getEditMeta(doc.data.body));
 const showToc = toc.length >= 2 && !editing;
-const tocLabel = locale === "zh-CN" ? "本页目录" : "On this page";
+const labels = uiLabels(locale);
+const tocLabel = labels.onThisPage;
 
 // A fallback page shows the en text, so search engines are pointed at the en URL.
 const canonicalLocale = fallbackLocale ?? locale;
@@ -87,10 +90,10 @@ const notTranslated: Record<string, string> = {
 			<DocsSidebar sidebar={sidebar} prefix={prefix} currentSlug={doc.data.slug} />
 		</aside>
 		<div class="min-w-0 py-6">
-			<nav aria-label="Breadcrumbs" class="mb-5 text-sm">
+			<nav aria-label={labels.breadcrumbs} class="mb-5 text-sm">
 				<ol class="m-0 flex list-none flex-wrap items-center gap-1.5 p-0 text-text-secondary">
 					<li class="flex">
-						<a href={localizeHref("/", locale)} aria-label="Home" class="flex text-text-secondary hover:text-brand">
+						<a href={localizeHref("/", locale)} aria-label={labels.home} class="flex text-text-secondary hover:text-brand">
 							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 								<path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
 								<path d="M9 22V12h6v10"></path>
@@ -133,7 +136,7 @@ const notTranslated: Record<string, string> = {
 				}
 				<h1 {...doc.edit.title}>{doc.data.title}</h1>
 				<div {...doc.edit.body}>
-					<PortableText value={doc.data.body} components={{ block: Heading }} />
+					<PortableText value={doc.data.body} components={{ block: Heading, type: { image: ContentImage } }} />
 				</div>
 			</article>
 		</div>
@@ -149,8 +152,9 @@ const notTranslated: Record<string, string> = {
 </Base>
 
 <script>
-	// "On this page" (spec 2026-10-17 docs UX §3.2): the current section is the last heading above a line 6rem below the
-	// top of the window (an anchor jump lands a heading 5rem down, so it counts at once); every TOC (right column and
+	// "On this page" (spec 2026-10-17 docs UX §3.2): the current section is the last heading above a line 1rem below
+	// where an anchor jump lands a heading (its scroll-margin-top: the header's height plus 1rem, so a heading reached
+	// through the TOC counts at once; 96 px with the 4rem header, the fallback); every TOC (right column and
 	// inline) marks its link with aria-current. That line moves with every scroll frame, so the rule is re-evaluated on
 	// scroll and resize, once per animation frame: an IntersectionObserver only fires when a heading crosses its root
 	// margin, which is too late for a rule about a line elsewhere (the previous section stayed lit after the next
@@ -165,12 +169,14 @@ const notTranslated: Record<string, string> = {
 		.map((id) => article?.querySelector<HTMLElement>(`:is(h2, h3)#${CSS.escape(id)}`) ?? null)
 		.filter((h): h is HTMLElement => h !== null);
 	if (tocHeadings.length) {
+		const margin = parseFloat(getComputedStyle(tocHeadings[0]).scrollMarginTop);
+		const line = Number.isFinite(margin) ? margin + 16 : 96;
 		let currentId = "";
 		const update = () => {
 			// scrollY > 0: a page that does not scroll at all keeps the top rule (its first section)
 			const atBottom = window.scrollY > 0 && window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 2;
 			let current = tocHeadings[0];
-			for (const h of tocHeadings) if (h.getBoundingClientRect().top < (atBottom ? window.innerHeight : 96)) current = h;
+			for (const h of tocHeadings) if (h.getBoundingClientRect().top < (atBottom ? window.innerHeight : line)) current = h;
 			if (current.id === currentId) return;
 			currentId = current.id;
 			for (const a of tocLinks) {
@@ -194,19 +200,20 @@ const notTranslated: Record<string, string> = {
 </script>
 
 <script>
-	// Anchor jumps (a TOC link, a heading's "#" link, a deep link) land on the heading even while the page grows. Doc
-	// images are <img loading="lazy"> without width or height (the old site's ideal-image output had both, so it never
-	// shifted), so images above the target load during the jump and push it down: the scroll ended far short, and the TOC
-	// marked the previous section. While a target is pending, it is aligned again whenever the article's size changes;
-	// that stops when the user takes over (wheel, touch, keys, a press) or after 5 s. Only a jump that moves this page
-	// starts a target, so three things never do: a click with a modifier key or a non-primary button, or on a link with
+	// Anchor jumps (a TOC link, a heading's "#" link, a deep link) land on the heading even while the page grows. Images
+	// under /img and /cover have their width and height (image-sizes.json: ContentImage.astro for image blocks,
+	// markdown.mjs in Markdown fields), but the article still grows after the jump: Mermaid draws its diagrams in the
+	// browser, and the SVG is taller than the source text it replaces (learn_ai_coding's first diagram: 144 -> 304 px),
+	// and an image without a known size (an external URL; in a Markdown field, an SVG drawn as wide as the line) has
+	// no box until it loads. Without this the scroll ended short, and the TOC marked the previous section. While a target is pending, it is aligned again
+	// whenever the article's size changes; that stops when the user takes over (wheel, touch, keys, a press) or after
+	// 5 s. Only a jump that moves this page starts a target, so three things never do: a click with a modifier key or a non-primary button, or on a link with
 	// a target other than _self (a new tab or window); a link that resolves to another document; a page loaded by a
 	// reload or Back/Forward (the browser restores the reading position there; a bfcache restore runs no script at all).
 	// Back/Forward between two entries of this page does start one (through hashchange), so a resize within 5 s can move
-	// the page from the restored position to that heading; this is accepted. Giving the images dimensions would remove
-	// both that and the need for this script (a follow-up, not this branch). scrollIntoView honours
-	// the headings' scroll-margin-top (5rem), so the TOC's 96 px line still marks the target. In edit mode there are no
-	// heading ids, so nothing is found.
+	// the page from the restored position to that heading; this is accepted. scrollIntoView honours the headings'
+	// scroll-margin-top, so the TOC's line still marks the target. In edit mode there are no heading ids, so nothing is
+	// found.
 	const article = document.querySelector(".docs-article");
 	if (article) {
 		let target: Element | null = null;
@@ -271,24 +278,25 @@ const notTranslated: Record<string, string> = {
 </script>
 
 <style>
-	/* The sticky columns sit below the 4rem sticky header (Base.astro .site-header). Their viewport heights stay here,
-	   out of utility classes (check-public-css). This also stops the sidebar showing through the translucent header. */
+	/* The sticky columns sit below the sticky header (Base.astro .site-header, --nav-height in tokens.css). Their
+	   viewport heights stay here, out of utility classes (check-public-css). This also stops the sidebar showing through
+	   the translucent header. */
 	.docs-sidebar,
 	.docs-toc {
 		position: sticky;
-		top: 4rem;
+		top: var(--nav-height);
 		align-self: start;
 		overflow-y: auto;
 		padding-block: 1.5rem;
 	}
 	.docs-sidebar {
-		max-height: calc(100dvh - 4rem);
+		max-height: calc(100dvh - var(--nav-height));
 	}
 	.docs-toc {
-		max-height: calc(100dvh - 5rem);
+		max-height: calc(100dvh - var(--nav-height) - 1rem);
 	}
-	/* A heading reached through its #anchor clears the sticky header */
+	/* A heading reached through its #anchor clears the sticky header; the TOC script reads this */
 	.docs-article :global(:is(h2, h3, h4, h5, h6)[id]) {
-		scroll-margin-top: 5rem;
+		scroll-margin-top: calc(var(--nav-height) + 1rem);
 	}
 </style>

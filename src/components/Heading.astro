@@ -8,6 +8,7 @@
 import { emdashComponents } from "emdash/ui";
 import { slug } from "github-slugger";
 import { blockText, isHeading } from "../../packages/web9-site/lib/anchors.mjs";
+import { uiLabels } from "../../packages/web9-site/lib/ui-labels.mjs";
 
 // emdash/ui exports Block as a component and, by the same name, as astro-portabletext's type, so the typechecker takes
 // `import { Block }` for the type only; emdashComponents.block is the same component.
@@ -25,13 +26,15 @@ const text = isHeading(node) ? blockText(node) : "";
 const key = typeof node?._key === "string" && node._key ? node._key : null;
 const ids = Astro.locals.headingIds ?? {};
 const id = !text.trim() ? undefined : key ? (Object.hasOwn(ids, key) ? ids[key] : undefined) : slug(text);
+// in the page's language, as the rest of the chrome (a fallback page shows en text under zh-CN chrome)
+const linkLabel = uiLabels(Astro.currentLocale ?? "en").headingLink(text);
 ---
 
 {
 	id ? (
 		<Block {...{ ...props, id }}>
 			<slot />
-			<a class="hash-link" href={`#${id}`} aria-label={`Direct link to ${text}`}>
+			<a class="hash-link" href={`#${id}`} aria-label={linkLabel}>
 				#
 			</a>
 		</Block>

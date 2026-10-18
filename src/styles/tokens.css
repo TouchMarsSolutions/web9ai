@@ -82,7 +82,7 @@
 		--max-width: var(--content-width);
 		--gutter-width: 200px; /* right sidebar column (TOC) on article pages */
 		--meta-col-width: 180px; /* left meta column on article pages */
-		--nav-height: 64px; /* sticky header height */
+		--nav-height: 4rem; /* sticky header height, its bottom border included (Base.astro); docs and posts stick below it */
 		--search-input-width: 180px; /* nav search box width */
 
 		/* Borders & radius */

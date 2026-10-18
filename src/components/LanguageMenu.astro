@@ -2,6 +2,8 @@
 // Language switcher (spec 2026-10-17 docs UX §3.1): a <details> dropdown in the header, a plain list in the drawer.
 // Works without JS; Base.astro's script closes an open dropdown on a click outside it. The dropdown sits inside the
 // sticky header's stacking context, so it needs no z-index.
+import { uiLabels } from "../../packages/web9-site/lib/ui-labels.mjs";
+
 interface Props {
 	languages: { code: string; label: string; href: string }[];
 	locale: string;
@@ -9,11 +11,12 @@ interface Props {
 }
 const { languages, locale, variant = "dropdown" } = Astro.props;
 const current = languages.find((l) => l.code === locale) ?? languages[0];
+const labels = uiLabels(locale);
 ---
 
 {
 	variant === "list" ? (
-		<ul class="m-0 flex list-none gap-4 p-0 text-sm" aria-label="Language">
+		<ul class="m-0 flex list-none gap-4 p-0 text-sm" aria-label={labels.language}>
 			{languages.map((l) => (
 				<li>
 					<a
@@ -30,7 +33,7 @@ const current = languages.find((l) => l.code === locale) ?? languages[0];
 		</ul>
 	) : (
 		<details class="lang-menu relative text-sm" data-dropdown>
-			<summary class="flex cursor-pointer list-none items-center gap-1.5 text-text hover:text-brand" aria-label={`Language: ${current?.label ?? ""}`}>
+			<summary class="flex cursor-pointer list-none items-center gap-1.5 text-text hover:text-brand" aria-label={labels.currentLanguage(current?.label ?? "")}>
 				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 					<circle cx="12" cy="12" r="10"></circle>
 					<path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>

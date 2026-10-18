@@ -4,6 +4,7 @@ import { Marked } from "marked";
 import sanitizeHtml from "sanitize-html";
 import { safeValueFor } from "./css-value.mjs";
 import { isSiteHref, safeHref } from "./href.mjs";
+import IMAGE_SIZES from "./image-sizes.json" with { type: "json" };
 
 const TONES = new Set(["note", "tip", "info", "warning", "danger", "caution"]);
 
@@ -97,6 +98,19 @@ function transformLink(tagName, attribs) {
 	return { tagName, attribs: { ...attribs, rel: "noopener noreferrer", target: "_blank" } };
 }
 
+/**
+ * An image under /img or /cover gets its width and height from image-sizes.json (scripts/lib/image-sizes.mjs), as
+ * ContentImage.astro gives a Portable Text image, so it keeps its box while it loads. Only a fixed size: an SVG the
+ * browser draws as wide as the line (`fill`) would need a style of ours, which Markdown output never carries. A width or
+ * height the content gives itself is kept. The sanitizer checks the attributes after this, as it does every tag's.
+ */
+function transformImage(tagName, attribs) {
+	if (attribs.width !== undefined || attribs.height !== undefined || typeof attribs.src !== "string") return { tagName, attribs };
+	const size = Object.hasOwn(IMAGE_SIZES, attribs.src) ? IMAGE_SIZES[attribs.src] : null;
+	if (!size || size.fill || !Number.isInteger(size.width) || !Number.isInteger(size.height)) return { tagName, attribs };
+	return { tagName, attribs: { ...attribs, width: String(size.width), height: String(size.height) } };
+}
+
 const SANITIZE = {
 	allowedTags: ALLOWED_TAGS,
 	allowedAttributes: {
@@ -121,7 +135,7 @@ const SANITIZE = {
 	// the schemes href.mjs accepts; the sanitizer checks them again after transformLink
 	allowedSchemes: ["http", "https", "mailto", "tel"],
 	allowProtocolRelative: false,
-	transformTags: { a: transformLink },
+	transformTags: { a: transformLink, img: transformImage },
 };
 
 /** Dedent a block so indented MDX children don't turn into code blocks. */

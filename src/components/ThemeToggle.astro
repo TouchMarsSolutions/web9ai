@@ -2,13 +2,16 @@
 // One button that cycles the theme light -> dark -> system (spec 2026-10-17 docs UX §3.1), in the header and in the
 // drawer. The icon follows the html class (the head script sets it before first paint), so it never flashes; Base.astro's
 // script handles clicks and writes the label. The icons are plain markup, not injected as raw HTML (render-sinks.test.mjs).
+import { uiLabels } from "../../packages/web9-site/lib/ui-labels.mjs";
+
+const labels = uiLabels(Astro.currentLocale ?? "en");
 ---
 
 <button
 	type="button"
 	data-theme-toggle
 	data-current="system"
-	aria-label="Theme"
+	aria-label={labels.theme}
 	class="flex size-9 cursor-pointer items-center justify-center rounded text-text-secondary hover:bg-surface hover:text-text"
 >
 	<span class="theme-icon" data-theme-icon="light">

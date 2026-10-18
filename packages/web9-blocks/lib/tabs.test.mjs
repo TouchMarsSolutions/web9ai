@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeTab, tabItems } from "./tabs.mjs";
+import { activeTab, fullscreenLabel, tabItems } from "./tabs.mjs";
 
 describe("tabItems", () => {
 	it("keeps object tabs, with label and body as strings", () => {
@@ -27,5 +27,13 @@ describe("activeTab", () => {
 			expect(activeTab({ default_tab }, 3), String(default_tab)).toBe(0);
 		}
 		for (const node of [undefined, null, {}]) expect(activeTab(node, 3)).toBe(0);
+	});
+});
+
+describe("fullscreenLabel", () => {
+	it("is in the page's language, en for any other", () => {
+		expect(fullscreenLabel("zh-CN")).toBe("切换全屏");
+		expect(fullscreenLabel("en")).toBe("Toggle fullscreen");
+		for (const locale of [undefined, "fr", "constructor", "__proto__"]) expect(fullscreenLabel(locale), String(locale)).toBe("Toggle fullscreen");
 	});
 });

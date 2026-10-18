@@ -9,15 +9,18 @@
 // It needs no legacy/ and no old site: it compares the page with itself.
 //
 // The pages come from the site itself. The sidebar shows one section, so it starts from the doc links of the header
-// menu on the home page (one doc per section), unions the sidebar links of each, and checks every en doc and its
-// /zh-CN twin. That crawl depends on the chrome it walks, so it is cross-checked against /sitemap-docs.xml, which does
-// not: the crawl must find every en doc the sitemap lists, and must have checked some headings and some TOC links, or
-// the check fails (a crawl that silently finds nothing would otherwise pass). A heading the renderer marks
+// menu on each locale's home page, / and /zh-CN/ (one doc per section), and unions the sidebar links of each: an en
+// sidebar lists the en docs; a zh-CN one lists the translations under their own slugs, the docs that exist only in
+// zh-CN, and the fallback pages of the en docs without a translation. Every en doc's /zh-CN twin is checked too. That
+// crawl depends on the chrome it walks, so it is cross-checked against /sitemap-docs.xml, which does not: the crawl
+// must have checked every doc the sitemap lists, en and zh-CN, and some headings and some TOC links, or the check fails
+// (a crawl that silently finds nothing would otherwise pass). A heading the renderer marks
 // data-w9-chrome (ToolGrid's title) is exempt; a heading in a Markdown field has no id and is reported.
 // Prints one line per page with problems, the sitemap cross-check, then
 //   pages=<n> headings=<n> toc-links=<n> problems=<n>
-// and exits 1 on any problem, any failed or timed-out fetch, or fewer than 2 pages found (the crawl itself broke).
-import { checkHeadings, coverageProblems, headerDocHrefs, navDocHrefs, sitemapEnDocs } from "./lib/heading-ids.mjs";
+// and exits 1 on any problem, any failed or timed-out fetch, a home page whose header links no doc, or fewer than 2
+// pages found (the crawl itself broke).
+import { checkHeadings, coverageProblems, headerDocHrefs, navDocHrefs, sitemapDocs } from "./lib/heading-ids.mjs";
 
 const base = (process.argv[2] ?? "http://localhost:4321").replace(/\/+$/, "");
 let failures = 0;
@@ -35,15 +38,23 @@ async function get(path) {
 	return null;
 }
 
-const enHref = (href) => href.replace(/^\/zh-CN/, "");
-const home = await get("/");
-const starts = home ? headerDocHrefs(home).map(enHref) : [];
-const docs = new Set(starts);
-for (const start of starts) {
-	const html = await get(start);
-	if (html) for (const href of navDocHrefs(html)) docs.add(enHref(href));
+const docs = new Set();
+for (const homePath of ["/", "/zh-CN/"]) {
+	const home = await get(homePath);
+	const starts = home ? headerDocHrefs(home) : [];
+	// a home page whose header links no doc (a broken menu in that locale) would leave its sidebars uncrawled
+	if (home && !starts.length) {
+		console.log(`${homePath}: the header links no /docs page`);
+		failures++;
+	}
+	for (const start of starts) {
+		docs.add(start);
+		const html = await get(start);
+		if (html) for (const href of navDocHrefs(html)) docs.add(href);
+	}
 }
-const pages = [...docs].flatMap((href) => [href, `/zh-CN${href}`]);
+for (const href of [...docs]) if (href.startsWith("/docs/")) docs.add(`/zh-CN${href}`);
+const pages = [...docs].sort();
 
 let headings = 0;
 let tocLinks = 0;
@@ -58,11 +69,15 @@ for (const path of pages) {
 	if (found.problems.length) console.log(`${path}:\n${found.problems.map((p) => `  ${p}`).join("\n")}`);
 }
 
-const sitemap = await get("/sitemap-docs.xml");
-const sitemapEn = sitemap === null ? null : sitemapEnDocs(sitemap);
-const coverage = coverageProblems({ crawledEn: [...docs], sitemapEn, headings, tocLinks });
+const xml = await get("/sitemap-docs.xml");
+const sitemap = xml === null ? null : sitemapDocs(xml);
+const coverage = coverageProblems({ crawled: pages, sitemap, headings, tocLinks });
 problems += coverage.length;
-console.log(`sitemap-docs.xml: ${sitemapEn ? `${sitemapEn.length} en docs` : "unreadable"}; crawl: ${docs.size} en docs`);
+const count = (paths) => {
+	const zh = paths.filter((path) => path.startsWith("/zh-CN/")).length;
+	return `${paths.length - zh} en + ${zh} zh-CN docs`;
+};
+console.log(`sitemap-docs.xml: ${sitemap ? count(sitemap) : "unreadable"}; crawl: ${count(pages)}`);
 for (const p of coverage) console.log(`  coverage: ${p}`);
 console.log(`pages=${pages.length} headings=${headings} toc-links=${tocLinks} problems=${problems}`);
 if (pages.length < 2) console.log("the crawl found fewer than 2 pages: is the site running and the menu pointing at /docs/…?");

@@ -26,12 +26,21 @@ function storedLabel(section, category, locale) {
 	return Object.hasOwn(labels, locale) ? labels[locale] : labels.en ?? category;
 }
 
+/**
+ * A doc's section and category as the sidebar, the breadcrumbs and the header read them, trimmed. Unset, blank and
+ * non-string values are the defaults: the editor can store an empty string, which would otherwise be a group of its
+ * own, labelled with the section's name, and a second crumb repeating it.
+ */
+const stored = (value, fallback) => (typeof value === "string" && value.trim() ? value.trim() : fallback);
+export const docSection = (data) => stored(data?.section, "ai");
+export const docCategory = (data) => stored(data?.category, "general");
+
 /** [{ key, label, items }]: entries sorted by sort_order, grouped in order of first appearance. */
 export function groupDocs(entries, locale) {
 	const groups = new Map();
 	for (const e of [...entries].sort((a, b) => (a.data.sort_order ?? 0) - (b.data.sort_order ?? 0))) {
-		const section = e.data.section ?? "ai";
-		const category = e.data.category ?? "general";
+		const section = docSection(e.data);
+		const category = docCategory(e.data);
 		const key = `${section}/${category}`;
 		if (!groups.has(key)) groups.set(key, { key, label: groupLabel(section, category, locale), items: [] });
 		groups.get(key).items.push(e);
@@ -56,8 +65,8 @@ export function docsSidebar(groups, section, currentSlug) {
 
 /** The breadcrumb trail after the home icon: section, category (none for "general"), then the doc title. */
 export function breadcrumbs(data, locale) {
-	const section = data.section ?? "ai";
-	const category = data.category ?? "general";
+	const section = docSection(data);
+	const category = docCategory(data);
 	return [
 		groupLabel(section, "general", locale),
 		...(category === "general" ? [] : [groupLabel(section, category, locale)]),

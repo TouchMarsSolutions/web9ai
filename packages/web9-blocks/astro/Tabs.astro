@@ -1,6 +1,6 @@
 ---
 import { renderMarkdown } from "../lib/markdown.mjs";
-import { activeTab, tabItems } from "../lib/tabs.mjs";
+import { activeTab, fullscreenLabel, tabItems } from "../lib/tabs.mjs";
 
 interface Props {
 	node: { _type: "tabs"; _key: string; tabs?: unknown; default_tab?: number; fullscreen?: boolean };
@@ -15,7 +15,7 @@ const uid = `w9t-${crypto.randomUUID().slice(0, 8)}`;
 <div class="relative my-6 rounded-lg border border-border px-4 pb-4 [&:fullscreen]:overflow-auto [&:fullscreen]:bg-bg [&:fullscreen]:p-8" data-w9-tabs>
 	{
 		node?.fullscreen && (
-			<button class="absolute top-1.5 right-2 cursor-pointer text-lg opacity-70 hover:opacity-100" type="button" data-fs aria-label="Toggle fullscreen">
+			<button class="absolute top-1.5 right-2 cursor-pointer text-lg opacity-70 hover:opacity-100" type="button" data-fs aria-label={fullscreenLabel(Astro.currentLocale)}>
 				⛶
 			</button>
 		)

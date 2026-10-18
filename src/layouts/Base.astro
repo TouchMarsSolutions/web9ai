@@ -9,6 +9,7 @@ import { Font } from "astro:assets";
 import LanguageMenu from "../components/LanguageMenu.astro";
 import ThemeToggle from "../components/ThemeToggle.astro";
 import { activeMenuHref, homeLanguages, linkRel, localizeHref, splitMenu } from "../../packages/web9-site/lib/nav.mjs";
+import { uiLabels } from "../../packages/web9-site/lib/ui-labels.mjs";
 import { LIMITS, clampText } from "../../packages/web9-blocks/lib/limits.mjs";
 import { resolveBlogSiteIdentity } from "../utils/site-identity";
 import "../styles/global.css";
@@ -48,6 +49,7 @@ const fullTitle = titleIncludesSiteName ? title : `${title} — ${siteTitle}`;
 
 const locale = Astro.currentLocale ?? "en";
 const localePrefix = locale === "en" ? "" : `/${locale}`;
+const labels = uiLabels(locale);
 // One en menu; on zh-CN pages links that have a zh-CN route get the prefix (spec §5). The menu is on every page and
 // has no hook, so the render keeps it bounded too: at most LIMITS.menuItems items, labels cut to LIMITS.label.
 const menuItems = (menuResult.data?.items ?? [])
@@ -105,12 +107,12 @@ const isLoggedIn = !!Astro.locals.user;
 	</head>
 	<body>
 		<EmDashBodyStart page={pageCtx} />
-		<header class="site-header border-b border-border-subtle">
-			<nav class="mx-auto flex h-16 max-w-[1400px] items-center gap-6 px-4 sm:px-6" aria-label="Main">
+		<header class="site-header h-(--nav-height) border-b border-border-subtle">
+			<nav class="mx-auto flex h-full max-w-[1400px] items-center gap-6 px-4 sm:px-6" aria-label={labels.main}>
 				<button
 					type="button"
 					class="-ms-2 flex size-10 cursor-pointer items-center justify-center rounded text-text hover:bg-surface lg:hidden"
-					aria-label="Menu"
+					aria-label={labels.menu}
 					aria-haspopup="dialog"
 					aria-expanded="false"
 					aria-controls="site:drawer"
@@ -171,8 +173,8 @@ const isLoggedIn = !!Astro.locals.user;
 				</div>
 			</nav>
 		</header>
-		<dialog id="site:drawer" class="site-drawer" aria-label="Menu">
-			<div class="flex h-16 shrink-0 items-center justify-between border-b border-border-subtle px-4">
+		<dialog id="site:drawer" class="site-drawer" aria-label={labels.menu}>
+			<div class="flex h-(--nav-height) shrink-0 items-center justify-between border-b border-border-subtle px-4">
 				<a href={homeHref} class="flex items-center gap-2 font-semibold tracking-tight text-text">
 					{
 						siteLogo ? (
@@ -188,7 +190,7 @@ const isLoggedIn = !!Astro.locals.user;
 				<button
 					type="button"
 					class="flex size-9 cursor-pointer items-center justify-center rounded text-text-secondary hover:bg-surface hover:text-text"
-					aria-label="Close menu"
+					aria-label={labels.closeMenu}
 					data-drawer-close
 					autofocus
 				>
@@ -278,6 +280,9 @@ const isLoggedIn = !!Astro.locals.user;
 		<script>
 			// Theme: html.light / html.dark plus a `theme` cookie; "system" removes both. Every [data-theme-toggle]
 			// (header and drawer) cycles light -> dark -> system; ThemeToggle.astro shows the icon from the html class.
+			// The button's label is in the page's language (html lang, the locale Base renders).
+			import { themeLabel } from "../../packages/web9-site/lib/ui-labels.mjs";
+
 			const THEMES = ["light", "dark", "system"] as const;
 			type Theme = (typeof THEMES)[number];
 			const root = document.documentElement;
@@ -301,7 +306,7 @@ const isLoggedIn = !!Astro.locals.user;
 				}
 				toggles.forEach((btn) => {
 					btn.dataset.current = theme;
-					btn.setAttribute("aria-label", `Theme: ${theme}. Switch to ${nextTheme(theme)}`);
+					btn.setAttribute("aria-label", themeLabel(root.lang, theme, nextTheme(theme)));
 				});
 			}
 
@@ -393,7 +398,7 @@ const isLoggedIn = !!Astro.locals.user;
 				-webkit-backdrop-filter: blur(12px);
 			}
 			.site-main {
-				min-height: calc(100vh - 64px - 300px);
+				min-height: calc(100vh - var(--nav-height) - 300px);
 			}
 
 			/* LiveSearch renders its own markup; these class names are passed to it as props. */

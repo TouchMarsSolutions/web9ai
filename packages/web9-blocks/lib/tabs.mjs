@@ -15,3 +15,9 @@ export function tabItems(node) {
 	const list = Array.isArray(node?.tabs) ? node.tabs : [];
 	return list.filter(isObject).map((tab) => ({ label: text(tab.label), body: text(tab.body) }));
 }
+
+// The fullscreen button's label in the page's language, as the site chrome's (packages/web9-site/lib/ui-labels.mjs)
+const FULLSCREEN_LABELS = { en: "Toggle fullscreen", "zh-CN": "切换全屏" };
+
+/** The fullscreen button's aria-label for `locale` (Astro.currentLocale), else the en one. */
+export const fullscreenLabel = (locale) => (Object.hasOwn(FULLSCREEN_LABELS, locale) ? FULLSCREEN_LABELS[locale] : FULLSCREEN_LABELS.en);
