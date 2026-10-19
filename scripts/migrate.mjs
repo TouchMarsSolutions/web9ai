@@ -38,7 +38,6 @@ const MENU = [
 	{ label: "AI", type: "custom", customUrl: "/docs/intro" },
 	{ label: "Dev", type: "custom", customUrl: "/docs/overview" },
 	{ label: "Blog", type: "custom", customUrl: "/posts" },
-	{ label: "GitHub", type: "custom", customUrl: "https://github.com/TouchMarsSolutions/web9ai", target: "_blank" },
 ];
 
 /** Redirects that are not rows of the table: pattern rules (sample URLs) and the feeds in astro.config.mjs. */
