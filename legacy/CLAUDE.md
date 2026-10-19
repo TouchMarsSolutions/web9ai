@@ -1,5 +1,7 @@
 # Web9.AI Development Guide
 
+> **Migration input only.** The migration scripts read this tree as text (`scripts/lib/legacy-tree.mjs`, `posts.mjs`, `legacy-anchors.mjs`), and it is removed after cutover. Its `package.json` and `package-lock.json` were removed on 2026-10-18: nothing installed them, and the old Docusaurus dependencies carried about 156 Dependabot alerts. To build the old site, restore them first: `git checkout 83b0f67b -- legacy/package.json legacy/package-lock.json`.
+
 ## Development Commands
 
 - Start development server: `npm run start`
