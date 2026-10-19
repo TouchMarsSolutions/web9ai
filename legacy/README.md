@@ -1,5 +1,7 @@
 # Website
 
+> **Migration input only.** The migration scripts read this tree as text (`scripts/lib/legacy-tree.mjs`, `posts.mjs`, `legacy-anchors.mjs`), and it is removed after cutover. It cannot build the old site: its static assets moved to `public/`, and its `package.json` and `package-lock.json` were removed on 2026-10-18 (nothing installed them, and the old Docusaurus dependencies carried about 156 Dependabot alerts). Run nothing from inside `legacy/`. The complete Docusaurus source is the tag `docusaurus-final` (e.g. `git worktree add ../web9-docusaurus docusaurus-final`); the commands below are kept as the old site wrote them.
+
 This website is built using [Docusaurus 2](https://docusaurus.io/), a modern static website generator.
 
 ### Installation
