@@ -319,11 +319,6 @@
 					"type": "custom",
 					"label": "Blog",
 					"url": "/posts"
-				},
-				{
-					"type": "custom",
-					"label": "GitHub",
-					"url": "https://github.com/TouchMarsSolutions/web9ai"
 				}
 			]
 		}
